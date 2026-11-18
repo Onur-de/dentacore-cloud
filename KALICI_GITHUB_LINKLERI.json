@@ -1,9 +1,20 @@
 {
-  "github_repo": "https://github.com/Onur-de/dentacore-cloud",
-  "kalici_tam_sistem_url": "https://onur-de.github.io/dentacore-cloud/",
-  "kalici_tanitim_url": "https://onur-de.github.io/dentacore-cloud/tanitim.html",
-  "kalici_panel_url": "https://onur-de.github.io/dentacore-cloud/panel.html",
-  "render_tek_tik_kurulum": "https://dashboard.render.com/select-repo?type=blueprint",
-  "railway_tek_tik_kurulum": "https://railway.app/new/github",
-  "vercel_tek_tik_kurulum": "https://vercel.com/new/clone?repository-url=https://github.com/Onur-de/dentacore-cloud"
+  "Kurumsal-Otomasyon-Sistemi": {
+    "repo_url": "https://github.com/Onur-de/Kurumsal-Otomasyon-Sistemi",
+    "tanitim_url": "https://onur-de.github.io/Kurumsal-Otomasyon-Sistemi/",
+    "panel_url": "https://onur-de.github.io/Kurumsal-Otomasyon-Sistemi/panel.html",
+    "tam_sistem_url": "https://onur-de.github.io/Kurumsal-Otomasyon-Sistemi/tam-sistem.html"
+  },
+  "Kurumsal-Otomasyon-Sistemii": {
+    "repo_url": "https://github.com/Onur-de/Kurumsal-Otomasyon-Sistemii",
+    "tanitim_url": "https://onur-de.github.io/Kurumsal-Otomasyon-Sistemii/",
+    "panel_url": "https://onur-de.github.io/Kurumsal-Otomasyon-Sistemii/panel.html",
+    "tam_sistem_url": "https://onur-de.github.io/Kurumsal-Otomasyon-Sistemii/tam-sistem.html"
+  },
+  "dentacore-cloud": {
+    "repo_url": "https://github.com/Onur-de/dentacore-cloud",
+    "tanitim_url": "https://onur-de.github.io/dentacore-cloud/",
+    "panel_url": "https://onur-de.github.io/dentacore-cloud/panel.html",
+    "tam_sistem_url": "https://onur-de.github.io/dentacore-cloud/tam-sistem.html"
+  }
 }

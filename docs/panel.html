@@ -76,7 +76,16 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+p, li, dd, dt, td, th, label, small, span, div, a, button, input, select, textarea, h1, h2, h3, h4, strong, b {
+  max-height: 999999px;
+}
 
 html, body {
   margin: 0;
@@ -88,6 +97,9 @@ html, body {
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.65;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   caret-color: var(--teal);
@@ -96,7 +108,7 @@ html, body {
 }
 
 /* Başlıklar: güven veren, sakin başlık yüzü */
-h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.015em; }
+h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.01em; }
 
 ::selection { background: var(--teal-soft); color: var(--navy); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -104,7 +116,8 @@ a { color: var(--teal); }
 .hidden { display: none !important; }
 
 h1, h2, h3 {
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
+  line-height: 1.28;
   text-wrap: balance;
   overflow-wrap: break-word;
   min-width: 0;
@@ -149,10 +162,10 @@ h1, h2, h3 {
 }
 .login-art h1 {
   font-size: clamp(1.75rem, 2.8vw, 2.3rem);
-  line-height: 1.18;
+  line-height: 1.26;
   margin: 0 0 12px;
   color: var(--on-dark);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 .login-art p { color: var(--on-dark-muted); max-width: 48ch; margin: 0; }
 .badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-3); }
@@ -282,7 +295,9 @@ textarea.input { min-height: 84px; }
   padding: var(--space-2) 12px;
   position: sticky;
   top: 0;
-  height: 100dvh;
+  min-height: 100dvh;
+  height: auto;
+  align-self: stretch;
 }
 .brand {
   display: flex;
@@ -904,6 +919,15 @@ textarea.input { min-height: 84px; }
   .toast { bottom: 76px; }
 }
 
+@media (min-width: 821px) and (max-height: 700px) {
+  .side { padding: var(--space-1) 12px; }
+  .brand { padding: 4px 12px var(--space-1); }
+  .nav { gap: 4px; }
+  .nav a { min-height: 36px; padding: 4px 12px; font-size: 13.5px; }
+  .side-asst { min-height: 36px; padding: var(--space-1) 12px; margin-top: var(--space-1); font-size: 13px; }
+  .me { padding-top: var(--space-1); }
+}
+
 @media (max-width: 1px) {
   .g4 { grid-template-columns: 1fr; }
   .btn { white-space: normal; text-align: center; }
@@ -958,18 +982,8 @@ textarea.input { min-height: 84px; }
   };
 
   function applyDesktopFitIfNeeded() {
-    if (document.documentElement.getAttribute("data-view-mode") !== "desktop") {
-      document.body.style.zoom = "";
-      return;
-    }
-    const w = window.innerWidth || document.documentElement.clientWidth || 1360;
-    if (w > 0 && w < 1024) {
-      document.body.style.zoom = String(Math.max(0.26, Math.min(1, w / 1360)));
-    } else {
-      document.body.style.zoom = "";
-    }
+    document.body.style.zoom = "";
   }
-  window.addEventListener("resize", applyDesktopFitIfNeeded);
   applyDesktopFitIfNeeded();
 
   window.__switchMasterTab = function(which) {

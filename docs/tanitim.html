@@ -95,7 +95,16 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+p, li, dd, dt, td, th, label, small, span, div, a, button, input, select, textarea, h1, h2, h3, h4, strong, b {
+  max-height: 999999px;
+}
 
 html, body {
   margin: 0;
@@ -106,6 +115,9 @@ html, body {
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.65;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   caret-color: var(--teal);
@@ -114,7 +126,7 @@ html, body {
 }
 
 /* Başlıklar: güven veren, sakin başlık yüzü */
-h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.015em; }
+h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.01em; }
 
 ::selection {
   background: var(--teal-soft);
@@ -155,8 +167,8 @@ a { color: inherit; text-decoration: none; }
 
 h1, h2, h3 {
   color: var(--navy);
-  letter-spacing: -0.015em;
-  line-height: 1.2;
+  letter-spacing: -0.01em;
+  line-height: 1.28;
   margin-top: 0;
   overflow-wrap: break-word;
   min-width: 0;
@@ -303,7 +315,8 @@ code {
   align-items: center;
 }
 .hero h1 {
-  font-size: clamp(2rem, 3.6vw, 2.85rem);
+  font-size: clamp(1.9rem, 3.3vw, 2.75rem);
+  line-height: 1.26;
   margin-bottom: var(--space-2);
 }
 .lead {
@@ -1131,7 +1144,7 @@ code {
       <a href="#sss">SSS</a>
     </nav>
     <div class="nav-actions">
-      <a class="btn btn-ghost" href="https://mcp.edgeone.site/share/nQghHOrQ0GfJOB37Mrcw5">Panele giriş</a>
+      <a class="btn btn-ghost" href="https://mcp.edgeone.site/share/YpxwY0nW4wb1wGk3wO09I">Panele giriş</a>
       <a class="btn btn-cta" href="#demo">Demo iste</a>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Menüyü aç">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
@@ -1149,7 +1162,7 @@ code {
       <a href="#fiyat">Fiyat</a>
       <a href="#sss">Sık sorulanlar</a>
       <div class="mobile-menu-cta">
-        <a class="btn btn-ghost" href="https://mcp.edgeone.site/share/nQghHOrQ0GfJOB37Mrcw5">Panele giriş</a>
+        <a class="btn btn-ghost" href="https://mcp.edgeone.site/share/YpxwY0nW4wb1wGk3wO09I">Panele giriş</a>
         <a class="btn btn-cta" href="#demo">Demo iste</a>
       </div>
     </div>
@@ -1658,7 +1671,7 @@ code {
             <li>Teknik kurulum ve numara bağlantısı ekibimizden</li>
             <li>Önce yalnızca izleme modunda başlatabilirsiniz</li>
           </ul>
-          <p class="demo-panel-link">Sistemi hemen test etmek isterseniz <a href="https://mcp.edgeone.site/share/nQghHOrQ0GfJOB37Mrcw5">3 demo şube ile yönetim paneline</a> geçebilirsiniz.</p>
+          <p class="demo-panel-link">Sistemi hemen test etmek isterseniz <a href="https://mcp.edgeone.site/share/YpxwY0nW4wb1wGk3wO09I">3 demo şube ile yönetim paneline</a> geçebilirsiniz.</p>
         </div>
         <form id="lead" class="lead-form" novalidate>
           <label for="f-clinic">Klinik adı
@@ -1695,7 +1708,7 @@ code {
       <a href="#moduller">Modüller</a>
       <a href="#guvenlik">Güvenlik</a>
       <a href="#fiyat">Fiyat</a>
-      <a href="https://mcp.edgeone.site/share/nQghHOrQ0GfJOB37Mrcw5">Panele giriş</a>
+      <a href="https://mcp.edgeone.site/share/YpxwY0nW4wb1wGk3wO09I">Panele giriş</a>
     </div>
   </div>
 </footer>
@@ -1738,18 +1751,8 @@ code {
   };
 
   function applyDesktopFitIfNeeded() {
-    if (document.documentElement.getAttribute("data-view-mode") !== "desktop") {
-      document.body.style.zoom = "";
-      return;
-    }
-    const w = window.innerWidth || document.documentElement.clientWidth || 1360;
-    if (w > 0 && w < 1024) {
-      document.body.style.zoom = String(Math.max(0.26, Math.min(1, w / 1360)));
-    } else {
-      document.body.style.zoom = "";
-    }
+    document.body.style.zoom = "";
   }
-  window.addEventListener("resize", applyDesktopFitIfNeeded);
   applyDesktopFitIfNeeded();
 
   window.__switchMasterTab = function(which) {
