@@ -468,7 +468,7 @@
       "he": "תוכנית הטיפול והעלות נמסרות בכתב על ידי הרופא לאחר בדיקה וצילום. איזה יום ושעה נוחים לכם לבדיקה?"
     },
     "randevu": {
-      "tr": "Randevu talebinizi aldık. Size uygun gün ve saati (örneğin Salı öğleden sonra) yazarsanız ekibimiz hemen onaylayacaktır.",
+      "tr": "Randevu talebinizi aldık. Size uygun gün ve saat aralığını (örneğin Salı öğleden sonra) yazarsanız ekibimiz çalışma saatlerinde teyit edecektir.",
       "en": "We have received your appointment request. Please tell us a preferred day and time (e.g. Tuesday afternoon); our team will confirm during working hours.",
       "de": "Ihre Terminanfrage ist eingegangen. Nennen Sie uns bitte Wunschtag und Uhrzeit (z. B. Dienstagnachmittag); unser Team bestätigt während der Öffnungszeiten.",
       "ar": "تم استلام طلب الموعد. يرجى إخبارنا باليوم والوقت المفضلين (مثلاً الثلاثاء بعد الظهر) وسيؤكد فريقنا خلال ساعات العمل.",
@@ -558,7 +558,7 @@
       "he": "רופא השיניים שלנו הוא הגורם המוסמך להשיב על כך; העברנו את הודעתך לצוות המרפאה."
     },
     "tibbi_soru": {
-      "tr": "Geçmiş olsun. Sağlığınız için sizi muayene etmeden buradan ilaç, antibiyotik veya doz önermemiz doğru olmaz. Sorunuzu doğrudan uzman diş hekimimize ilettik; sizi en kısa sürede arayıp bilgilendireceğiz.",
+      "tr": "Geçmiş olsun. Hekim muayenesi ve klinik değerlendirme olmadan buradan ilaç, antibiyotik veya doz kullanımı önerilmez. Sorunuzu doğrudan uzman diş hekimimize ve ekibimize ilettik; sizi en kısa sürede arayıp bilgilendireceğiz.",
       "en": "Medication use, dosage advice, or stopping prescribed blood thinners is never recommended without a clinical examination by our dentist. We have forwarded your message to our medical team.",
       "de": "Ohne ärztliche Untersuchung empfehlen wir keine Medikamenteneinnahme oder Dosisänderung. Ihre Anfrage wurde direkt an unseren Zahnarzt weitergeleitet.",
       "ar": "لا يُنصح بتناول أي دواء أو تعديل الجرعة دون فحص سريري من قبل الطبيب. تم تحويل رسالتكم إلى فريقنا الطبي.",
