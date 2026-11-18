@@ -145,6 +145,14 @@ async def upsert_identity(key: str, channel: str, lang: str | None = None, name:
     return row["id"]
 
 
+def mask_phone(p: str | None) -> str:
+    raw = str(p or "")
+    if raw.startswith("ig:"):
+        return "Instagram"
+    d = re.sub(r"\D", "", raw)
+    return f"+{d[:2]} {d[2:3]}** *** {d[-4:-2]} {d[-2:]}" if len(d) >= 10 else "***"
+
+
 def ip_hash(ip: str | None) -> str:
     """Denetim kaydında IP'nin kendisi değil anahtarlı özeti tutulur (kişisel veri minimizasyonu)."""
     return hmac.new(S.phone_hmac_key, (ip or "-").encode(), hashlib.sha256).hexdigest()[:16]
@@ -200,15 +208,40 @@ async def add_consent(pid: int, kind: str, version: str, text: str, channel: str
             pid, kind, version, hashlib.sha256(text.encode()).hexdigest(), channel)
 
 
-async def log_msg(pid: int | None, direction: str, layer: str | None = None, intent: str | None = None, tin: int = 0, tout: int = 0, clinic_id: int | None = None):
+def dec_msg_body(raw: str | None) -> str | None:
+    if raw is None or raw == "":
+        return raw
+    try:
+        return dec(raw)
+    except Exception:
+        return raw
+
+
+async def log_msg(
+    pid: int | None,
+    direction: str,
+    layer: str | None = None,
+    intent: str | None = None,
+    tin: int = 0,
+    tout: int = 0,
+    clinic_id: int | None = None,
+    body: str | None = None,
+    delivery_status: str | None = None,
+    delivery_error: str | None = None,
+):
     if clinic_id is None:
         if pid is not None:
             row = await q1("SELECT clinic_id FROM patients WHERE id=%s", pid)
             clinic_id = int(row["clinic_id"]) if row else 1
         else:
             clinic_id = 1
-    await q("INSERT INTO message_log (clinic_id, patient_id, direction, layer, intent, tokens_in, tokens_out) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            clinic_id, pid, direction, layer, intent, tin, tout)
+    body_enc = enc(body[:2000]) if body else ("" if body == "" else None)
+    await q(
+        """INSERT INTO message_log
+           (clinic_id, patient_id, direction, layer, intent, tokens_in, tokens_out, body, delivery_status, delivery_error)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        clinic_id, pid, direction, layer, intent, tin, tout, body_enc, delivery_status, delivery_error,
+    )
 
 
 async def add_alert(pid: int | None, kind: str, detail: str, clinic_id: int | None = None) -> int:

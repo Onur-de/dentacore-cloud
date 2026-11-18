@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import html as html_lib
 import json
+import logging
 import os
 import re
 import secrets
@@ -27,7 +28,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from cryptography.fernet import Fernet
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 import uvicorn
@@ -35,7 +36,7 @@ import uvicorn
 ROOT = Path(__file__).resolve().parent
 API_DIR = ROOT / "api"
 WEB = API_DIR / "app" / "web"
-DB_PATH = ROOT / "dentacore_local.db"
+DB_PATH = Path(os.environ.get("DC_DB_PATH") or (ROOT / "dentacore_local.db"))
 SECRETS_PATH = ROOT / ".local_secrets.json"
 TZ = ZoneInfo("Europe/Istanbul")
 
@@ -66,10 +67,13 @@ os.environ.setdefault("LLM_MAIN_MODEL", "free-auto")
 os.environ.setdefault("CLINIC_NAME", "Özel DentaCore Merkez Polikliniği")
 
 sys.path.insert(0, str(API_DIR))
-from app import cal, media, security as sec  # noqa: E402
-from app.router import TokenRouter  # noqa: E402
+from app import cal, media, security as sec, wa  # noqa: E402
+from app.router import TokenRouter, normalize  # noqa: E402
 
-_SEEN_WEBHOOK_IDS: set[str] = set()
+log = logging.getLogger("dentacore.local")
+_SEEN_WEBHOOK_IDS = sec.WebhookDedupCache(max_size=10_000, ttl_seconds=86_400)
+_SCHED_TASK: asyncio.Task | None = None
+_SCHED_LOCK = asyncio.Lock()
 
 _FERNET = Fernet(_SECRETS["DATA_ENCRYPTION_KEY"].encode())
 _HMAC_KEY = _SECRETS["PHONE_HMAC_KEY"].encode()
@@ -100,6 +104,21 @@ def enc(s: str) -> str:
 
 def dec(s: str) -> str:
     return _FERNET.decrypt(str(s).encode()).decode()
+
+
+def _dec_msg_body(raw: str | None) -> str | None:
+    if raw is None or raw == "":
+        return raw
+    try:
+        return dec(raw)
+    except Exception:
+        return raw
+
+
+def _has_consent(pid: int | None, kind: str) -> bool:
+    if not pid:
+        return False
+    return bool(q1("SELECT 1 FROM consents WHERE patient_id=? AND kind=? AND granted_at IS NOT NULL AND revoked_at IS NULL LIMIT 1", pid, kind))
 
 
 def norm_phone(p: str) -> str:
@@ -160,6 +179,12 @@ def mask_phone(p: str) -> str:
 
 
 def client_ip(request: Request) -> str:
+    if os.environ.get("TRUSTED_PROXY") == "1":
+        xff = (request.headers.get("x-forwarded-for") or "").strip()
+        if xff:
+            first = xff.split(",")[0].strip()
+            if first:
+                return first[:64]
     return request.client.host if request.client else "-"
 
 
@@ -243,6 +268,9 @@ CREATE TABLE IF NOT EXISTS clinics (
   working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}',
   buffer_min         INTEGER NOT NULL DEFAULT 0,
   ai_custom_rules_json TEXT NOT NULL DEFAULT '{}',
+  wa_phone_id        TEXT NOT NULL DEFAULT '',
+  ig_handle          TEXT NOT NULL DEFAULT '',
+  cal_token_version  INTEGER NOT NULL DEFAULT 1,
   active             INTEGER NOT NULL DEFAULT 1,
   created_at         TEXT NOT NULL
 );
@@ -323,9 +351,11 @@ CREATE TABLE IF NOT EXISTS appointments (
   treatment   TEXT NOT NULL,
   chair       TEXT NOT NULL DEFAULT '1',
   doctor_id   INTEGER,
-  status      TEXT NOT NULL DEFAULT 'booked',
-  source      TEXT NOT NULL DEFAULT 'panel',
-  created_at  TEXT NOT NULL
+  status           TEXT NOT NULL DEFAULT 'booked',
+  source           TEXT NOT NULL DEFAULT 'panel',
+  reminder_sent_at TEXT,
+  followup_sent_at TEXT,
+  created_at       TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS waitlist (
@@ -343,6 +373,7 @@ CREATE TABLE IF NOT EXISTS slot_offers (
   waitlist_id    INTEGER NOT NULL,
   wave           INTEGER NOT NULL,
   sent_at        TEXT NOT NULL,
+  expires_at     TEXT,
   status         TEXT NOT NULL DEFAULT 'sent'
 );
 
@@ -442,15 +473,18 @@ CREATE TABLE IF NOT EXISTS tooth_records (
 CREATE INDEX IF NOT EXISTS tooth_records_patient_idx ON tooth_records(clinic_id, patient_id, tooth_fdi);
 
 CREATE TABLE IF NOT EXISTS message_log (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  clinic_id   INTEGER NOT NULL DEFAULT 1,
-  patient_id  INTEGER,
-  direction   TEXT NOT NULL,
-  layer       TEXT,
-  intent      TEXT,
-  tokens_in   INTEGER NOT NULL DEFAULT 0,
-  tokens_out  INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  clinic_id       INTEGER NOT NULL DEFAULT 1,
+  patient_id      INTEGER,
+  direction       TEXT NOT NULL,
+  layer           TEXT,
+  intent          TEXT,
+  tokens_in       INTEGER NOT NULL DEFAULT 0,
+  tokens_out      INTEGER NOT NULL DEFAULT 0,
+  body            TEXT,
+  delivery_status TEXT,
+  delivery_error  TEXT,
+  created_at      TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS alerts (
@@ -488,12 +522,15 @@ CREATE TABLE IF NOT EXISTS campaigns (
 );
 
 CREATE TABLE IF NOT EXISTS leads (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  clinic      TEXT NOT NULL,
-  contact_enc TEXT NOT NULL,
-  city        TEXT,
-  chairs      INTEGER,
-  created_at  TEXT NOT NULL
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  clinic         TEXT NOT NULL,
+  contact_enc    TEXT NOT NULL,
+  city           TEXT,
+  chairs         INTEGER,
+  kvkk_version   TEXT NOT NULL DEFAULT '',
+  kvkk_sha256    TEXT NOT NULL DEFAULT '',
+  yurt_disi_riza INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL
 );
 
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
@@ -526,6 +563,25 @@ def _migrate_sqlite():
             c.execute("""UPDATE message_log SET clinic_id = COALESCE(
                             (SELECT p.clinic_id FROM patients p WHERE p.id = message_log.patient_id), 1
                          )""")
+        if "body" not in msg_cols:
+            c.execute("ALTER TABLE message_log ADD COLUMN body TEXT")
+        if "delivery_status" not in msg_cols:
+            c.execute("ALTER TABLE message_log ADD COLUMN delivery_status TEXT")
+        if "delivery_error" not in msg_cols:
+            c.execute("ALTER TABLE message_log ADD COLUMN delivery_error TEXT")
+        for mrow in c.execute("SELECT id, body FROM message_log WHERE body IS NOT NULL AND body <> ''").fetchall():
+            try:
+                dec(mrow["body"])
+            except Exception:
+                c.execute("UPDATE message_log SET body=? WHERE id=?", (enc(mrow["body"]), mrow["id"]))
+        so_cols = {r["name"] for r in c.execute("PRAGMA table_info(slot_offers)").fetchall()}
+        if "expires_at" not in so_cols:
+            c.execute("ALTER TABLE slot_offers ADD COLUMN expires_at TEXT")
+        appt_cols = {r["name"] for r in c.execute("PRAGMA table_info(appointments)").fetchall()}
+        if "reminder_sent_at" not in appt_cols:
+            c.execute("ALTER TABLE appointments ADD COLUMN reminder_sent_at TEXT")
+        if "followup_sent_at" not in appt_cols:
+            c.execute("ALTER TABLE appointments ADD COLUMN followup_sent_at TEXT")
         pat_sql_row = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='patients'").fetchone()
         pat_sql = (pat_sql_row["sql"] or "") if pat_sql_row else ""
         if "UNIQUE(CLINIC_ID,PHONE_HMAC)" not in re.sub(r"\s+", "", pat_sql).upper():
@@ -558,6 +614,19 @@ def _migrate_sqlite():
             c.execute("ALTER TABLE clinics ADD COLUMN buffer_min INTEGER NOT NULL DEFAULT 0")
         if "ai_custom_rules_json" not in clinic_cols:
             c.execute("ALTER TABLE clinics ADD COLUMN ai_custom_rules_json TEXT NOT NULL DEFAULT '{}'")
+        if "wa_phone_id" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN wa_phone_id TEXT NOT NULL DEFAULT ''")
+        if "ig_handle" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN ig_handle TEXT NOT NULL DEFAULT ''")
+        if "cal_token_version" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN cal_token_version INTEGER NOT NULL DEFAULT 1")
+        lead_cols = {r["name"] for r in c.execute("PRAGMA table_info(leads)").fetchall()}
+        if "kvkk_version" not in lead_cols:
+            c.execute("ALTER TABLE leads ADD COLUMN kvkk_version TEXT NOT NULL DEFAULT ''")
+        if "kvkk_sha256" not in lead_cols:
+            c.execute("ALTER TABLE leads ADD COLUMN kvkk_sha256 TEXT NOT NULL DEFAULT ''")
+        if "yurt_disi_riza" not in lead_cols:
+            c.execute("ALTER TABLE leads ADD COLUMN yurt_disi_riza INTEGER NOT NULL DEFAULT 0")
         chg_cols = {r["name"] for r in c.execute("PRAGMA table_info(charges)").fetchall()}
         if "idempotency_key" not in chg_cols:
             c.execute("ALTER TABLE charges ADD COLUMN idempotency_key TEXT")
@@ -665,6 +734,19 @@ def init_and_seed():
             c.execute("ALTER TABLE clinics ADD COLUMN buffer_min INTEGER NOT NULL DEFAULT 0")
         if "ai_custom_rules_json" not in clinic_cols:
             c.execute("ALTER TABLE clinics ADD COLUMN ai_custom_rules_json TEXT NOT NULL DEFAULT '{}'")
+        if "wa_phone_id" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN wa_phone_id TEXT NOT NULL DEFAULT ''")
+        if "ig_handle" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN ig_handle TEXT NOT NULL DEFAULT ''")
+        if "cal_token_version" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN cal_token_version INTEGER NOT NULL DEFAULT 1")
+        lead_cols = {r["name"] for r in c.execute("PRAGMA table_info(leads)").fetchall()}
+        if "kvkk_version" not in lead_cols:
+            c.execute("ALTER TABLE leads ADD COLUMN kvkk_version TEXT NOT NULL DEFAULT ''")
+        if "kvkk_sha256" not in lead_cols:
+            c.execute("ALTER TABLE leads ADD COLUMN kvkk_sha256 TEXT NOT NULL DEFAULT ''")
+        if "yurt_disi_riza" not in lead_cols:
+            c.execute("ALTER TABLE leads ADD COLUMN yurt_disi_riza INTEGER NOT NULL DEFAULT 0")
         chg_cols = {r["name"] for r in c.execute("PRAGMA table_info(charges)").fetchall()}
         if "idempotency_key" not in chg_cols:
             c.execute("ALTER TABLE charges ADD COLUMN idempotency_key TEXT")
@@ -855,13 +937,39 @@ ANY = need()
 OWNER = need("owner")
 CLINICAL = need("owner", "doctor")
 
+
+def need_hq():
+    def dep(u: dict = Depends(OWNER)) -> dict:
+        if not u.get("is_hq"):
+            raise HTTPException(403, "Bu işlem yalnızca platform/merkez yönetici (HQ) yetkisindedir")
+        return u
+    return dep
+
+
+HQ_OWNER = need_hq()
+
 app = FastAPI(title="DentaCore Local v5.0", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(sec.SecurityHeadersMiddleware)
 
 
 @app.on_event("startup")
-def _on_startup():
+async def _on_startup():
+    global _SCHED_TASK
     init_and_seed()
+    if _SCHED_TASK is None or _SCHED_TASK.done():
+        _SCHED_TASK = asyncio.create_task(_scheduler_loop())
+
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    global _SCHED_TASK
+    if _SCHED_TASK and not _SCHED_TASK.done():
+        _SCHED_TASK.cancel()
+        try:
+            await _SCHED_TASK
+        except asyncio.CancelledError:
+            pass
+    _SCHED_TASK = None
 
 
 @app.get("/health")
@@ -962,10 +1070,9 @@ class LoginIn(BaseModel):
 async def login(body: LoginIn, request: Request, response: Response):
     email = body.email.strip().lower()
     ip = client_ip(request)
-    if not await _LIMITER.hit(f"ip:{ip}", 50, 900) or not await _LIMITER.hit(f"em:{email}", 15, 900):
+    if not await _LIMITER.hit(f"ip:{ip}", int(os.environ.get("DC_LOGIN_IP_LIMIT", "50")), 900) or not await _LIMITER.hit(f"em:{email}", int(os.environ.get("DC_LOGIN_EMAIL_LIMIT", "15")), 900):
         raise HTTPException(429, "Çok fazla deneme. Daha sonra tekrar deneyin.")
     u = q1("SELECT * FROM staff_users WHERE email=? AND active=1", email)
-    ok = await asyncio.to_thread(sec.verify_password, body.password, u["pw_hash"] if u else sec.dummy_hash())
     now = now_utc()
     expired_lock = False
     if u and u.get("locked_until"):
@@ -978,6 +1085,7 @@ async def login(body: LoginIn, request: Request, response: Response):
             expired_lock = True
         except ValueError:
             pass
+    ok = await asyncio.to_thread(sec.verify_password, body.password, u["pw_hash"] if u else sec.dummy_hash())
 
     def _record_fail():
         fc = 1 if expired_lock else (int(u.get("failed_count") or 0) + 1)
@@ -1103,25 +1211,52 @@ def revoke_all(response: Response, u: dict = Depends(ANY)):
 def overview(u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     cinfo = q1("SELECT chairs, work_minutes FROM clinics WHERE id=?", cid) or {"chairs": 2, "work_minutes": 600}
-    today_ymd = datetime.now(TZ).strftime("%Y-%m-%d")
+    now_loc = datetime.now(TZ)
+    today_ymd = now_loc.strftime("%Y-%m-%d")
+    month_start_dt = now_loc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    cutoff_30d_dt = now_loc - timedelta(days=30)
+    cutoff_90d_dt = now_loc - timedelta(days=90)
+    cutoff_7d_dt = now_loc - timedelta(days=7)
+
     appts = q("SELECT starts_at, duration_min, status FROM appointments WHERE clinic_id=?", cid)
-    today_active = [a for a in appts if a["starts_at"].startswith(today_ymd) and a["status"] in ("booked", "confirmed")]
+    today_active = []
+    done = 0
+    noshow = 0
+    for a in appts:
+        a_dt = _parse_dt_tz(a["starts_at"]).astimezone(TZ)
+        if a_dt.strftime("%Y-%m-%d") == today_ymd and a["status"] in ("booked", "confirmed"):
+            today_active.append(a)
+        if cutoff_30d_dt <= a_dt <= now_loc:
+            if a["status"] == "done":
+                done += 1
+            elif a["status"] == "noshow":
+                noshow += 1
     occ = round(100 * sum(a["duration_min"] for a in today_active) / max(1, cinfo["chairs"] * cinfo["work_minutes"]))
-    done = sum(1 for a in appts if a["status"] == "done")
-    noshow = sum(1 for a in appts if a["status"] == "noshow")
-    avg = q1("SELECT avg(amount_kurus) AS a FROM charges WHERE clinic_id=? AND voided_at IS NULL", cid)
-    avg_ticket = int(avg["a"]) if avg and avg["a"] else 350000
-    billed = (q1("SELECT coalesce(sum(amount_kurus),0) AS s FROM charges WHERE clinic_id=? AND voided_at IS NULL", cid) or {})["s"]
-    paid = (q1("SELECT coalesce(sum(amount_kurus),0) AS s FROM payments WHERE clinic_id=? AND voided_at IS NULL", cid) or {})["s"]
+
+    chg_rows = q("SELECT amount_kurus, created_at FROM charges WHERE clinic_id=? AND voided_at IS NULL", cid)
+    pay_rows = q("SELECT amount_kurus, created_at FROM payments WHERE clinic_id=? AND voided_at IS NULL", cid)
+    chg_90d = [r["amount_kurus"] for r in chg_rows if _parse_dt_tz(r["created_at"]) >= cutoff_90d_dt]
+    avg_ticket = int(sum(chg_90d) / len(chg_90d)) if chg_90d else 350000
+    billed = sum(r["amount_kurus"] for r in chg_rows if _parse_dt_tz(r["created_at"]) >= month_start_dt)
+    paid = sum(r["amount_kurus"] for r in pay_rows if _parse_dt_tz(r["created_at"]) >= month_start_dt)
+
     msgs = q("SELECT m.layer, m.tokens_in, m.tokens_out, m.direction, m.created_at FROM message_log m LEFT JOIN patients p ON p.id=m.patient_id WHERE COALESCE(p.clinic_id, m.clinic_id, 1)=?", cid)
-    out_m = [m for m in msgs if m["direction"] == "out"]
+    msgs_30d = [m for m in msgs if _parse_dt_tz(m["created_at"]) >= cutoff_30d_dt]
+    out_m = [m for m in msgs_30d if m["direction"] == "out"]
     free = sum(1 for m in out_m if (m["layer"] or "").startswith("L1"))
+
+    refill_rows = q("SELECT created_at FROM alerts WHERE clinic_id=? AND kind='koltuk_dolduruldu'", cid)
+    refills_30d = sum(1 for r in refill_rows if _parse_dt_tz(r["created_at"]) >= cutoff_30d_dt)
+    postop_rows = q("SELECT pc.answered_at, pc.due_at FROM postop_checks pc JOIN patients p ON p.id=pc.patient_id WHERE p.clinic_id=? AND pc.alarm=1", cid)
+    postop_7d = sum(1 for r in postop_rows if _parse_dt_tz(r.get("answered_at") or r["due_at"]) >= cutoff_7d_dt)
+
     series = []
     for i in range(13, -1, -1):
-        d = (datetime.now(TZ) - timedelta(days=i)).strftime("%Y-%m-%d")
-        lbl = (datetime.now(TZ) - timedelta(days=i)).strftime("%d.%m")
-        mc = sum(1 for m in msgs if m["direction"] == "in" and m["created_at"].startswith(d))
-        ac = sum(1 for a in appts if a["starts_at"].startswith(d))
+        day_dt = now_loc - timedelta(days=i)
+        d = day_dt.strftime("%Y-%m-%d")
+        lbl = day_dt.strftime("%d.%m")
+        mc = sum(1 for m in msgs if m["direction"] == "in" and _parse_dt_tz(m["created_at"]).astimezone(TZ).strftime("%Y-%m-%d") == d)
+        ac = sum(1 for a in appts if _parse_dt_tz(a["starts_at"]).astimezone(TZ).strftime("%Y-%m-%d") == d)
         series.append({"day": lbl, "msgs": mc, "appts": ac})
     return {
         "today": {"appointments": len(today_active), "confirmed": sum(1 for a in today_active if a["status"] == "confirmed"), "occupancy": occ},
@@ -1133,9 +1268,9 @@ def overview(u: dict = Depends(ANY)):
         "counts": {
             "alerts": q1("SELECT count(*) AS n FROM alerts WHERE clinic_id=? AND acknowledged_at IS NULL", cid)["n"],
             "waitlist": q1("SELECT count(*) AS n FROM waitlist w JOIN patients p ON p.id=w.patient_id WHERE p.clinic_id=? AND w.active=1", cid)["n"],
-            "refills": q1("SELECT count(*) AS n FROM alerts WHERE clinic_id=? AND kind='koltuk_dolduruldu'", cid)["n"],
+            "refills": refills_30d,
             "low_stock": q1("SELECT count(*) AS n FROM inventory_items WHERE clinic_id=? AND active=1 AND qty <= min_qty AND min_qty > 0", cid)["n"],
-            "postop_alarms": q1("SELECT count(*) AS n FROM postop_checks pc JOIN patients p ON p.id=pc.patient_id WHERE p.clinic_id=? AND pc.alarm=1", cid)["n"],
+            "postop_alarms": postop_7d,
         },
         "series": series,
     }
@@ -1178,11 +1313,7 @@ def _parse_hhmm(val: str) -> int:
     return int(parts[0]) * 60 + (int(parts[1]) if len(parts) > 1 else 0)
 
 
-def validate_working_hours(starts: datetime, duration_min: int, working_hours_json: str | None = None):
-    s_loc = (starts if starts.tzinfo else starts.replace(tzinfo=TZ)).astimezone(TZ)
-    e_loc = (s_loc + timedelta(minutes=duration_min)).astimezone(TZ)
-    if s_loc.date() != e_loc.date():
-        raise HTTPException(422, "Randevu aynı gün içinde başlamalı ve bitmelidir")
+def _clinic_day_hours(dt_loc: datetime, working_hours_json: str | None = None) -> tuple[int, int] | None:
     try:
         wh = json.loads(working_hours_json or DEFAULT_WORKING_HOURS_JSON)
         if not isinstance(wh, dict):
@@ -1190,7 +1321,7 @@ def validate_working_hours(starts: datetime, duration_min: int, working_hours_js
     except Exception:
         wh = json.loads(DEFAULT_WORKING_HOURS_JSON)
 
-    wd = s_loc.weekday()
+    wd = dt_loc.weekday()
     day_keys = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
     dkey = day_keys[wd]
     if dkey in wh:
@@ -1203,14 +1334,518 @@ def validate_working_hours(starts: datetime, duration_min: int, working_hours_js
         hrs = wh.get("sun", None)
 
     if not hrs or not isinstance(hrs, (list, tuple)) or len(hrs) < 2 or not hrs[0] or not hrs[1]:
+        return None
+    return _parse_hhmm(hrs[0]), _parse_hhmm(hrs[1])
+
+
+def is_within_working_hours(now_dt: datetime | None = None, working_hours_json: str | None = None) -> bool:
+    dt_loc = ((now_dt or now_utc()) if (now_dt is None or now_dt.tzinfo) else now_dt.replace(tzinfo=TZ)).astimezone(TZ)
+    span = _clinic_day_hours(dt_loc, working_hours_json)
+    if not span:
+        return False
+    open_m, close_m = span
+    cur_m = dt_loc.hour * 60 + dt_loc.minute
+    return open_m <= cur_m < close_m
+
+
+def validate_working_hours(starts: datetime, duration_min: int, working_hours_json: str | None = None):
+    s_loc = (starts if starts.tzinfo else starts.replace(tzinfo=TZ)).astimezone(TZ)
+    e_loc = (s_loc + timedelta(minutes=duration_min)).astimezone(TZ)
+    if s_loc.date() != e_loc.date():
+        raise HTTPException(422, "Randevu aynı gün içinde başlamalı ve bitmelidir")
+    span = _clinic_day_hours(s_loc, working_hours_json)
+    if not span:
         raise HTTPException(422, "Seçilen gün klinik kapalıdır (kapalı güne randevu oluşturulamaz)")
 
-    open_m = _parse_hhmm(hrs[0])
-    close_m = _parse_hhmm(hrs[1])
+    open_m, close_m = span
     s_m = s_loc.hour * 60 + s_loc.minute
     e_m = e_loc.hour * 60 + e_loc.minute
     if s_m < open_m or e_m > close_m:
-        raise HTTPException(422, f"Randevu saati klinik çalışma saatleri ({hrs[0]}-{hrs[1]}) dışındadır")
+        hrs_lbl = f"{open_m // 60:02d}:{open_m % 60:02d}-{close_m // 60:02d}:{close_m % 60:02d}"
+        raise HTTPException(422, f"Randevu saati klinik çalışma saatleri ({hrs_lbl}) dışındadır")
+
+
+async def _deliver_wa(
+    clinic_id: int,
+    patient_id: int | None,
+    phone: str,
+    text: str,
+    layer: str = "L1-otomasyon",
+    intent: str = "bildirim",
+    tpl: str = "",
+    params: list[str] | None = None,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+) -> dict:
+    err_msg: str | None = None
+    raw_res: dict = {}
+    try:
+        if tpl:
+            raw_res = await wa.send_text_or_template(phone, text, tpl, params or [])
+        else:
+            raw_res = await wa.send_text(phone, text)
+        if raw_res.get("dry_run"):
+            status = "dry_run"
+        elif raw_res.get("error"):
+            status = "failed"
+            err_msg = json.dumps(raw_res["error"], ensure_ascii=False)[:500]
+        elif raw_res.get("skipped"):
+            status = "dry_run"
+            err_msg = str(raw_res["skipped"])
+        else:
+            status = "sent"
+    except Exception as exc:
+        status = "failed"
+        err_msg = str(exc)[:500]
+        raw_res = {"error": err_msg}
+
+    ex(
+        """INSERT INTO message_log
+           (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,body,delivery_status,delivery_error,created_at)
+           VALUES (?,?,'out',?,?,?,?,?,?,?,?)""",
+        clinic_id, patient_id, layer, intent, tokens_in, tokens_out, enc(text[:2000]) if text else "", status, err_msg, iso_now(),
+    )
+    return {"ok": status != "failed", "status": status, "dry_run": status == "dry_run", "error": err_msg, "raw": raw_res}
+
+
+def _parse_dt_tz(raw: str | datetime) -> datetime:
+    dt = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+    return dt if dt.tzinfo else dt.replace(tzinfo=TZ)
+
+
+def _find_appt_conflicts(
+    c: sqlite3.Connection,
+    cid: int,
+    starts: datetime,
+    duration_min: int,
+    chair: str,
+    doctor_id: int | None,
+    buf_min: int,
+    exclude_aid: int | None = None,
+):
+    ends = starts + timedelta(minutes=duration_min + buf_min)
+    sql = "SELECT id, starts_at, duration_min, chair, doctor_id FROM appointments WHERE clinic_id=? AND status IN ('booked','confirmed')"
+    params: list = [cid]
+    if exclude_aid is not None:
+        sql += " AND id<>?"
+        params.append(exclude_aid)
+    for ex_a in c.execute(sql, tuple(params)).fetchall():
+        s2 = _parse_dt_tz(ex_a["starts_at"])
+        e2 = s2 + timedelta(minutes=int(ex_a["duration_min"] or 30) + buf_min)
+        if s2 < ends and e2 > starts:
+            if str(ex_a["chair"]) == str(chair):
+                return "chair", ex_a["id"]
+            if doctor_id is not None and ex_a["doctor_id"] == doctor_id:
+                return "doctor", ex_a["id"]
+    return None
+
+
+async def _offer_waitlist_wave(appt: dict, wave: int, now_dt: datetime | None = None) -> int:
+    cid = int(appt["clinic_id"])
+    aid = int(appt["id"])
+    t_now_dt = now_dt or now_utc()
+    t_now = t_now_dt.isoformat()
+    exp_at = (t_now_dt + timedelta(hours=2)).isoformat()
+    treat = str(appt.get("treatment") or "").lower()
+    rows = q(
+        """SELECT w.id, w.patient_id, w.treatment, p.phone_enc, p.display_name
+           FROM waitlist w
+           JOIN patients p ON p.id = w.patient_id
+           WHERE p.clinic_id=? AND w.active=1 AND COALESCE(p.active, 1)=1
+             AND (? IS NULL OR w.patient_id <> ?)
+             AND NOT EXISTS (SELECT 1 FROM slot_offers o WHERE o.appointment_id=? AND o.waitlist_id=w.id)
+           ORDER BY w.id ASC""",
+        cid, appt.get("patient_id"), appt.get("patient_id"), aid,
+    )
+    cands = []
+    seen_pids: set[int] = set()
+    for r in rows:
+        pid = int(r["patient_id"])
+        if pid in seen_pids:
+            continue
+        wt = str(r.get("treatment") or "herhangi").strip().lower()
+        if wt == "herhangi" or not treat or wt in treat or treat in wt:
+            seen_pids.add(pid)
+            cands.append(r)
+        if len(cands) >= 5:
+            break
+    if not cands and rows:
+        for r in rows:
+            pid = int(r["patient_id"])
+            if pid not in seen_pids:
+                seen_pids.add(pid)
+                cands.append(r)
+            if len(cands) >= 5:
+                break
+
+    dt_loc = _parse_dt_tz(appt["starts_at"]).astimezone(TZ)
+    d_str, h_str = dt_loc.strftime("%d.%m.%Y"), dt_loc.strftime("%H:%M")
+    c_row = q1("SELECT name FROM clinics WHERE id=?", cid)
+    c_name = (c_row and c_row["name"]) or "Kliniğimiz"
+    offers = 0
+    for cand in cands:
+        ex(
+            "INSERT INTO slot_offers (appointment_id,waitlist_id,wave,sent_at,expires_at,status) VALUES (?,?,?,?,?,'sent')",
+            aid, cand["id"], wave, t_now, exp_at,
+        )
+        offers += 1
+        p_name = cand.get("display_name") or "Sayın Hastamız"
+        msg = (
+            f"Sayın {p_name}, {c_name} kliniğimizde {d_str} saat {h_str} ({appt['treatment']}) için boş yer açıldı "
+            f"(Dalga {wave}). Randevuyu almak için EVET yazabilirsiniz."
+        )
+        await _deliver_wa(
+            cid,
+            int(cand["patient_id"]),
+            dec(cand["phone_enc"]),
+            msg,
+            layer="L1-otomasyon",
+            intent="bekleme_listesi_teklif",
+            tpl=os.environ.get("WA_TPL_WAITLIST", "bekleme_listesi_teklif"),
+            params=[h_str, str(appt["treatment"])],
+        )
+    return offers
+
+
+async def _cancel_appt_and_refill(cid: int, aid: int, actor_id: int | None, actor: str, ip_h: str = "") -> int:
+    with _DB_LOCK:
+        c = db()
+        a = c.execute("SELECT * FROM appointments WHERE id=? AND clinic_id=?", (aid, cid)).fetchone()
+        if not a:
+            raise HTTPException(404, "randevu yok")
+        a_dict = dict(a)
+        c.execute("UPDATE appointments SET status='cancelled' WHERE id=? AND clinic_id=?", (aid, cid))
+        c.commit()
+    offers = 0
+    if _parse_dt_tz(a_dict["starts_at"]) > now_utc():
+        offers = await _offer_waitlist_wave(a_dict, 1)
+    write_audit(actor_id, actor, "appointment.cancel", f"appointment:{aid}", ip_h, {"offers": offers}, clinic_id=cid)
+    return offers
+
+
+async def _claim_slot_offer(cid: int, pid: int, offer_id: int | None = None) -> tuple[str, str, str] | None:
+    now_dt = now_utc()
+    now_iso = now_dt.isoformat()
+    with _DB_LOCK:
+        c = db()
+        try:
+            if offer_id is not None:
+                off = c.execute(
+                    """SELECT o.*, w.patient_id FROM slot_offers o
+                       JOIN waitlist w ON w.id=o.waitlist_id
+                       JOIN patients p ON p.id=w.patient_id
+                       WHERE o.id=? AND w.patient_id=? AND p.clinic_id=?
+                         AND o.status='sent' AND (o.expires_at IS NULL OR o.expires_at >= ?)""",
+                    (offer_id, pid, cid, now_iso),
+                ).fetchone()
+            else:
+                cutoff = (now_dt - timedelta(hours=2)).isoformat()
+                off = c.execute(
+                    """SELECT o.*, w.patient_id FROM slot_offers o
+                       JOIN waitlist w ON w.id=o.waitlist_id
+                       JOIN patients p ON p.id=w.patient_id
+                       WHERE w.patient_id=? AND p.clinic_id=? AND o.status='sent'
+                         AND o.sent_at >= ? AND (o.expires_at IS NULL OR o.expires_at >= ?)
+                       ORDER BY o.id DESC LIMIT 1""",
+                    (pid, cid, cutoff, now_iso),
+                ).fetchone()
+            if not off:
+                return None
+            cur_upd = c.execute(
+                "UPDATE appointments SET status='booked', patient_id=?, reminder_sent_at=NULL, followup_sent_at=NULL WHERE id=? AND clinic_id=? AND status='cancelled'",
+                (pid, off["appointment_id"], cid),
+            )
+            if cur_upd.rowcount == 0:
+                c.execute("UPDATE slot_offers SET status='lost' WHERE id=?", (off["id"],))
+                c.commit()
+                return (
+                    "Teşekkürler; bu saat az önce doldu. Bekleme listesindeki yeriniz korunuyor, yeni bir saat açıldığında tekrar haber vereceğiz.",
+                    "L1-koltuk",
+                    "bekleme_listesi",
+                )
+            appt = c.execute("SELECT * FROM appointments WHERE id=?", (off["appointment_id"],)).fetchone()
+            c.execute("UPDATE slot_offers SET status='won' WHERE id=?", (off["id"],))
+            c.execute("UPDATE slot_offers SET status='lost' WHERE appointment_id=? AND id<>? AND status='sent'", (off["appointment_id"], off["id"]))
+            c.execute("UPDATE waitlist SET active=0 WHERE id=?", (off["waitlist_id"],))
+            dt_loc = _parse_dt_tz(appt["starts_at"]).astimezone(TZ)
+            c.execute(
+                "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'koltuk_dolduruldu',?,?)",
+                (cid, pid, f"İptal edilen {dt_loc:%d.%m.%Y %H:%M} ({appt['treatment']}) koltuğu bekleme listesinden dolduruldu.", iso_now()),
+            )
+            c.commit()
+        except Exception:
+            c.rollback()
+            raise
+    write_audit(None, f"patient:{pid}", "waitlist.claim_won", f"appointment:{off['appointment_id']}", clinic_id=cid)
+    return (f"Randevunuz oluşturuldu: {dt_loc:%d.%m.%Y} saat {dt_loc:%H:%M}. Görüşmek üzere.", "L1-koltuk", "bekleme_listesi")
+
+
+_CONFIRM_WORDS = {"evet", "tamam", "onayliyorum", "yes", "ok", "onay", "geliyorum", "gelecegim", "uygun"}
+_CANCEL_WORDS = {"hayir", "iptal", "no", "iptal ediyorum", "iptal et", "gelemiyorum", "gelemeyecegim", "vazgectim"}
+
+
+async def _handle_patient_reply(
+    cid: int,
+    pid: int,
+    text: str,
+    channel: str = "wa",
+    payload: str = "",
+    context_previous_turn: str | None = None,
+) -> tuple[str, str, str] | None:
+    raw_txt = text or ""
+    cleaned = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", normalize(raw_txt))).strip()
+    toks = cleaned.split()
+    has_q = "?" in raw_txt
+
+    # TECH-03: Tek başına 1..10 ağrı puanı asla randevu teyit/iptal sayılmaz; varsa bekleyen post-op kontrolüne yazılır.
+    is_numeric_score = bool(re.fullmatch(r"\s*(10|[1-9])\s*", raw_txt)) and not payload
+
+    is_confirm = False if is_numeric_score else bool(
+        payload.startswith("RMD_OK_")
+        or (not has_q and (
+            cleaned in _CONFIRM_WORDS
+            or (1 <= len(toks) <= 3 and any(t in {"evet", "onayliyorum", "yes", "tamam"} for t in toks)
+                and not any(t in {"hayir", "iptal", "degil", "yok", "no"} for t in toks))
+        ))
+    )
+    is_cancel = False if is_numeric_score else bool(
+        payload.startswith("RMD_CHG_")
+        or (not has_q and (
+            cleaned in _CANCEL_WORDS
+            or (1 <= len(toks) <= 3 and any(t in {"hayir", "iptal", "no", "vazgectim", "gelemiyorum", "gelemeyecegim"} for t in toks)
+                and not any(t in {"evet", "onayliyorum"} for t in toks))
+        ))
+    )
+
+    if payload.startswith("SLOT_"):
+        try:
+            oid = int(payload.split("_", 1)[1])
+        except ValueError:
+            oid = None
+        claimed = await _claim_slot_offer(cid, pid, oid)
+        if claimed:
+            return claimed
+
+    ctx_norm = normalize(context_previous_turn or "")
+    prefers_appt_confirm = any(k in ctx_norm for k in ("randevu", "teyit", "hatirlat", "onay icin")) and "yer acildi" not in ctx_norm
+    if not context_previous_turn and not payload and is_confirm and not prefers_appt_confirm:
+        last_out = q1(
+            "SELECT intent FROM message_log WHERE clinic_id=? AND patient_id=? AND direction='out' ORDER BY id DESC LIMIT 1",
+            cid, pid,
+        )
+        if last_out and last_out.get("intent") in ("hatirlatma", "randevu_teyit", "takip"):
+            prefers_appt_confirm = True
+
+    if not payload and is_confirm and not prefers_appt_confirm:
+        claimed = await _claim_slot_offer(cid, pid, None)
+        if claimed:
+            return claimed
+
+    if is_confirm or is_cancel:
+        target_appt = None
+        if payload.startswith("RMD_"):
+            try:
+                aid_p = int(payload.rsplit("_", 1)[1])
+                target_appt = q1("SELECT * FROM appointments WHERE id=? AND clinic_id=? AND patient_id=?", aid_p, cid, pid)
+            except ValueError:
+                target_appt = None
+        else:
+            allowed = ("booked",) if is_confirm else ("booked", "confirmed")
+            placeholders = ",".join("?" for _ in allowed)
+            appts = q(
+                f"SELECT * FROM appointments WHERE clinic_id=? AND patient_id=? AND status IN ({placeholders})",
+                cid, pid, *allowed,
+            )
+            cutoff = now_utc() - timedelta(minutes=15)
+            future = [a for a in appts if _parse_dt_tz(a["starts_at"]) >= cutoff]
+            future.sort(key=lambda a: (
+                0 if a["status"] == "booked" else 1,
+                0 if a.get("reminder_sent_at") else 1,
+                _parse_dt_tz(a["starts_at"]),
+            ))
+            target_appt = future[0] if future else None
+
+        if target_appt:
+            dt_loc = _parse_dt_tz(target_appt["starts_at"]).astimezone(TZ)
+            dt_str = dt_loc.strftime("%d.%m.%Y %H:%M")
+            if is_confirm:
+                ex("UPDATE appointments SET status='confirmed' WHERE id=? AND clinic_id=?", target_appt["id"], cid)
+                write_audit(None, f"{channel}_patient:{pid}", "appointment.confirm_reply", f"appointment:{target_appt['id']}", clinic_id=cid)
+                return (f"Teşekkürler, {dt_str} tarihli randevunuz teyit edildi.", "L1-hatirlatma", "teyit")
+            await _cancel_appt_and_refill(cid, int(target_appt["id"]), None, f"{channel}_patient:{pid}")
+            return (
+                f"Randevunuz ({dt_str}) iptal edilerek serbest bırakıldı. Yeni saat için ekibimiz sizinle iletişime geçecektir.",
+                "L1-hatirlatma",
+                "iptal",
+            )
+
+    # Post-op yanıt kontrolü (son 12 saatte gönderilmiş cevapsız kontrol)
+    postop_rows = q("SELECT * FROM postop_checks WHERE patient_id=? AND sent_at IS NOT NULL AND answered_at IS NULL ORDER BY id DESC LIMIT 3", pid)
+    recent_cutoff = now_utc() - timedelta(hours=12)
+    chk = next((r for r in postop_rows if _parse_dt_tz(r["sent_at"]) >= recent_cutoff), None)
+    if chk:
+        m = re.search(r"\b(10|[1-9])\b", raw_txt)
+        emerg = _ROUTER.is_emergency(raw_txt)
+        if m or emerg:
+            score = int(m.group(1)) if m else None
+            alarm = bool(emerg or (score is not None and score >= 8))
+            ex("UPDATE postop_checks SET pain_score=?, answered_at=?, alarm=? WHERE id=?", score, iso_now(), 1 if alarm else 0, chk["id"])
+            if alarm:
+                p_row = q1("SELECT display_name FROM patients WHERE id=?", pid)
+                pname = (p_row and p_row["display_name"]) or f"Hasta #{pid}"
+                ex(
+                    "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'postop_alarm',?,?)",
+                    cid, pid, f"İŞLEM SONRASI ALARM: {pname} (#{pid}), {chk['procedure']} ({chk['stage']}), ağrı {score if score is not None else '?'}/10", iso_now(),
+                )
+                return ("Bilginiz nöbetçi hekimimize iletildi, sizi en kısa sürede arayacak. Acil durumda lütfen 112'yi arayın.", "L1-postop", "postop")
+            return ("Teşekkürler, iyileşmeniz beklenen şekilde ilerliyor görünüyor. Sorunuz olursa buradan yazabilirsiniz.", "L1-postop", "postop")
+    return None
+
+
+async def _run_scheduler_tick(clinic_id: int | None = None, now_dt: datetime | None = None, respect_hours: bool = True) -> dict:
+    async with _SCHED_LOCK:
+        ref_now = (now_dt if now_dt.tzinfo else now_dt.replace(tzinfo=TZ)) if now_dt else now_utc()
+        clinics = q("SELECT id, name, working_hours_json FROM clinics WHERE active=1" + (" AND id=?" if clinic_id is not None else ""), *([clinic_id] if clinic_id is not None else []))
+        stats = {
+            "ok": True,
+            "at": ref_now.isoformat(),
+            "skipped_outside_hours": False,
+            "skipped_clinics": [],
+            "reminders_sent": 0,
+            "waves_advanced": 0,
+            "followups_sent": 0,
+            "postop_sent": 0,
+        }
+        for cl in clinics:
+            cid = int(cl["id"])
+            if respect_hours and not is_within_working_hours(ref_now, cl.get("working_hours_json")):
+                stats["skipped_clinics"].append(cid)
+                continue
+
+            # 1) 24 saat öncesi randevu hatırlatma (20-28 saat penceresi, bir kez)
+            w_start = ref_now + timedelta(hours=20)
+            w_end = ref_now + timedelta(hours=28)
+            rmd_rows = q(
+                """SELECT a.id, a.patient_id, a.starts_at, a.treatment, p.phone_enc, p.display_name
+                   FROM appointments a
+                   JOIN patients p ON p.id = a.patient_id
+                   WHERE a.clinic_id=? AND a.status='booked' AND a.reminder_sent_at IS NULL
+                     AND a.patient_id IS NOT NULL AND COALESCE(p.active, 1)=1""",
+                cid,
+            )
+            for r in rmd_rows:
+                st_dt = _parse_dt_tz(r["starts_at"])
+                if w_start <= st_dt <= w_end:
+                    dt_loc = st_dt.astimezone(TZ)
+                    d_str, h_str = dt_loc.strftime("%d.%m.%Y"), dt_loc.strftime("%H:%M")
+                    p_name = r.get("display_name") or "Sayın Hastamız"
+                    msg = (
+                        f"Sayın {p_name}, {cl['name']} kliniğimizde {d_str} saat {h_str} ({r['treatment']}) için randevunuz vardır. "
+                        f"Onaylamak için EVET, iptal etmek için HAYIR yazınız."
+                    )
+                    d_res = await _deliver_wa(
+                        cid, int(r["patient_id"]), dec(r["phone_enc"]), msg,
+                        layer="L1-otomasyon", intent="hatirlatma",
+                        tpl=os.environ.get("WA_TPL_REMINDER", "randevu_hatirlatma"), params=[d_str, h_str],
+                    )
+                    if d_res.get("status") != "failed":
+                        ex("UPDATE appointments SET reminder_sent_at=? WHERE id=? AND reminder_sent_at IS NULL", ref_now.isoformat(), r["id"])
+                        write_audit(None, "scheduler", "appointment.reminder_sent", f"appointment:{r['id']}", clinic_id=cid)
+                        stats["reminders_sent"] += 1
+
+            # 2) Bekleme listesi tekliflerinde 3 dk yanıt yoksa sonraki dalga (maks 4 dalga)
+            offer_appts = q(
+                """SELECT a.*, max(o.wave) AS max_wave, max(o.sent_at) AS last_sent,
+                          sum(CASE WHEN o.status='won' THEN 1 ELSE 0 END) AS won_cnt,
+                          sum(CASE WHEN o.status='sent' THEN 1 ELSE 0 END) AS sent_cnt
+                   FROM appointments a
+                   JOIN slot_offers o ON o.appointment_id = a.id
+                   WHERE a.clinic_id=? AND a.status='cancelled'
+                   GROUP BY a.id""",
+                cid,
+            )
+            for oa in offer_appts:
+                if int(oa.get("won_cnt") or 0) > 0 or int(oa.get("sent_cnt") or 0) == 0:
+                    continue
+                if _parse_dt_tz(oa["starts_at"]) <= ref_now:
+                    continue
+                if _parse_dt_tz(oa["last_sent"]) <= ref_now - timedelta(minutes=3):
+                    ex("UPDATE slot_offers SET status='expired' WHERE appointment_id=? AND status='sent'", oa["id"])
+                    cur_wave = int(oa["max_wave"] or 1)
+                    if cur_wave < 4:
+                        sent_n = await _offer_waitlist_wave(oa, cur_wave + 1, now_dt=ref_now)
+                        if sent_n:
+                            write_audit(None, "scheduler", "waitlist.wave_advanced", f"appointment:{oa['id']}", meta={"wave": cur_wave + 1, "offers": sent_n}, clinic_id=cid)
+                            stats["waves_advanced"] += 1
+
+            # 3) Cevap vermeyen hastaya takip (hatırlatmadan 4+ saat geçmiş ve hâlâ booked) + zamanı gelen post-op
+            unans_rows = q(
+                """SELECT a.id, a.patient_id, a.starts_at, a.treatment, a.reminder_sent_at, p.phone_enc, p.display_name
+                   FROM appointments a
+                   JOIN patients p ON p.id = a.patient_id
+                   WHERE a.clinic_id=? AND a.status='booked'
+                     AND a.reminder_sent_at IS NOT NULL AND a.followup_sent_at IS NULL
+                     AND COALESCE(p.active, 1)=1""",
+                cid,
+            )
+            for ur in unans_rows:
+                st_dt = _parse_dt_tz(ur["starts_at"])
+                rmd_dt = _parse_dt_tz(ur["reminder_sent_at"])
+                if st_dt > ref_now + timedelta(hours=1) and rmd_dt <= ref_now - timedelta(hours=4):
+                    dt_loc = st_dt.astimezone(TZ)
+                    p_name = ur.get("display_name") or "Sayın Hastamız"
+                    msg = (
+                        f"Sayın {p_name}, {dt_loc:%d.%m.%Y %H:%M} tarihli randevunuz için henüz teyidinizi alamadık. "
+                        f"Katılım durumunuzu EVET veya HAYIR yazarak paylaşabilirsiniz."
+                    )
+                    d_res = await _deliver_wa(cid, int(ur["patient_id"]), dec(ur["phone_enc"]), msg, layer="L1-otomasyon", intent="takip")
+                    if d_res.get("status") != "failed":
+                        ex("UPDATE appointments SET followup_sent_at=? WHERE id=?", ref_now.isoformat(), ur["id"])
+                        if st_dt <= ref_now + timedelta(hours=12):
+                            ex(
+                                "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'randevu_takip',?,?)",
+                                cid, ur["patient_id"], f"Teyit yanıtı alınamadı: {p_name} ({dt_loc:%d.%m.%Y %H:%M})", ref_now.isoformat(),
+                            )
+                        write_audit(None, "scheduler", "appointment.followup_sent", f"appointment:{ur['id']}", clinic_id=cid)
+                        stats["followups_sent"] += 1
+
+            postop_due = q(
+                """SELECT pc.*, p.phone_enc, p.display_name
+                   FROM postop_checks pc
+                   JOIN patients p ON p.id = pc.patient_id
+                   WHERE p.clinic_id=? AND pc.sent_at IS NULL AND COALESCE(p.active, 1)=1""",
+                cid,
+            )
+            for pc in postop_due:
+                due_dt = _parse_dt_tz(pc["due_at"])
+                if ref_now - timedelta(hours=6) <= due_dt <= ref_now:
+                    p_name = pc.get("display_name") or "Sayın Hastamız"
+                    msg = f"Sayın {p_name}, {pc['procedure']} işleminiz sonrası ({pc['stage']}) ağrı durumunuzu 1-10 arası puanla paylaşır mısınız?"
+                    d_res = await _deliver_wa(
+                        cid, int(pc["patient_id"]), dec(pc["phone_enc"]), msg,
+                        layer="L1-otomasyon", intent="postop_kontrol",
+                        tpl=os.environ.get("WA_TPL_POSTOP", "postop_kontrol"), params=[str(pc["procedure"])],
+                    )
+                    if d_res.get("status") != "failed":
+                        ex("UPDATE postop_checks SET sent_at=? WHERE id=?", ref_now.isoformat(), pc["id"])
+                        stats["postop_sent"] += 1
+
+        if clinic_id is not None and clinic_id in stats["skipped_clinics"]:
+            stats["skipped_outside_hours"] = True
+        elif clinics and len(stats["skipped_clinics"]) == len(clinics):
+            stats["skipped_outside_hours"] = True
+        return stats
+
+
+async def _scheduler_loop():
+    while True:
+        try:
+            await asyncio.sleep(60)
+            await _run_scheduler_tick(respect_hours=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.exception("zamanlayıcı hatası: %s", exc)
 
 
 def _require_active_patient_row(c: sqlite3.Connection, pid: int, cid: int) -> sqlite3.Row:
@@ -1221,6 +1856,84 @@ def _require_active_patient_row(c: sqlite3.Connection, pid: int, cid: int) -> sq
     if not int(act if act is not None else 1):
         raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
     return row
+
+
+@app.get("/app/api/appointments/available")
+def available_appts(
+    date: str | None = None,
+    duration: int = Query(30, ge=5, le=480),
+    chair: str | None = None,
+    u: dict = Depends(ANY),
+):
+    cid = u["clinic_id"]
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(400, "Geçersiz tarih formatı (YYYY-MM-DD olmalı)")
+    else:
+        target_date = datetime.now(TZ).date()
+
+    cinfo = q1("SELECT chairs, slot_step_min, working_hours_json, buffer_min FROM clinics WHERE id=?", cid) or {
+        "chairs": 2,
+        "slot_step_min": 15,
+        "working_hours_json": DEFAULT_WORKING_HOURS_JSON,
+        "buffer_min": 0,
+    }
+    max_chairs = max(1, int(cinfo.get("chairs") or 2))
+    step_min = max(5, int(cinfo.get("slot_step_min") or 30))
+    buf_min = max(0, int(cinfo.get("buffer_min") or 0))
+    if chair is not None:
+        if not str(chair).isdigit() or not (1 <= int(chair) <= max_chairs):
+            raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
+        chair_list = [str(chair)]
+    else:
+        chair_list = [str(i) for i in range(1, max_chairs + 1)]
+
+    day_start_loc = datetime(target_date.year, target_date.month, target_date.day, 0, 0, tzinfo=TZ)
+    span = _clinic_day_hours(day_start_loc, cinfo.get("working_hours_json"))
+    if not span:
+        return {"date": target_date.isoformat(), "duration": duration, "chairs": max_chairs, "closed": True, "slots": []}
+
+    open_m, close_m = span
+    active_rows = q(
+        "SELECT starts_at, duration_min, chair FROM appointments WHERE clinic_id=? AND status IN ('booked','confirmed')",
+        cid,
+    )
+    busy: list[tuple[datetime, datetime, str]] = []
+    for ex_a in active_rows:
+        s2 = _parse_dt_tz(ex_a["starts_at"])
+        e2 = s2 + timedelta(minutes=int(ex_a["duration_min"] or 30) + buf_min)
+        busy.append((s2, e2, str(ex_a["chair"])))
+
+    min_start = now_utc() - timedelta(minutes=1)
+    slots: list[dict] = []
+    cur_m = open_m
+    while cur_m + duration <= close_m:
+        cand_s = day_start_loc + timedelta(minutes=cur_m)
+        if cand_s >= min_start:
+            cand_e = cand_s + timedelta(minutes=duration + buf_min)
+            free_chairs = [
+                ch for ch in chair_list
+                if not any(s2 < cand_e and e2 > cand_s and ch2 == ch for s2, e2, ch2 in busy)
+            ]
+            if free_chairs:
+                slots.append({
+                    "starts_at": cand_s.isoformat(),
+                    "time": cand_s.strftime("%H:%M"),
+                    "end_time": (cand_s + timedelta(minutes=duration)).strftime("%H:%M"),
+                    "available_chairs": free_chairs,
+                })
+        cur_m += step_min
+
+    return {
+        "date": target_date.isoformat(),
+        "duration": duration,
+        "chairs": max_chairs,
+        "closed": False,
+        "working_hours": [f"{open_m // 60:02d}:{open_m % 60:02d}", f"{close_m // 60:02d}:{close_m % 60:02d}"],
+        "slots": slots,
+    }
 
 
 class ApptCreate(BaseModel):
@@ -1235,10 +1948,11 @@ class ApptCreate(BaseModel):
 
 
 @app.post("/app/api/appointments")
-def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
+async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     starts = b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)
-    cinfo = q1("SELECT chairs, working_hours_json, buffer_min FROM clinics WHERE id=?", cid) or {
+    cinfo = q1("SELECT name, chairs, working_hours_json, buffer_min FROM clinics WHERE id=?", cid) or {
+        "name": u.get("clinic_name") or "Kliniğimiz",
         "chairs": 2,
         "working_hours_json": DEFAULT_WORKING_HOURS_JSON,
         "buffer_min": 0,
@@ -1246,57 +1960,79 @@ def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
     max_chairs = int(cinfo.get("chairs") or 2)
     if not str(b.chair).isdigit() or not (1 <= int(b.chair) <= max_chairs):
         raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
+    if starts < now_utc() - timedelta(minutes=5):
+        raise HTTPException(400, "Geçmiş tarihe randevu oluşturulamaz")
+    validate_working_hours(starts, b.duration_min, cinfo.get("working_hours_json"))
 
     with _DB_LOCK:
         c = db()
-        pid = b.patient_id
-        if pid is not None:
-            _require_active_patient_row(c, pid, cid)
-        else:
-            if not b.phone or len(norm_phone(b.phone)) < 10:
-                raise HTTPException(400, "Hasta seçin veya geçerli telefon girin")
-            ph = phone_hmac(b.phone)
-            row = c.execute("SELECT id, active FROM patients WHERE clinic_id=? AND phone_hmac=?", (cid, ph)).fetchone()
-            if row:
-                if not int(row["active"] if row["active"] is not None else 1):
-                    raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
-                pid = row["id"]
+        try:
+            if b.doctor_id is not None:
+                if not c.execute("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", (b.doctor_id, cid)).fetchone():
+                    raise HTTPException(404, "hekim yok")
+            pid = b.patient_id
+            new_patient_data: tuple[str, str, str | None] | None = None
+            if pid is not None:
+                p_row = _require_active_patient_row(c, pid, cid)
+                p_phone_enc = p_row["phone_enc"]
+                p_name = p_row["display_name"]
             else:
+                if not b.phone or len(norm_phone(b.phone)) < 10:
+                    raise HTTPException(400, "Hasta seçin veya geçerli telefon girin")
+                ph = phone_hmac(b.phone)
+                row = c.execute("SELECT id, active, phone_enc, display_name FROM patients WHERE clinic_id=? AND phone_hmac=?", (cid, ph)).fetchone()
+                if row:
+                    if not int(row["active"] if row["active"] is not None else 1):
+                        raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
+                    pid = row["id"]
+                    p_phone_enc = row["phone_enc"]
+                    p_name = row["display_name"]
+                else:
+                    p_phone_enc = enc(norm_phone(b.phone))
+                    p_name = b.name
+                    new_patient_data = (ph, p_phone_enc, b.name)
+            buf_min = max(0, int(cinfo.get("buffer_min") or 0))
+            conflict = _find_appt_conflicts(c, cid, starts, b.duration_min, str(b.chair), b.doctor_id, buf_min)
+            if conflict:
+                kind, ex_id = conflict
+                if kind == "chair":
+                    raise HTTPException(409, f"Koltuk {b.chair} bu saatte dolu (randevu #{ex_id})")
+                raise HTTPException(409, f"Seçilen hekim bu saatte başka koltukta dolu (randevu #{ex_id})")
+            if new_patient_data is not None:
+                ph, p_phone_enc, new_name = new_patient_data
                 cur_p = c.execute(
                     "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
-                    (cid, ph, enc(norm_phone(b.phone)), b.name, "tr", "wa", iso_now()),
+                    (cid, ph, p_phone_enc, new_name, "tr", "wa", iso_now()),
                 )
                 pid = cur_p.lastrowid
-        if b.doctor_id is not None:
-            if not c.execute("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", (b.doctor_id, cid)).fetchone():
-                raise HTTPException(404, "hekim yok")
-        if starts < now_utc() - timedelta(minutes=5):
-            raise HTTPException(400, "Geçmiş tarihe randevu oluşturulamaz")
-        validate_working_hours(starts, b.duration_min, cinfo.get("working_hours_json"))
-        buf_min = max(0, int(cinfo.get("buffer_min") or 0))
-        ends = starts + timedelta(minutes=b.duration_min + buf_min)
-        active_rows = c.execute(
-            "SELECT id, starts_at, duration_min, chair, doctor_id FROM appointments WHERE clinic_id=? AND status IN ('booked','confirmed')",
-            (cid,),
-        ).fetchall()
-        for ex_a in active_rows:
-            s2 = datetime.fromisoformat(ex_a["starts_at"])
-            if s2.tzinfo is None:
-                s2 = s2.replace(tzinfo=TZ)
-            e2 = s2 + timedelta(minutes=ex_a["duration_min"] + buf_min)
-            if s2 < ends and e2 > starts:
-                if str(ex_a["chair"]) == str(b.chair):
-                    raise HTTPException(409, f"Koltuk {b.chair} bu saatte dolu (randevu #{ex_a['id']})")
-                if b.doctor_id is not None and ex_a["doctor_id"] == b.doctor_id:
-                    raise HTTPException(409, f"Seçilen hekim bu saatte başka koltukta dolu (randevu #{ex_a['id']})")
-        cur_a = c.execute(
-            "INSERT INTO appointments (clinic_id,patient_id,starts_at,duration_min,treatment,chair,doctor_id,source,created_at) VALUES (?,?,?,?,?,?,?,'panel',?)",
-            (cid, pid, starts.isoformat(), b.duration_min, b.treatment, b.chair, b.doctor_id, iso_now()),
-        )
-        aid = cur_a.lastrowid
-        c.commit()
-    write_audit(u["id"], u["email"], "appointment.create", f"appointment:{aid}", u["ip_h"], {"chair": b.chair}, clinic_id=cid)
-    return {"id": aid, "patient_id": pid}
+            cur_a = c.execute(
+                "INSERT INTO appointments (clinic_id,patient_id,starts_at,duration_min,treatment,chair,doctor_id,source,created_at) VALUES (?,?,?,?,?,?,?,'panel',?)",
+                (cid, pid, starts.isoformat(), b.duration_min, b.treatment, b.chair, b.doctor_id, iso_now()),
+            )
+            aid = cur_a.lastrowid
+            c.commit()
+        except Exception:
+            c.rollback()
+            raise
+
+    dt_loc = starts.astimezone(TZ)
+    d_str, h_str = dt_loc.strftime("%d.%m.%Y"), dt_loc.strftime("%H:%M")
+    msg_text = (
+        f"Sayın {p_name or 'Hastamız'}, {cinfo.get('name') or 'kliniğimiz'} bünyesinde "
+        f"{d_str} saat {h_str} ({b.treatment}) için randevunuz oluşturulmuştur. Onaylamak için EVET yazabilirsiniz."
+    )
+    delivery = await _deliver_wa(
+        cid,
+        pid,
+        dec(p_phone_enc),
+        msg_text,
+        layer="L1-otomasyon",
+        intent="randevu_teyit",
+        tpl=os.environ.get("WA_TPL_REMINDER", "randevu_hatirlatma"),
+        params=[d_str, h_str],
+    )
+    write_audit(u["id"], u["email"], "appointment.create", f"appointment:{aid}", u["ip_h"], {"chair": b.chair, "msg_status": delivery["status"]}, clinic_id=cid)
+    return {"id": aid, "patient_id": pid, "delivery": delivery}
 
 
 class ApptUpdate(BaseModel):
@@ -1323,30 +2059,19 @@ def update_appt(aid: int, b: ApptUpdate, u: dict = Depends(ANY)):
         doc_id = b.doctor_id if b.doctor_id is not None else cur_row["doctor_id"]
         if doc_id is not None and not c.execute("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", (doc_id, cid)).fetchone():
             raise HTTPException(404, "hekim yok")
-        starts = (b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)) if b.starts_at else datetime.fromisoformat(cur_row["starts_at"])
-        if starts.tzinfo is None:
-            starts = starts.replace(tzinfo=TZ)
+        starts = _parse_dt_tz(b.starts_at if b.starts_at else cur_row["starts_at"])
         if starts < now_utc() - timedelta(minutes=5):
             raise HTTPException(400, "Geçmiş tarihe randevu taşınamaz")
         dur = b.duration_min if b.duration_min is not None else cur_row["duration_min"]
         validate_working_hours(starts, dur, (cinfo and cinfo["working_hours_json"]) or DEFAULT_WORKING_HOURS_JSON)
         treat = b.treatment if b.treatment is not None else cur_row["treatment"]
         buf_min = max(0, int((cinfo and cinfo["buffer_min"]) or 0))
-        ends = starts + timedelta(minutes=dur + buf_min)
-        others = c.execute(
-            "SELECT id, starts_at, duration_min, chair, doctor_id FROM appointments WHERE clinic_id=? AND id<>? AND status IN ('booked','confirmed')",
-            (cid, aid),
-        ).fetchall()
-        for ex_a in others:
-            s2 = datetime.fromisoformat(ex_a["starts_at"])
-            if s2.tzinfo is None:
-                s2 = s2.replace(tzinfo=TZ)
-            e2 = s2 + timedelta(minutes=ex_a["duration_min"] + buf_min)
-            if s2 < ends and e2 > starts:
-                if str(ex_a["chair"]) == chair:
-                    raise HTTPException(409, f"Koltuk {chair} bu saatte dolu")
-                if doc_id is not None and ex_a["doctor_id"] == doc_id:
-                    raise HTTPException(409, "Seçilen hekim bu saatte dolu")
+        conflict = _find_appt_conflicts(c, cid, starts, dur, chair, doc_id, buf_min, exclude_aid=aid)
+        if conflict:
+            kind, _ = conflict
+            if kind == "chair":
+                raise HTTPException(409, f"Koltuk {chair} bu saatte dolu")
+            raise HTTPException(409, "Seçilen hekim bu saatte dolu")
         c.execute(
             "UPDATE appointments SET starts_at=?, duration_min=?, treatment=?, chair=?, doctor_id=? WHERE id=? AND clinic_id=?",
             (starts.isoformat(), dur, treat, chair, doc_id, aid, cid),
@@ -1357,34 +2082,52 @@ def update_appt(aid: int, b: ApptUpdate, u: dict = Depends(ANY)):
 
 
 class StatusIn(BaseModel):
-    status: Literal["confirmed", "done", "noshow", "cancelled"]
+    status: Literal["booked", "confirmed", "done", "noshow", "cancelled"]
 
 
 @app.post("/app/api/appointments/{aid}/status")
-def appt_status(aid: int, b: StatusIn, u: dict = Depends(ANY)):
+async def appt_status(aid: int, b: StatusIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    a = q1("SELECT * FROM appointments WHERE id=? AND clinic_id=?", aid, cid)
-    if not a:
-        raise HTTPException(404, "randevu yok")
-    ex("UPDATE appointments SET status=? WHERE id=? AND clinic_id=?", b.status, aid, cid)
-    offers = 0
+    with _DB_LOCK:
+        c = db()
+        a = c.execute("SELECT * FROM appointments WHERE id=? AND clinic_id=?", (aid, cid)).fetchone()
+        if not a:
+            raise HTTPException(404, "randevu yok")
+        prev_status = a["status"]
+        if b.status in ("booked", "confirmed") and prev_status not in ("booked", "confirmed"):
+            cinfo = c.execute("SELECT buffer_min FROM clinics WHERE id=?", (cid,)).fetchone()
+            buf_min = max(0, int((cinfo and cinfo["buffer_min"]) or 0))
+            conflict = _find_appt_conflicts(
+                c, cid, _parse_dt_tz(a["starts_at"]), int(a["duration_min"] or 30),
+                str(a["chair"]), a["doctor_id"], buf_min, exclude_aid=aid,
+            )
+            if conflict:
+                kind, ex_id = conflict
+                if kind == "chair":
+                    raise HTTPException(409, f"Koltuk {a['chair']} bu saatte artık dolu (randevu #{ex_id}); randevu geri alınamıyor")
+                raise HTTPException(409, f"Seçilen hekim bu saatte artık başka koltukta dolu (randevu #{ex_id}); randevu geri alınamıyor")
+            c.execute("UPDATE slot_offers SET status='expired' WHERE appointment_id=? AND status='sent'", (aid,))
+        if b.status == "cancelled":
+            a_dict = dict(a)
+        c.execute("UPDATE appointments SET status=? WHERE id=? AND clinic_id=?", (b.status, aid, cid))
+        c.commit()
+
     if b.status == "cancelled":
-        cands = q("SELECT w.id FROM waitlist w JOIN patients p ON p.id=w.patient_id WHERE p.clinic_id=? AND w.active=1 AND (? IS NULL OR w.patient_id <> ?) LIMIT 5",
-                  cid, a["patient_id"], a["patient_id"])
-        for c in cands:
-            ex("INSERT INTO slot_offers (appointment_id,waitlist_id,wave,sent_at,status) VALUES (?,?,1,?,'sent')", aid, c["id"], iso_now())
-            offers += 1
-        write_audit(u["id"], u["email"], "appointment.cancel", f"appointment:{aid}", u["ip_h"], {"offers": offers}, clinic_id=cid)
+        offers = 0
+        if _parse_dt_tz(a_dict["starts_at"]) > now_utc():
+            offers = await _offer_waitlist_wave(a_dict, 1)
+        write_audit(u["id"], u["email"], "appointment.cancel", f"appointment:{aid}", u["ip_h"], {"offers": offers, "from": prev_status}, clinic_id=cid)
         return {"ok": True, "waitlist_offers": offers}
-    write_audit(u["id"], u["email"], f"appointment.{b.status}", f"appointment:{aid}", u["ip_h"], clinic_id=cid)
-    return {"ok": True}
+
+    audit_action = "appointment.undo_cancel" if (prev_status == "cancelled" and b.status == "booked") else f"appointment.{b.status}"
+    write_audit(u["id"], u["email"], audit_action, f"appointment:{aid}", u["ip_h"], {"from": prev_status, "to": b.status}, clinic_id=cid)
+    return {"ok": True, "status": b.status}
 
 
 @app.get("/app/api/appointments/{aid}/ics")
 def appt_ics(aid: int, u: dict = Depends(ANY)):
     r = q1(
-        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor,
-                  EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=a.patient_id AND x.red_flags_json <> '[]') AS red_flag
+        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor
            FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
            WHERE a.id=? AND a.clinic_id=?""",
         aid, u["clinic_id"],
@@ -1396,24 +2139,45 @@ def appt_ics(aid: int, u: dict = Depends(ANY)):
                              headers={"content-disposition": f'attachment; filename="randevu-{aid}.ics"'})
 
 
-@app.get("/app/api/calendar-links")
-def calendar_links(request: Request, u: dict = Depends(ANY)):
-    tok = cal.calendar_feed_token(u["clinic_id"])
+def _build_calendar_links(request: Request, cid: int, version: int) -> dict:
+    tok = cal.calendar_feed_token(cid, version=version)
     base = str(request.base_url).rstrip("/")
     ics_url = f"{base}/calendar/{tok}.ics"
     webcal_url = "webcal://" + ics_url.split("://", 1)[-1]
     google_subscribe_url = "https://calendar.google.com/calendar/r?cid=" + quote(webcal_url, safe="")
-    return {"ics_url": ics_url, "webcal_url": webcal_url, "google_subscribe_url": google_subscribe_url,
-            "iphone_guide": "Ayarlar > Takvim > Hesaplar > Hesap Ekle > Diğer > Abone Olunan Takvim Ekle kısmına webcal adresini yapıştırın.",
-            "android_guide": "Her randevudaki '+ Android' butonuna basarak Google Takvime ekleyin veya Google Takvim webde URL ile abone olun."}
+    return {
+        "ics_url": ics_url,
+        "webcal_url": webcal_url,
+        "google_subscribe_url": google_subscribe_url,
+        "token_version": version,
+        "expires_days": 90,
+        "iphone_guide": "Ayarlar > Takvim > Hesaplar > Hesap Ekle > Diğer > Abone Olunan Takvim Ekle kısmına webcal adresini yapıştırın.",
+        "android_guide": "Her randevudaki '+ Android' butonuna basarak Google Takvime ekleyin veya Google Takvim webde URL ile abone olun.",
+    }
+
+
+@app.get("/app/api/calendar-links")
+def calendar_links(request: Request, u: dict = Depends(ANY)):
+    c = q1("SELECT coalesce(cal_token_version, 1) AS ver FROM clinics WHERE id=?", u["clinic_id"])
+    ver = int(c["ver"]) if c else 1
+    return _build_calendar_links(request, u["clinic_id"], ver)
+
+
+@app.post("/app/api/calendar-links/rotate")
+def calendar_links_rotate(request: Request, u: dict = Depends(OWNER)):
+    cid = u["clinic_id"]
+    ex("UPDATE clinics SET cal_token_version = coalesce(cal_token_version, 1) + 1 WHERE id=?", cid)
+    c = q1("SELECT coalesce(cal_token_version, 1) AS ver FROM clinics WHERE id=?", cid)
+    ver = int(c["ver"]) if c else 2
+    write_audit(u["id"], u["email"], "calendar.token_rotate", f"clinic:{cid}", u["ip_h"], {"version": ver}, clinic_id=cid)
+    return _build_calendar_links(request, cid, ver)
 
 
 @app.get("/app/api/calendar/all.ics")
 def calendar_all_ics(u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     rows = q(
-        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor,
-                  EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=a.patient_id AND x.red_flags_json <> '[]') AS red_flag
+        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor
            FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
            WHERE a.clinic_id=? AND a.status IN ('booked','confirmed') ORDER BY a.starts_at LIMIT 500""",
         cid,
@@ -1427,13 +2191,15 @@ def calendar_all_ics(u: dict = Depends(ANY)):
 
 @app.get("/calendar/{token}.ics")
 def calendar_feed(token: str):
-    cid = cal.verify_feed_token(token)
-    if not cid:
-        raise HTTPException(403, "geçersiz takvim bağlantısı")
-    c = q1("SELECT name, address FROM clinics WHERE id=?", cid) or {"name": "DentaCore", "address": ""}
+    parsed = cal.verify_feed_token_parts(token)
+    if not parsed:
+        raise HTTPException(403, "geçersiz veya süresi dolmuş takvim bağlantısı")
+    cid, ver = parsed
+    c = q1("SELECT name, address, coalesce(cal_token_version, 1) AS ver FROM clinics WHERE id=? AND active=1", cid)
+    if not c or int(c["ver"]) != ver:
+        raise HTTPException(403, "takvim bağlantısı iptal edilmiş veya geçersiz")
     rows = q(
-        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor,
-                  EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=a.patient_id AND x.red_flags_json <> '[]') AS red_flag
+        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor
            FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
            WHERE a.clinic_id=? ORDER BY a.starts_at LIMIT 500""",
         cid,
@@ -1445,35 +2211,21 @@ def calendar_feed(token: str):
 @app.get("/app/api/patients")
 def list_patients(search: str = "", include_archived: bool = False, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    sql_base = """
-        SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.phone_hmac,
-               COALESCE((SELECT sum(c.amount_kurus) FROM charges c WHERE c.patient_id=p.id AND c.voided_at IS NULL), 0) AS billed_k,
-               COALESCE((SELECT sum(y.amount_kurus) FROM payments y WHERE y.patient_id=p.id AND y.voided_at IS NULL), 0) AS paid_k,
-               EXISTS (SELECT 1 FROM anamnesis a WHERE a.patient_id=p.id AND a.red_flags_json <> '[]') AS rf,
-               (SELECT max(ap.starts_at) FROM appointments ap WHERE ap.patient_id=p.id) AS last_appt
-        FROM patients p
-        WHERE p.clinic_id=?
-    """
-    if not include_archived:
-        sql_base += " AND p.active=1"
-    sql_base += " ORDER BY p.id DESC"
-    rows = q(sql_base, cid)
+    if include_archived:
+        rows = q("SELECT * FROM patients WHERE clinic_id=? ORDER BY id DESC", cid)
+    else:
+        rows = q("SELECT * FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", cid)
     s = search.strip().lower()
-    s_hmac = phone_hmac(s) if s else ""
     out = []
     for p in rows:
-        if s and s not in (p["display_name"] or "").lower() and s_hmac != p["phone_hmac"]:
+        if s and s not in (p["display_name"] or "").lower() and phone_hmac(s) != p["phone_hmac"]:
             continue
-        out.append({
-            "id": p["id"],
-            "display_name": p["display_name"],
-            "lang": p["lang"],
-            "channel": p["channel"],
-            "active": bool(p.get("active", 1)),
-            "balance": tl(int(p["billed_k"]) - int(p["paid_k"])),
-            "red_flag": bool(p["rf"]),
-            "last_appt": p["last_appt"],
-        })
+        billed = q1("SELECT coalesce(sum(amount_kurus),0) AS k FROM charges WHERE patient_id=? AND voided_at IS NULL", p["id"])["k"]
+        paid = q1("SELECT coalesce(sum(amount_kurus),0) AS k FROM payments WHERE patient_id=? AND voided_at IS NULL", p["id"])["k"]
+        rf = q1("SELECT 1 FROM anamnesis WHERE patient_id=? AND red_flags_json <> '[]'", p["id"])
+        la = q1("SELECT max(starts_at) AS d FROM appointments WHERE patient_id=?", p["id"])
+        out.append({"id": p["id"], "display_name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
+                    "active": bool(p.get("active", 1)), "balance": tl(billed - paid), "red_flag": bool(rf), "last_appt": la["d"] if la else None})
     return out
 
 
@@ -1489,25 +2241,11 @@ def create_patient(b: PatientIn, u: dict = Depends(ANY)):
         raise HTTPException(400, "Geçerli telefon girin")
     cid = u["clinic_id"]
     ph = phone_hmac(b.phone)
-    pe = enc(norm_phone(b.phone))
-    t_now = iso_now()
-    with _DB_LOCK:
-        c = db()
-        ex_p = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", _clean_sql_args((cid, ph))).fetchone()
-        if ex_p:
-            return {"id": ex_p["id"], "duplicate": True}
-        try:
-            cur = c.execute(
-                "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,created_at) VALUES (?,?,?,?,?,?,?)",
-                _clean_sql_args((cid, ph, pe, b.name, b.lang, "wa", t_now)),
-            )
-            pid = cur.lastrowid
-            c.commit()
-        except sqlite3.IntegrityError:
-            ex_p2 = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", _clean_sql_args((cid, ph))).fetchone()
-            if ex_p2:
-                return {"id": ex_p2["id"], "duplicate": True}
-            raise HTTPException(409, "Bu telefon numarası zaten kayıtlı")
+    ex_p = q1("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", cid, ph)
+    if ex_p:
+        return {"id": ex_p["id"], "duplicate": True}
+    pid = ex("INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,created_at) VALUES (?,?,?,?,?,?,?)",
+             cid, ph, enc(norm_phone(b.phone)), b.name, b.lang, "wa", iso_now())
     write_audit(u["id"], u["email"], "patient.create", f"patient:{pid}", u["ip_h"], clinic_id=cid)
     return {"id": pid, "duplicate": False}
 
@@ -1521,32 +2259,21 @@ class PatientUpdateIn(BaseModel):
 @app.patch("/app/api/patients/{pid}")
 def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    with _DB_LOCK:
-        c = db()
-        p = c.execute("SELECT * FROM patients WHERE id=? AND clinic_id=?", (pid, cid)).fetchone()
-        if not p:
-            raise HTTPException(404, "hasta yok")
-        new_name = b.name if b.name is not None else p["display_name"]
-        new_lang = b.lang if b.lang is not None else p["lang"]
-        if b.phone is not None:
-            if len(norm_phone(b.phone)) < 10:
-                raise HTTPException(400, "Geçerli telefon girin")
-            ph = phone_hmac(b.phone)
-            pe = enc(norm_phone(b.phone))
-            dup = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=? AND id<>?", (cid, ph, pid)).fetchone()
-            if dup:
-                raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı")
-        else:
-            ph = p["phone_hmac"]
-            pe = p["phone_enc"]
-        try:
-            c.execute(
-                "UPDATE patients SET display_name=?, lang=?, phone_hmac=?, phone_enc=? WHERE id=? AND clinic_id=?",
-                _clean_sql_args((new_name, new_lang, ph, pe, pid, cid)),
-            )
-            c.commit()
-        except sqlite3.IntegrityError:
-            raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı")
+    p = q1("SELECT * FROM patients WHERE id=? AND clinic_id=?", pid, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    new_name = b.name if b.name is not None else p["display_name"]
+    new_lang = b.lang if b.lang is not None else p["lang"]
+    if b.phone is not None:
+        if len(norm_phone(b.phone)) < 10:
+            raise HTTPException(400, "Geçerli telefon girin")
+        ph = phone_hmac(b.phone)
+        pe = enc(norm_phone(b.phone))
+    else:
+        ph = p["phone_hmac"]
+        pe = p["phone_enc"]
+    ex("UPDATE patients SET display_name=?, lang=?, phone_hmac=?, phone_enc=? WHERE id=? AND clinic_id=?",
+       new_name, new_lang, ph, pe, pid, cid)
     write_audit(u["id"], u["email"], "patient.update", f"patient:{pid}", u["ip_h"], clinic_id=cid)
     return {"ok": True, "id": pid}
 
@@ -1625,22 +2352,159 @@ def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
         c["amount"] = tl(c.pop("amount_kurus"))
     anam = q("SELECT id, red_flags_json, signed_at FROM anamnesis WHERE patient_id=? ORDER BY id DESC", pid)
     for a in anam:
-        a["red_flags"] = json.loads(a.pop("red_flags_json") or "[]")
+        flags = json.loads(a.pop("red_flags_json") or "[]")
+        if u["role"] == "secretary" and flags:
+            a["red_flags"] = ["Klinik Uyarı (Hekim Kontrolü)"]
+        else:
+            a["red_flags"] = flags
     return {
         "id": p["id"], "name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
         "active": bool(p.get("active", 1)),
         "phone": phone if reveal else mask_phone(phone), "balance": tl(billed - paid),
         "appointments": q("SELECT id, starts_at, treatment, status, chair FROM appointments WHERE patient_id=? ORDER BY starts_at DESC", pid),
         "charges": charges, "payments": pays, "anamnesis": anam,
-        "consents": q("SELECT kind, text_version, granted_at, revoked_at FROM consents WHERE patient_id=?", pid),
+        "consents": q("SELECT id, kind, text_version, text_sha256, channel, granted_at, revoked_at FROM consents WHERE patient_id=? ORDER BY id DESC", pid),
         "anamnesis_links": {a["id"]: sign_path(f"/view/anamnez/{a['id']}", 900) for a in anam} if u["role"] != "secretary" else {},
     }
+
+
+class ConsentRevokeIn(BaseModel):
+    kind: Literal["kvkk_aydinlatma", "saglik_verisi_acik_riza", "iletisim", "yurt_disi_aktarim", "all"] | None = None
+    consent_id: int | None = None
+
+
+@app.post("/app/api/patients/{pid}/consents/revoke")
+def revoke_patient_consent(pid: int, b: ConsentRevokeIn, u: dict = Depends(OWNER)):
+    cid = u["clinic_id"]
+    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
+        raise HTTPException(404, "hasta yok")
+    now_s = iso_now()
+    with _DB_LOCK:
+        c = db()
+        if b.consent_id is not None:
+            cur = c.execute(
+                "UPDATE consents SET revoked_at=? WHERE id=? AND patient_id=? AND revoked_at IS NULL",
+                (now_s, b.consent_id, pid),
+            )
+        elif b.kind and b.kind != "all":
+            cur = c.execute(
+                "UPDATE consents SET revoked_at=? WHERE patient_id=? AND kind=? AND revoked_at IS NULL",
+                (now_s, pid, b.kind),
+            )
+        else:
+            cur = c.execute(
+                "UPDATE consents SET revoked_at=? WHERE patient_id=? AND revoked_at IS NULL",
+                (now_s, pid),
+            )
+        cnt = cur.rowcount
+        c.commit()
+    write_audit(u["id"], u["email"], "patient.consent_revoke", f"patient:{pid}", u["ip_h"],
+                {"kind": b.kind or f"id:{b.consent_id}", "count": cnt}, clinic_id=cid)
+    return {"ok": True, "patient_id": pid, "revoked_count": cnt, "revoked_at": now_s}
+
+
+@app.get("/app/api/patients/{pid}/export")
+def export_patient_data(pid: int, u: dict = Depends(OWNER)):
+    cid = u["clinic_id"]
+    p = q1("SELECT * FROM patients WHERE id=? AND clinic_id=?", pid, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    try:
+        phone = dec(p["phone_enc"])
+    except Exception:
+        phone = "***"
+    anam_rows = q("SELECT id, answers_enc, red_flags_json, signer_name, signature_sha256, signed_at FROM anamnesis WHERE patient_id=? ORDER BY id", pid)
+    anam_out = []
+    for a in anam_rows:
+        try:
+            ans = json.loads(dec(a["answers_enc"]))
+        except Exception:
+            ans = {}
+        anam_out.append({
+            "id": a["id"], "answers": ans,
+            "red_flags": json.loads(a.get("red_flags_json") or "[]"),
+            "signer_name": a["signer_name"], "signature_sha256": a["signature_sha256"], "signed_at": a["signed_at"],
+        })
+    charges = q("SELECT id, description, amount_kurus, created_at, voided_at, void_reason FROM charges WHERE patient_id=? ORDER BY id", pid)
+    pays = q("SELECT id, amount_kurus, method, created_at, voided_at, void_reason FROM payments WHERE patient_id=? ORDER BY id", pid)
+    for c in charges + pays:
+        c["amount"] = tl(c.pop("amount_kurus"))
+    write_audit(u["id"], u["email"], "patient.export", f"patient:{pid}", u["ip_h"], clinic_id=cid)
+    return {
+        "exported_at": iso_now(),
+        "clinic_id": cid,
+        "patient": {
+            "id": p["id"], "display_name": p["display_name"], "phone": phone,
+            "lang": p["lang"], "channel": p["channel"], "active": bool(p.get("active", 1)), "created_at": p["created_at"],
+        },
+        "consents": q("SELECT id, kind, text_version, text_sha256, channel, granted_at, revoked_at FROM consents WHERE patient_id=? ORDER BY id", pid),
+        "anamnesis": anam_out,
+        "appointments": q("SELECT id, starts_at, duration_min, treatment, chair, status, source, created_at FROM appointments WHERE patient_id=? ORDER BY id", pid),
+        "tooth_records": q("SELECT id, tooth_fdi, surface, status, procedure_code, procedure_name, note, created_at FROM tooth_records WHERE patient_id=? AND clinic_id=? ORDER BY id", pid, cid),
+        "charges": charges,
+        "payments": pays,
+        "waitlist": q("SELECT id, treatment, earliest, active, created_at FROM waitlist WHERE patient_id=? ORDER BY id", pid),
+        "postop_checks": q("SELECT id, procedure, stage, due_at, sent_at, pain_score, answered_at, alarm FROM postop_checks WHERE patient_id=? ORDER BY id", pid),
+    }
+
+
+def _anonymize_patient_impl(pid: int, u: dict) -> dict:
+    cid = u["clinic_id"]
+    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
+        raise HTTPException(404, "hasta yok")
+    now_s = iso_now()
+    anon_hmac = hmac.new(_HMAC_KEY, f"anon:{cid}:{pid}:{secrets.token_hex(8)}".encode(), hashlib.sha256).hexdigest()
+    anon_enc = enc(f"anon-{pid}")
+    anon_ans = enc(json.dumps({"anonymized": True, "at": now_s}))
+    anon_sig = hashlib.sha256(f"anon:{pid}:{now_s}".encode()).hexdigest()
+    with _DB_LOCK:
+        c = db()
+        try:
+            c.execute(
+                "UPDATE patients SET display_name=?, phone_hmac=?, phone_enc=?, active=0 WHERE id=? AND clinic_id=?",
+                (f"Anonim Hasta #{pid}", anon_hmac, anon_enc, pid, cid),
+            )
+            c.execute(
+                "UPDATE anamnesis SET signer_name='Anonimleştirildi', answers_enc=?, red_flags_json='[]', signature_sha256=? WHERE patient_id=?",
+                (anon_ans, anon_sig, pid),
+            )
+            c.execute("DELETE FROM anamnesis_tokens WHERE patient_id=?", (pid,))
+            c.execute("DELETE FROM slot_offers WHERE waitlist_id IN (SELECT id FROM waitlist WHERE patient_id=?)", (pid,))
+            c.execute("DELETE FROM postop_checks WHERE patient_id=?", (pid,))
+            c.execute("UPDATE message_log SET body='', delivery_error=NULL WHERE patient_id=?", (pid,))
+            c.execute("UPDATE consents SET revoked_at=coalesce(revoked_at, ?) WHERE patient_id=?", (now_s, pid))
+            c.execute(
+                "UPDATE alerts SET detail=?, acknowledged_at=coalesce(acknowledged_at, ?) WHERE patient_id=?",
+                (f"Anonimleştirilmiş hasta (#{pid}) kaydı.", now_s, pid),
+            )
+            c.execute("UPDATE waitlist SET active=0 WHERE patient_id=?", (pid,))
+            c.commit()
+        except Exception:
+            c.rollback()
+            raise
+    img_dir = ROOT / "encrypted_media"
+    if img_dir.is_dir():
+        for fp in img_dir.glob(f"p{pid}_*.enc"):
+            fp.unlink(missing_ok=True)
+    write_audit(u["id"], u["email"], "patient.anonymize", f"patient:{pid}", u["ip_h"],
+                {"financial_records_preserved": True}, clinic_id=cid)
+    return {"ok": True, "patient_id": pid, "anonymized": True, "financial_records_preserved": True}
+
+
+@app.post("/app/api/patients/{pid}/anonymize")
+def anonymize_patient(pid: int, u: dict = Depends(OWNER)):
+    return _anonymize_patient_impl(pid, u)
+
+
+@app.delete("/app/api/patients/{pid}")
+def delete_patient(pid: int, u: dict = Depends(OWNER)):
+    return _anonymize_patient_impl(pid, u)
 
 
 class OdontogramIn(BaseModel):
     tooth_fdi: int
     surface: Literal["M", "D", "O", "B", "L", "FULL"] = "FULL"
-    status: Literal["healthy", "caries", "planned", "treated", "completed", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
+    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
     procedure_code: str = Field("", max_length=40)
     procedure_name: str = Field(min_length=2, max_length=120)
     amount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)
@@ -1655,11 +2519,6 @@ class OdontogramIn(BaseModel):
         if v not in VALID_FDI_TEETH:
             raise ValueError("Geçersiz FDI diş numarası (11-48 daimi veya 51-85 süt dişi olmalı)")
         return v
-
-    @field_validator("status")
-    @classmethod
-    def norm_status(cls, v: str) -> str:
-        return "treated" if v == "completed" else v
 
 
 class OdontogramUpdateIn(BaseModel):
@@ -1699,7 +2558,7 @@ def get_odontogram(pid: int, u: dict = Depends(ANY)):
 
 
 @app.post("/app/api/patients/{pid}/odontogram")
-def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLINICAL)):
+def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     amt_k = kurus(b.amount)
     charge_id = None
@@ -1767,15 +2626,32 @@ def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICAL)):
 
 
 @app.post("/app/api/patients/{pid}/anamnesis")
-def send_anam(pid: int, request: Request, u: dict = Depends(ANY)):
+async def send_anam(pid: int, request: Request, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     with _DB_LOCK:
-        _require_active_patient_row(db(), pid, cid)
+        p_row = _require_active_patient_row(db(), pid, cid)
+        p_phone = dec(p_row["phone_enc"])
+        p_name = p_row["display_name"] or "Hastamız"
     tok = secrets.token_urlsafe(24)
     ex("INSERT INTO anamnesis_tokens (token,patient_id,expires_at) VALUES (?,?,?)",
        tok, pid, (now_utc() + timedelta(hours=48)).isoformat())
-    write_audit(u["id"], u["email"], "anamnesis.send", f"patient:{pid}", u["ip_h"], clinic_id=cid)
-    return {"link": f"{public_base(request)}/form/anamnez/{tok}"}
+    link = f"{public_base(request)}/form/anamnez/{tok}"
+    msg_text = (
+        f"Sayın {p_name}, randevunuz öncesinde sağlık bilgi ve KVKK onam formunu "
+        f"aşağıdaki bağlantıdan 1 dakikada doldurabilirsiniz: {link}"
+    )
+    delivery = await _deliver_wa(
+        cid,
+        pid,
+        p_phone,
+        msg_text,
+        layer="L1-otomasyon",
+        intent="anamnez_form",
+        tpl=os.environ.get("WA_TPL_ANAMNESIS", "anamnez"),
+        params=[link],
+    )
+    write_audit(u["id"], u["email"], "anamnesis.send", f"patient:{pid}", u["ip_h"], {"delivery": delivery["status"]}, clinic_id=cid)
+    return {"link": link, "delivery": delivery["status"], "dry_run": delivery["dry_run"], "error": delivery["error"]}
 
 
 def public_base(request: Request) -> str:
@@ -1798,11 +2674,15 @@ h1{font-size:22px;line-height:1.3;margin:0 0 6px}p.lead{color:var(--muted);margi
 fieldset{border:0;border-top:1px solid var(--line);margin:0;padding:14px 0}legend{padding:0;font-weight:600;font-size:15px;line-height:1.45;float:left;width:100%;margin-bottom:10px}
 .opts{clear:both;display:flex;gap:10px}.opts label{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;border:1px solid #CBD5E1;border-radius:10px;cursor:pointer;font-weight:500;transition:background-color .15s,border-color .15s}
 .opts input{accent-color:var(--teal);width:18px;height:18px}.opts label:has(input:checked){border-color:var(--teal);background:var(--mint)}
-label.f{display:block;font-weight:600;font-size:14.5px;margin:18px 0 6px}input[type=text]{width:100%;min-height:48px;padding:10px 12px;font:inherit;border:1px solid #64748B;border-radius:10px}
+label.f{display:block;font-weight:600;font-size:14.5px;margin:18px 0 6px}input[type=text],textarea{width:100%;min-height:48px;padding:10px 12px;font:inherit;border:1px solid #64748B;border-radius:10px}
 .kvkk{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:var(--muted);margin-top:14px}.kvkk input{margin-top:3px;width:18px;height:18px;accent-color:var(--teal);flex:none}
 button{width:100%;min-height:50px;margin-top:18px;background:var(--teal);color:#fff;border:0;border-radius:10px;font:inherit;font-weight:700;font-size:16px;cursor:pointer;transition:background-color .15s}button:hover{background:var(--teal-h)}
 :focus-visible{outline:3px solid #5EEAD4;outline-offset:2px}
 .foot{color:var(--muted);font-size:12.5px;text-align:center;margin-top:18px}
+.err-box{background:var(--red-bg);border:1px solid #FECACA;color:var(--red);border-radius:10px;padding:12px;font-weight:600;font-size:14px;margin-bottom:14px}
+.f-err{color:var(--red);font-size:13px;font-weight:600;margin:6px 0 0}
+.has-err{border-color:var(--red)!important}
+.btn-back{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 18px;margin-top:14px;background:var(--ink);color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px}
 table{width:100%;border-collapse:collapse;font-size:14.5px}td{border-top:1px solid var(--line);padding:10px 6px;vertical-align:top}td.a{font-weight:700;white-space:nowrap;text-align:right}
 tr.flag td{background:var(--red-bg);color:var(--red)}.ok{color:var(--teal);font-weight:700}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -1812,12 +2692,83 @@ _SHIELD = ('<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="
            'stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>')
 
 
-def _patient_page(title: str, clinic: str, inner: str, status: int = 200) -> HTMLResponse:
+def _patient_page(title: str, clinic: str, inner: str, status: int = 200, with_validate: bool = False) -> HTMLResponse:
+    js_tag = '<script src="/form/validate.js" defer></script>' if with_validate else ""
     page = (f"<!doctype html><html lang=tr><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
             f"<meta name=robots content='noindex,nofollow'><title>{html_lib.escape(title)}</title><style>{_PATIENT_CSS}</style></head><body><main>"
             f"<div class=head>{_SHIELD}<div><b>{html_lib.escape(clinic)}</b><small>Güvenli hasta formu</small></div></div>"
-            f"<div class=card>{inner}</div><p class=foot>Bilgileriniz şifrelenerek yalnızca hekiminizle paylaşılır.</p></main></body></html>")
+            f"<div class=card>{inner}</div><p class=foot>Bilgileriniz şifrelenerek yalnızca hekiminizle paylaşılır.</p>{js_tag}</main></body></html>")
     return HTMLResponse(page, status_code=status)
+
+
+_FORM_VALIDATE_JS = """document.addEventListener("DOMContentLoaded",function(){
+  var f=document.querySelector("form[novalidate]");
+  if(!f)return;
+  var box=document.getElementById("form-err");
+  function clearErr(){
+    f.querySelectorAll(".f-err").forEach(function(n){n.remove();});
+    f.querySelectorAll(".has-err").forEach(function(n){n.classList.remove("has-err");});
+    if(box){box.style.display="none";box.textContent="";}
+  }
+  function addErr(host,msg){
+    var p=document.createElement("p");
+    p.className="f-err";
+    p.textContent=msg;
+    host.classList.add("has-err");
+    host.appendChild(p);
+  }
+  f.addEventListener("change",function(ev){
+    var fs=ev.target.closest("fieldset,label");
+    if(fs){fs.classList.remove("has-err");fs.querySelectorAll(".f-err").forEach(function(n){n.remove();});}
+  });
+  f.addEventListener("input",function(ev){
+    var p=ev.target.parentElement;
+    if(p){p.classList.remove("has-err");p.querySelectorAll(".f-err").forEach(function(n){n.remove();});}
+  });
+  f.addEventListener("submit",function(e){
+    clearErr();
+    var first=null;
+    f.querySelectorAll("fieldset").forEach(function(fs){
+      var reqRadio=fs.querySelector("input[type=radio][required]");
+      if(reqRadio && !fs.querySelector("input[type=radio]:checked")){
+        addErr(fs,"Lütfen bu soruyu yanıtlayın.");
+        if(!first)first=reqRadio;
+      }
+    });
+    f.querySelectorAll("input[required]:not([type=radio]):not([type=checkbox]),textarea[required]").forEach(function(el){
+      var v=(el.value||"").trim();
+      var ml=parseInt(el.getAttribute("minlength")||"0",10);
+      if(!v || (ml && v.length<ml)){
+        var msg=el.name==="imza"?"Lütfen adınızı ve soyadınızı yazın (en az 2 karakter).":"Lütfen bu alanı doldurun.";
+        addErr(el.parentElement,msg);
+        if(!first)first=el;
+      }
+    });
+    f.querySelectorAll("input[type=checkbox][required]").forEach(function(cb){
+      if(!cb.checked){
+        var lbl=cb.closest("label")||cb.parentElement;
+        var p=document.createElement("p");
+        p.className="f-err";
+        p.textContent="Lütfen zorunlu onay kutusunu işaretleyin.";
+        lbl.classList.add("has-err");
+        lbl.insertAdjacentElement("afterend",p);
+        if(!first)first=cb;
+      }
+    });
+    if(first){
+      e.preventDefault();
+      if(box){box.textContent="Lütfen işaretlenen eksik alanları tamamlayın.";box.style.display="block";}
+      first.scrollIntoView({behavior:"smooth",block:"center"});
+      try{first.focus({preventScroll:true});}catch(_){}
+    }
+  });
+});
+"""
+
+
+@app.get("/form/validate.js", include_in_schema=False)
+def form_validate_js():
+    return Response(_FORM_VALIDATE_JS, media_type="application/javascript; charset=utf-8", headers={"cache-control": "no-store"})
 
 
 def _anam_token(token: str):
@@ -1829,7 +2780,8 @@ def _anam_token(token: str):
 
 
 _INVALID_LINK = ("<h1>Bu bağlantı artık geçerli değil</h1><p class=lead>Form daha önce doldurulmuş ya da 48 saatlik süresi dolmuş olabilir. "
-                 "Yeni bir bağlantı için lütfen kliniğinizi arayın.</p>")
+                 "Yeni bir bağlantı için lütfen kliniğinizi arayın.</p>"
+                 "<a class=btn-back href=\"/\">Kliniğe / Ana Sayfaya Dön</a>")
 
 
 @app.get("/form/anamnez/{token}", response_class=HTMLResponse)
@@ -1837,19 +2789,25 @@ def anamnez_form(token: str):
     t, clinic = _anam_token(token)
     if not t:
         return _patient_page("Bağlantı geçersiz", os.environ.get("CLINIC_NAME", "Kliniğimiz"), _INVALID_LINK, 400)
+    texts = sec.kvkk_texts(clinic)
     rows = "".join(
         f"<fieldset><legend>{i}. {html_lib.escape(q_text)}</legend><div class=opts>"
         f"<label><input type=radio name={k} value=evet required> Evet</label>"
         f"<label><input type=radio name={k} value=hayir> Hayır</label></div></fieldset>"
         for i, (k, q_text, _) in enumerate(ANAMNEZ_SORULAR, 1))
-    inner = ("<h1>Sağlık Bilgi Formu</h1><p class=lead>Tedaviniz güvenle planlansın diye 11 kısa soru. Yaklaşık 2 dakika sürer.</p>"
-             "<div class=note>Emin olmadığınız bir soru varsa \"Evet\" işaretleyin; hekiminiz muayenede sizinle birlikte netleştirir.</div>"
-             f"<form method=post>{rows}<label class=f for=imza>Adınız ve soyadınız</label>"
-             "<input type=text id=imza name=imza required maxlength=80 autocomplete=name>"
-             "<label class=kvkk><input type=checkbox name=kvkk value=1 required> Sağlık verilerimin yalnızca tedavim amacıyla, 6698 sayılı KVKK "
-             "kapsamında kliniğim tarafından işlenmesine açık rıza veriyorum.</label>"
-             "<button type=submit>Onayla ve gönder</button></form>")
-    return _patient_page("Sağlık Bilgi Formu", clinic, inner)
+    inner = (
+        "<h1>Sağlık Bilgi Formu</h1><p class=lead>Tedaviniz güvenle planlansın diye 11 kısa soru. Yaklaşık 2 dakika sürer.</p>"
+        "<div class=note>Emin olmadığınız bir soru varsa \"Evet\" işaretleyin; hekiminiz muayenede sizinle birlikte netleştirir.</div>"
+        "<div id=form-err class=err-box role=alert style='display:none'></div>"
+        f"<form method=post novalidate>{rows}<div><label class=f for=imza>Adınız ve soyadınız</label>"
+        "<input type=text id=imza name=imza required minlength=2 maxlength=80 autocomplete=name></div>"
+        f"<div class=note style='margin-top:14px;margin-bottom:8px;display:block'><strong>KVKK Aydınlatma Metni:</strong> {html_lib.escape(texts['aydinlatma'])}</div>"
+        "<label class=kvkk><input type=checkbox name=kvkk_aydinlatma value=1 required> Aydınlatma Metni'ni okudum ve anladım.</label>"
+        f"<label class=kvkk><input type=checkbox name=saglik_riza value=1 required> {html_lib.escape(texts['saglik'])}</label>"
+        f"<label class=kvkk><input type=checkbox name=yurt_disi_riza value=1> {html_lib.escape(texts['yurt_disi'])}</label>"
+        "<button type=submit>Onayla ve gönder</button></form>"
+    )
+    return _patient_page("Sağlık Bilgi Formu", clinic, inner, with_validate=True)
 
 
 @app.post("/form/anamnez/{token}", response_class=HTMLResponse)
@@ -1858,21 +2816,34 @@ async def anamnez_submit(token: str, request: Request):
     if not t:
         return _patient_page("Bağlantı geçersiz", os.environ.get("CLINIC_NAME", "Kliniğimiz"), _INVALID_LINK, 400)
     form = dict(await request.form())
-    if str(form.get("kvkk", "")) != "1":
-        return _patient_page("Onay gerekli", clinic, "<h1>Açık rıza onayı gerekli</h1><p class=lead>Formu göndermek için KVKK onay kutusunu işaretleyin. "
-                             "Geri dönüp tekrar deneyebilirsiniz.</p>", 400)
+    has_ayd = sec.is_checked(form.get("kvkk_aydinlatma"))
+    has_saglik = sec.is_checked(form.get("saglik_riza")) or sec.is_checked(form.get("acik_riza"))
+    imza = str(form.get("imza", "")).strip()[:80]
+    if not (has_ayd and has_saglik and len(imza) >= 2):
+        return _patient_page(
+            "Onay gerekli",
+            clinic,
+            "<h1>Aydınlatma ve açık rıza onayı gerekli</h1>"
+            "<p class=lead>Formu göndermek için aydınlatma metni ile sağlık verisi açık rıza kutularını işaretleyin ve adınızı soyadınızı yazın. "
+            "Geri dönüp tekrar deneyebilirsiniz.</p>"
+            "<a class=btn-back href=\"/\">Kliniğe / Ana Sayfaya Dön</a>",
+            400,
+        )
     ans = {k: str(form.get(k, "")) for k, _, _ in ANAMNEZ_SORULAR}
     flags = [k for k, _, red in ANAMNEZ_SORULAR if red and ans.get(k) == "evet"]
-    imza = str(form.get("imza", "Hasta")).strip()[:80] or "Hasta"
     sig = hashlib.sha256(f"{t['patient_id']}|{imza}".encode()).hexdigest()
     now_s = iso_now()
     ex("INSERT INTO anamnesis (patient_id,answers_enc,red_flags_json,signer_name,signature_sha256,signed_at) VALUES (?,?,?,?,?,?)",
        t["patient_id"], enc(json.dumps(ans)), json.dumps(flags), imza, sig, now_s)
     ex("UPDATE anamnesis_tokens SET used_at=? WHERE token=?", now_s, token)
-    kvkk_hash = hashlib.sha256(f"kvkk-2026-11|{clinic}".encode()).hexdigest()
-    for c_kind in ("kvkk_aydinlatma", "saglik_verisi_acik_riza"):
+    texts = sec.kvkk_texts(clinic)
+    ex("INSERT INTO consents (patient_id,kind,text_version,text_sha256,channel,granted_at) VALUES (?,?,?,?,?,?)",
+       t["patient_id"], "kvkk_aydinlatma", sec.KVKK_METIN_VER, sec.kvkk_sha256(texts["aydinlatma"]), "web_form", now_s)
+    ex("INSERT INTO consents (patient_id,kind,text_version,text_sha256,channel,granted_at) VALUES (?,?,?,?,?,?)",
+       t["patient_id"], "saglik_verisi_acik_riza", sec.KVKK_METIN_VER, sec.kvkk_sha256(texts["saglik"]), "web_form", now_s)
+    if sec.is_checked(form.get("yurt_disi_riza")):
         ex("INSERT INTO consents (patient_id,kind,text_version,text_sha256,channel,granted_at) VALUES (?,?,?,?,?,?)",
-           t["patient_id"], c_kind, "2026-11", kvkk_hash, "web_form", now_s)
+           t["patient_id"], "yurt_disi_aktarim", sec.KVKK_METIN_VER, sec.kvkk_sha256(texts["yurt_disi"]), "web_form", now_s)
     if flags:
         p_row = q1("SELECT clinic_id, display_name FROM patients WHERE id=?", t["patient_id"])
         cid_p = int(p_row["clinic_id"]) if p_row and p_row.get("clinic_id") else 1
@@ -1892,15 +2863,16 @@ def feedback_form():
     inner = (
         "<h1>Başhekimliğe Doğrudan İlet</h1>"
         "<p class=lead>Görüşünüz doğrudan başhekime ulaşır.</p>"
-        "<form method=post>"
+        "<div id=form-err class=err-box role=alert style='display:none'></div>"
+        "<form method=post novalidate>"
         f"<input type=hidden name=csrf_token value=\"{tok}\">"
-        "<label class=f for=mesaj>Mesajınız</label>"
-        "<input type=text id=mesaj name=mesaj required maxlength=1500>"
+        "<div><label class=f for=mesaj>Mesajınız</label>"
+        "<textarea id=mesaj name=mesaj rows=5 required maxlength=1500></textarea></div>"
         "<label class=f for=iletisim>Telefon (isteğe bağlı)</label>"
         "<input type=text id=iletisim name=iletisim maxlength=40>"
         "<button type=submit>Gönder</button></form>"
     )
-    return _patient_page("Başhekimliğe İlet", clinic, inner)
+    return _patient_page("Başhekimliğe İlet", clinic, inner, with_validate=True)
 
 
 @app.post("/form/geri-bildirim", response_class=HTMLResponse)
@@ -1912,9 +2884,16 @@ async def feedback_submit(request: Request):
     if not verify_sig("/form/geri-bildirim", (tok_p.get("exp") or [""])[0], (tok_p.get("sig") or [""])[0]):
         raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş")
     msg = str(f.get("mesaj", "")).strip()[:1500]
-    if msg:
-        ex("INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (1,NULL,'geri_bildirim',?,?)",
-           f"Başhekimliğe geri bildirim: {msg[:500]}", iso_now())
+    if not msg:
+        return _patient_page(
+            "Mesaj gerekli",
+            clinic,
+            "<h1>Lütfen mesajınızı yazın</h1><p class=lead>Boş geri bildirim gönderilemez. Geri dönüp mesajınızı yazabilirsiniz.</p>"
+            "<a class=btn-back href=\"/\">Kliniğe / Ana Sayfaya Dön</a>",
+            400,
+        )
+    ex("INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (1,NULL,'geri_bildirim',?,?)",
+       f"Başhekimliğe geri bildirim: {msg[:500]}", iso_now())
     return _patient_page("Teşekkürler", clinic, "<h1>Teşekkür ederiz, mesajınız başhekimliğe iletildi.</h1>")
 
 
@@ -1944,6 +2923,26 @@ def anamnez_view(aid: int, exp: str = "", sig: str = ""):
 @app.get("/app/api/waitlist")
 def waitlist(u: dict = Depends(ANY)):
     return q("SELECT w.id, w.treatment, w.earliest, w.created_at, p.display_name AS patient, w.patient_id FROM waitlist w JOIN patients p ON p.id=w.patient_id WHERE p.clinic_id=? AND w.active=1", u["clinic_id"])
+
+
+@app.get("/app/api/waitlist/offers")
+def list_waitlist_offers(status: str | None = None, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    sql = """SELECT o.id, o.appointment_id, o.waitlist_id, o.wave, o.sent_at, o.status,
+                    w.patient_id, w.treatment AS waitlist_treatment,
+                    p.display_name AS patient,
+                    a.starts_at, a.treatment, a.chair, a.status AS appointment_status
+             FROM slot_offers o
+             JOIN waitlist w ON w.id = o.waitlist_id
+             JOIN patients p ON p.id = w.patient_id
+             JOIN appointments a ON a.id = o.appointment_id
+             WHERE p.clinic_id = ? AND a.clinic_id = ?"""
+    params: list = [cid, cid]
+    if status:
+        sql += " AND o.status = ?"
+        params.append(status)
+    sql += " ORDER BY o.id DESC LIMIT 100"
+    return q(sql, *params)
 
 
 class WaitIn(BaseModel):
@@ -2065,7 +3064,7 @@ def reply_postop_local(b: PostopReplyIn, u: dict = Depends(ANY)):
     return {"ok": True, "alarm": alarm, "pain_score": b.pain_score}
 
 
-async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mtype: str, text: str, channel: str = "wa", clinic_id: int = 1):
+async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mtype: str, text: str, channel: str = "wa", clinic_id: int = 1, payload: str = ""):
     from app.router import detect_lang
     if channel == "wa" and text:
         st_row = q1("SELECT id, clinic_id, role, full_name FROM staff_users WHERE phone_hmac=? AND active=1", phone_hmac(sender))
@@ -2084,24 +3083,28 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
         if row:
             pid = row["id"]
             if profile_name and not row["display_name"]:
-                c.execute("UPDATE patients SET display_name=?, lang=? WHERE id=?", _clean_sql_args((profile_name, lang, pid)))
+                c.execute("UPDATE patients SET display_name=?, lang=? WHERE id=?", (profile_name, lang, pid))
         else:
-            try:
-                cur_p = c.execute(
-                    "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
-                    _clean_sql_args((clinic_id, ph, enc(raw_id), profile_name or f"Misafir ({sender[-4:]})", lang, channel, t_now)),
-                )
-                pid = cur_p.lastrowid
-            except sqlite3.IntegrityError:
-                row2 = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", (clinic_id, ph)).fetchone()
-                pid = row2["id"] if row2 else 1
+            cur_p = c.execute(
+                "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
+                (clinic_id, ph, enc(raw_id), profile_name or f"Misafir ({sender[-4:]})", lang, channel, t_now),
+            )
+            pid = cur_p.lastrowid
+        raw_body = (text or payload)[:2000]
         c.execute(
-            "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,?,'in',NULL,?,0,0,?)",
-            (clinic_id, pid, f"{channel}:{mtype}", t_now),
+            "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,body,delivery_status,created_at) VALUES (?,?,'in',NULL,?,0,0,?,'received',?)",
+            (clinic_id, pid, f"{channel}:{mtype}", enc(raw_body) if raw_body else "", t_now),
         )
         c.commit()
 
-    if not text:
+    if not text and not payload:
+        return
+
+    handled = await _handle_patient_reply(clinic_id, pid, text, channel=channel, payload=payload)
+    if handled:
+        ans, layer, intent = handled
+        await _deliver_wa(clinic_id, pid, raw_id, ans, layer=layer, intent=intent)
+        write_audit(None, f"{channel}_webhook", f"webhook.{channel}", f"patient:{pid}", meta={"intent": intent, "layer": layer}, clinic_id=clinic_id)
         return
 
     c_row = q1("SELECT name, address, phone, ai_custom_rules_json FROM clinics WHERE id=?", clinic_id)
@@ -2117,14 +3120,15 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
     if c_row and c_row.get("ai_custom_rules_json"):
         facts["ai_custom_rules_json"] = c_row["ai_custom_rules_json"]
 
+    allow_llm = _has_consent(pid, "yurt_disi_aktarim")
     try:
-        res = await asyncio.wait_for(_ROUTER.route(text, lang=lang, clinic_facts=facts, allow_llm=True, patient_id=pid), timeout=10.0)
+        res = await asyncio.wait_for(_ROUTER.route(text, lang=lang, clinic_facts=facts, allow_llm=allow_llm, patient_id=pid), timeout=10.0)
     except Exception:
         res = await _ROUTER.route(text, lang=lang, clinic_facts=facts, allow_llm=False, patient_id=pid)
 
-    ex(
-        "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,?,'out',?,?,?,?,?)",
-        clinic_id, pid, res.layer, res.intent, res.tokens_in, res.tokens_out, iso_now(),
+    await _deliver_wa(
+        clinic_id, pid, raw_id, res.answer,
+        layer=res.layer, intent=res.intent, tokens_in=res.tokens_in, tokens_out=res.tokens_out,
     )
     if res.alert == "acil":
         ex(
@@ -2139,6 +3143,24 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
     write_audit(None, f"{channel}_webhook", f"webhook.{channel}", f"patient:{pid}", meta={"intent": res.intent, "layer": res.layer}, clinic_id=clinic_id)
 
 
+def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
+    if channel_id:
+        col = "wa_phone_id" if channel == "wa" else "ig_handle"
+        row = q1(f"SELECT id FROM clinics WHERE {col}=? AND active=1 LIMIT 1", channel_id)
+        if row:
+            return int(row["id"])
+    log.error("Eşleşmeyen webhook kanalı: channel=%s id=%s", channel, channel_id or "<boş>")
+    write_audit(
+        None,
+        f"{channel}_webhook",
+        "webhook.unmapped_clinic",
+        f"{channel}:{channel_id or 'missing'}",
+        meta={"channel": channel, "channel_id": channel_id[:80]},
+        clinic_id=1,
+    )
+    return None
+
+
 @app.post("/webhook/whatsapp")
 async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = Header(default=None)):
     raw = await request.body()
@@ -2148,42 +3170,45 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
     good = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(good, x_hub_signature_256[7:]):
         raise HTTPException(401, "imza geçersiz")
-    body = json.loads(raw)
-    if len(_SEEN_WEBHOOK_IDS) > 5000:
-        _SEEN_WEBHOOK_IDS.clear()
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Geçersiz JSON gövdesi")
     processed = 0
     dedup = 0
+    unmapped = 0
     for entry in body.get("entry", []):
         for ch in entry.get("changes", []):
             v = ch.get("value", {})
-            raw_cid = (v.get("metadata") or {}).get("clinic_id") or entry.get("clinic_id") or 1
-            try:
-                target_cid = int(raw_cid) if int(raw_cid) >= 1 else 1
-            except Exception:
-                target_cid = 1
+            phone_number_id = str((v.get("metadata") or {}).get("phone_number_id") or "").strip()
+            clinic_id = _resolve_webhook_clinic("wa", phone_number_id)
+            if not clinic_id:
+                unmapped += len(v.get("messages", [])) or 1
+                continue
             names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in v.get("contacts", []) if isinstance(c, dict)}
             for m in v.get("messages", []):
                 mid = str(m.get("id") or "")
-                if mid in _SEEN_WEBHOOK_IDS:
+                if mid and _SEEN_WEBHOOK_IDS.seen_or_add(mid):
                     dedup += 1
                     continue
-                if mid:
-                    _SEEN_WEBHOOK_IDS.add(mid)
                 sender = str(m.get("from") or "")
                 mtype = str(m.get("type") or "text")
                 text = ""
+                payload = ""
                 if mtype == "text":
                     text = str((m.get("text") or {}).get("body") or "")
                 elif mtype == "button":
                     text = str((m.get("button") or {}).get("text") or "")
+                    payload = str((m.get("button") or {}).get("payload") or "")
                 elif mtype == "interactive":
                     it = m.get("interactive") or {}
                     rep = it.get("button_reply") or it.get("list_reply") or {}
                     text = str(rep.get("title") or "")
+                    payload = str(rep.get("id") or "")
                 if sender:
-                    await _process_inbound_webhook_msg(sender, names.get(sender), mtype, text, channel="wa", clinic_id=target_cid)
+                    await _process_inbound_webhook_msg(sender, names.get(sender), mtype, text, channel="wa", clinic_id=clinic_id, payload=payload)
                 processed += 1
-    return {"ok": True, "processed": processed, "dedup": dedup}
+    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
 
 
 @app.post("/webhook/instagram")
@@ -2195,46 +3220,51 @@ async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = H
     good = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(good, x_hub_signature_256[7:]):
         raise HTTPException(401, "imza geçersiz")
-    body = json.loads(raw)
-    if len(_SEEN_WEBHOOK_IDS) > 5000:
-        _SEEN_WEBHOOK_IDS.clear()
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Geçersiz JSON gövdesi")
     processed = 0
+    dedup = 0
+    unmapped = 0
     for entry in body.get("entry", []):
-        raw_cid = entry.get("clinic_id") or 1
-        try:
-            target_cid = int(raw_cid) if int(raw_cid) >= 1 else 1
-        except Exception:
-            target_cid = 1
+        entry_id = str(entry.get("id") or "").strip()
         for ev in entry.get("messaging", []):
             msg = ev.get("message") or {}
             if msg.get("is_echo") or not msg.get("text"):
                 continue
-            mid = str(msg.get("mid") or "")
-            if mid and mid in _SEEN_WEBHOOK_IDS:
+            ig_target = str((ev.get("recipient") or {}).get("id") or entry_id).strip()
+            clinic_id = _resolve_webhook_clinic("ig", ig_target)
+            if not clinic_id:
+                unmapped += 1
                 continue
-            if mid:
-                _SEEN_WEBHOOK_IDS.add(mid)
+            mid = str(msg.get("mid") or "")
+            if mid and _SEEN_WEBHOOK_IDS.seen_or_add(mid):
+                dedup += 1
+                continue
             sender = str((ev.get("sender") or {}).get("id") or "")
             if sender:
-                await _process_inbound_webhook_msg(sender, None, "text", str(msg["text"]), channel="ig", clinic_id=target_cid)
+                await _process_inbound_webhook_msg(sender, None, "text", str(msg["text"]), channel="ig", clinic_id=clinic_id)
                 processed += 1
-    return {"ok": True, "processed": processed}
+    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
 
 
 @app.get("/app/api/alerts")
 def alerts(u: dict = Depends(ANY)):
-    return q("SELECT id, patient_id, kind, detail, created_at FROM alerts WHERE clinic_id=? AND acknowledged_at IS NULL ORDER BY id DESC", u["clinic_id"])
+    rows = q("SELECT id, patient_id, kind, detail, created_at FROM alerts WHERE clinic_id=? AND acknowledged_at IS NULL ORDER BY id DESC", u["clinic_id"])
+    if u["role"] == "secretary":
+        for r in rows:
+            if r.get("kind") in ("anamnez_kirmizi", "postop_alarm", "acil"):
+                r["detail"] = "Klinik Uyarı (Hekim Kontrolü)"
+    return rows
 
 
 @app.post("/app/api/alerts/{aid}/ack")
 def ack(aid: int, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    with _DB_LOCK:
-        c = db()
-        cur = c.execute("UPDATE alerts SET acknowledged_at=? WHERE id=? AND clinic_id=? AND acknowledged_at IS NULL", (iso_now(), aid, cid))
-        c.commit()
-        if cur.rowcount == 0:
-            raise HTTPException(404, "uyarı yok")
+    if not q1("SELECT id FROM alerts WHERE id=? AND clinic_id=? AND acknowledged_at IS NULL", aid, cid):
+        raise HTTPException(404, "uyarı yok")
+    ex("UPDATE alerts SET acknowledged_at=? WHERE id=? AND clinic_id=?", iso_now(), aid, cid)
     write_audit(u["id"], u["email"], "alert.ack", f"alert:{aid}", u["ip_h"], clinic_id=cid)
     return {"ok": True}
 
@@ -2587,7 +3617,7 @@ def list_clinics(request: Request, u: dict = Depends(OWNER)):
         paid_k = (q1("SELECT coalesce(sum(amount_kurus),0) AS s FROM payments WHERE clinic_id=? AND voided_at IS NULL", c["id"]) or {})["s"]
         c["paid_try"] = tl(paid_k)
         c["active"] = bool(c["active"])
-        tok = cal.calendar_feed_token(c["id"])
+        tok = cal.calendar_feed_token(c["id"], version=int(c.get("cal_token_version") or 1))
         c["ics_url"] = f"{base}/calendar/{tok}.ics"
         c["webcal_url"] = "webcal://" + c["ics_url"].split("://", 1)[-1]
     return rows
@@ -2646,18 +3676,34 @@ def switch_clinic(cid: int, u: dict = Depends(OWNER)):
 
 @app.get("/app/api/conversations")
 def list_conversations(u: dict = Depends(ANY)):
+    rows = q("SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", u["clinic_id"])
+    for r in rows:
+        logs = q("SELECT layer, intent, direction, body, delivery_status, delivery_error, created_at FROM message_log WHERE patient_id=? ORDER BY id DESC", r["id"])
+        out_logs = [l for l in logs if l["direction"] == "out"]
+        body_logs = [l for l in logs if l.get("body")]
+        r["last_at"] = logs[0]["created_at"] if logs else None
+        r["last_layer"] = out_logs[0]["layer"] if out_logs else None
+        r["last_intent"] = logs[0]["intent"] if logs else None
+        r["last_body"] = _dec_msg_body(body_logs[0]["body"]) if body_logs else None
+        r["last_dir"] = body_logs[0]["direction"] if body_logs else (logs[0]["direction"] if logs else None)
+        r["last_delivery_status"] = out_logs[0].get("delivery_status") if out_logs else None
+        r["last_delivery_error"] = out_logs[0].get("delivery_error") if out_logs else None
+        r["msg_count"] = len(logs)
+    return rows
+
+
+@app.get("/app/api/conversations/{pid}/messages")
+def list_conv_messages(pid: int, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
+    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
+        raise HTTPException(404, "hasta yok")
     rows = q(
-        """SELECT p.id, p.display_name, p.channel, p.lang,
-                  (SELECT count(*) FROM message_log m WHERE m.patient_id=p.id) AS msg_count,
-                  (SELECT m.created_at FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_at,
-                  (SELECT m.intent FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_intent,
-                  (SELECT m.layer FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_layer
-           FROM patients p
-           WHERE p.clinic_id=? AND p.active=1
-           ORDER BY p.id DESC""",
-        cid,
+        """SELECT id, direction, layer, intent, body, delivery_status, delivery_error, created_at
+           FROM message_log WHERE patient_id=? AND clinic_id=? ORDER BY id DESC LIMIT 100""",
+        pid, cid,
     )
+    for r in rows:
+        r["body"] = _dec_msg_body(r.get("body"))
     return rows
 
 
@@ -2666,14 +3712,52 @@ class ReplyIn(BaseModel):
 
 
 @app.post("/app/api/conversations/{pid}/send")
-def send_conv(pid: int, b: ReplyIn, u: dict = Depends(ANY)):
+async def send_conv(pid: int, b: ReplyIn, u: dict = Depends(ANY)):
+    if not await _LIMITER.hit(f"conv_send:{u['id']}", 30, 60):
+        raise HTTPException(429, "Çok fazla mesaj gönderildi; lütfen 1 dakika bekleyin")
     cid = u["clinic_id"]
     with _DB_LOCK:
-        _require_active_patient_row(db(), pid, cid)
-    ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,?,'out','panel-manuel','personel',0,0,?)",
-       cid, pid, iso_now())
-    write_audit(u["id"], u["email"], "conversation.send", f"patient:{pid}", u["ip_h"], clinic_id=cid)
-    return {"ok": True}
+        p_row = _require_active_patient_row(db(), pid, cid)
+        p_phone = dec(p_row["phone_enc"])
+    delivery = await _deliver_wa(cid, pid, p_phone, b.text, layer="panel-manuel", intent="personel")
+    write_audit(u["id"], u["email"], "conversation.send", f"patient:{pid}", u["ip_h"], {"status": delivery["status"]}, clinic_id=cid)
+    return {
+        "ok": delivery["ok"],
+        "status": delivery["status"],
+        "dry_run": delivery["dry_run"],
+        "error": delivery["error"],
+    }
+
+
+class TickIn(BaseModel):
+    force: bool = False
+    at: datetime | None = None
+
+
+@app.post("/app/api/admin/scheduler/tick")
+async def admin_scheduler_tick(b: TickIn | None = Body(default=None), u: dict = Depends(OWNER)):
+    cid = u["clinic_id"]
+    if not await _LIMITER.hit(f"sched_tick:{cid}", 20, 60):
+        raise HTTPException(429, "Çok fazla zamanlayıcı isteği gönderildi; lütfen 1 dakika bekleyin")
+    now_dt = b.at if b and b.at else None
+    respect = not (b.force if b else False)
+    res = await _run_scheduler_tick(clinic_id=cid, now_dt=now_dt, respect_hours=respect)
+    write_audit(u["id"], u["email"], "scheduler.tick", f"clinic:{cid}", u["ip_h"],
+                {"reminders": res["reminders_sent"], "waves": res["waves_advanced"], "followups": res["followups_sent"], "skipped": res["skipped_outside_hours"]},
+                clinic_id=cid)
+    return res
+
+
+@app.post("/app/api/reminders/send")
+async def manual_send_reminders(b: TickIn | None = Body(default=None), u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    if not await _LIMITER.hit(f"rem_send:{cid}", 20, 60):
+        raise HTTPException(429, "Çok fazla hatırlatma isteği gönderildi; lütfen 1 dakika bekleyin")
+    now_dt = b.at if b and b.at else None
+    respect = not (b.force if b else False)
+    res = await _run_scheduler_tick(clinic_id=cid, now_dt=now_dt, respect_hours=respect)
+    write_audit(u["id"], u["email"], "reminders.send", f"clinic:{cid}", u["ip_h"], {"reminders": res["reminders_sent"]}, clinic_id=cid)
+    return res
 
 
 class SimIn(BaseModel):
@@ -2690,6 +3774,37 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
     if not await _LIMITER.hit(f"sim:{u['id']}", sim_limit, 60):
         raise HTTPException(429, "Çok fazla simülasyon isteği gönderildi; lütfen 1 dakika bekleyin")
     cid = u["clinic_id"]
+    if b.patient_id is not None:
+        if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
+            raise HTTPException(404, "hasta yok")
+        handled = await _handle_patient_reply(
+            cid, b.patient_id, b.text, channel="simulator", context_previous_turn=b.context_previous_turn
+        )
+        if handled:
+            ans, layer, intent = handled
+            t_now = iso_now()
+            ex(
+                "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,body,delivery_status,created_at) VALUES (?,?,'in',NULL,'simulator',0,0,?,'received',?)",
+                cid, b.patient_id, enc(b.text[:1200]) if b.text else "", t_now,
+            )
+            ex(
+                "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,body,delivery_status,created_at) VALUES (?,?,'out',?,?,0,0,?,'dry_run',?)",
+                cid, b.patient_id, layer, f"simulator:{intent}", enc(ans[:2000]) if ans else "", t_now,
+            )
+            write_audit(u["id"], u["email"], "conversation.simulate", f"patient:{b.patient_id}", u["ip_h"],
+                        {"lang": b.lang or "tr", "layer": layer, "intent": intent}, clinic_id=cid)
+            return {
+                "answer": ans,
+                "layer": layer,
+                "intent": intent,
+                "lang": b.lang or "tr",
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "alert": None,
+                "handoff": False,
+                "meta": {"patient_id": b.patient_id},
+            }
+
     c = q1("SELECT name, address, phone, ai_custom_rules_json FROM clinics WHERE id=?", cid)
     all_branches = q("SELECT id, name, city, address, phone FROM clinics WHERE active=1")
     facts: dict = {
@@ -2702,13 +3817,14 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
         facts["telefon"] = c["phone"]
     if c and c.get("ai_custom_rules_json"):
         facts["ai_custom_rules_json"] = c["ai_custom_rules_json"]
+    allow_llm = _has_consent(b.patient_id, "yurt_disi_aktarim") if b.patient_id is not None else True
     try:
         res = await asyncio.wait_for(
             _ROUTER.route(
                 b.text,
                 lang=b.lang,
                 clinic_facts=facts,
-                allow_llm=True,
+                allow_llm=allow_llm,
                 session_id=b.session_id,
                 patient_id=b.patient_id,
                 context_previous_turn=b.context_previous_turn,
@@ -2725,10 +3841,10 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
             patient_id=b.patient_id,
             context_previous_turn=b.context_previous_turn,
         )
-    ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,NULL,'in',NULL,'simulator',0,0,?)",
-       cid, iso_now())
-    ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,NULL,'out',?,?,?, ?,?)",
-       cid, res.layer, f"simulator:{res.intent}", res.tokens_in, res.tokens_out, iso_now())
+    ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,body,delivery_status,created_at) VALUES (?,?,'in',NULL,'simulator',0,0,?,'received',?)",
+       cid, b.patient_id, enc(b.text[:1200]) if b.text else "", iso_now())
+    ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,body,delivery_status,created_at) VALUES (?,?,'out',?,?,?,?,?,'dry_run',?)",
+       cid, b.patient_id, res.layer, f"simulator:{res.intent}", res.tokens_in, res.tokens_out, enc(res.answer[:2000]) if res.answer else "", iso_now())
     write_audit(u["id"], u["email"], "conversation.simulate", f"clinic:{cid}", u["ip_h"],
                 {"lang": res.lang, "layer": res.layer, "intent": res.intent}, clinic_id=cid)
     return {
@@ -2746,7 +3862,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
 
 async def _probe_http(url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=0.18) as c:
+        async with httpx.AsyncClient(timeout=0.9) as c:
             resp = await c.get(url)
             return resp.status_code < 500
     except Exception:
@@ -2814,10 +3930,12 @@ def create_template(b: TemplateIn, u: dict = Depends(OWNER)):
 @app.get("/app/api/analytics")
 def analytics(u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    appts = q("SELECT starts_at FROM appointments WHERE clinic_id=?", cid)
+    cutoff_30d = now_utc() - timedelta(days=30)
+    raw_appts = q("SELECT starts_at, created_at FROM appointments WHERE clinic_id=?", cid)
+    appts = [a for a in raw_appts if _parse_dt_tz(a["created_at"]) >= cutoff_30d]
     off = 0
     for a in appts:
-        dt = datetime.fromisoformat(a["starts_at"])
+        dt = _parse_dt_tz(a["starts_at"]).astimezone(TZ)
         if dt.hour < 9 or dt.hour >= 19 or dt.weekday() == 6:
             off += 1
     camps = q("SELECT * FROM campaigns WHERE clinic_id=? ORDER BY id DESC", cid)
@@ -2860,10 +3978,16 @@ class SettingsIn(BaseModel):
     working_hours_json: str | None = None
     buffer_min: int = Field(0, ge=0, le=120)
     ai_custom_rules_json: str | None = None
+    wa_phone_id: str | None = Field(default=None, max_length=80)
+    ig_handle: str | None = Field(default=None, max_length=80)
 
 
 @app.post("/app/api/settings")
 def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
+    cid = u["clinic_id"]
+    rev_url = (b.google_review_url or "").strip()
+    if rev_url and not re.match(r"^https?://", rev_url, re.IGNORECASE):
+        raise HTTPException(400, "Google değerlendirme bağlantısı http:// veya https:// ile başlamalıdır")
     wh_str = b.working_hours_json or DEFAULT_WORKING_HOURS_JSON
     try:
         parsed_wh = json.loads(wh_str)
@@ -2871,7 +3995,7 @@ def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
             raise ValueError("dict değil")
     except Exception:
         raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı")
-    cur_c = q1("SELECT ai_custom_rules_json FROM clinics WHERE id=?", u["clinic_id"]) or {}
+    cur_c = q1("SELECT ai_custom_rules_json, wa_phone_id, ig_handle FROM clinics WHERE id=?", cid) or {}
     ai_rules_str = b.ai_custom_rules_json if b.ai_custom_rules_json is not None else (cur_c.get("ai_custom_rules_json") or "{}")
     try:
         parsed_ai = json.loads(ai_rules_str)
@@ -2879,11 +4003,17 @@ def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
             raise ValueError("dict değil")
     except Exception:
         raise HTTPException(400, "Geçersiz yapay zeka cevap kuralları JSON formatı")
+    wa_pid = b.wa_phone_id.strip() if b.wa_phone_id is not None else (cur_c.get("wa_phone_id") or "")
+    ig_hdl = b.ig_handle.strip() if b.ig_handle is not None else (cur_c.get("ig_handle") or "")
+    if wa_pid and q1("SELECT id FROM clinics WHERE wa_phone_id=? AND id<>?", wa_pid, cid):
+        raise HTTPException(409, "Bu WhatsApp telefon kimliği (wa_phone_id) başka bir şube tarafından kullanılıyor")
+    if ig_hdl and q1("SELECT id FROM clinics WHERE ig_handle=? AND id<>?", ig_hdl, cid):
+        raise HTTPException(409, "Bu Instagram hesabı (ig_handle) başka bir şube tarafından kullanılıyor")
     ex(
-        "UPDATE clinics SET name=?,city=?,address=?,phone=?,autopilot_name=?,default_lang=?,slot_step_min=?,google_review_url=?,working_hours_json=?,buffer_min=?,ai_custom_rules_json=? WHERE id=?",
-        b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, wh_str, b.buffer_min, ai_rules_str, u["clinic_id"],
+        "UPDATE clinics SET name=?,city=?,address=?,phone=?,autopilot_name=?,default_lang=?,slot_step_min=?,google_review_url=?,working_hours_json=?,buffer_min=?,ai_custom_rules_json=?,wa_phone_id=?,ig_handle=? WHERE id=?",
+        b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, rev_url, wh_str, b.buffer_min, ai_rules_str, wa_pid, ig_hdl, cid,
     )
-    write_audit(u["id"], u["email"], "settings.update", f"clinic:{u['clinic_id']}", u["ip_h"], clinic_id=u["clinic_id"])
+    write_audit(u["id"], u["email"], "settings.update", f"clinic:{cid}", u["ip_h"], clinic_id=cid)
     return {"ok": True}
 
 
@@ -2929,15 +4059,21 @@ async def assistant(b: AskIn, u: dict = Depends(ANY)):
         ans = "\n".join(f"- {r['name']}: {r['qty']} {r['unit']} (alt sınır {r['min_qty']})" for r in lows) or "Kritik stok yok."
         return {"answer": ans, "tokens": 0}
     if any(k in txt for k in ("uyarı", "uyari", "kırmızı", "kirmizi")):
-        als = q("SELECT detail FROM alerts WHERE clinic_id=? AND acknowledged_at IS NULL", cid)
-        return {"answer": "\n".join(f"- {a['detail']}" for a in als) or "Açık uyarı yok.", "tokens": 0}
+        als = q("SELECT kind, detail FROM alerts WHERE clinic_id=? AND acknowledged_at IS NULL", cid)
+        lines = []
+        for a in als:
+            if u["role"] == "secretary" and a.get("kind") in ("anamnez_kirmizi", "postop_alarm", "acil"):
+                lines.append("- Klinik Uyarı (Hekim Kontrolü)")
+            else:
+                lines.append(f"- {a['detail']}")
+        return {"answer": "\n".join(lines) or "Açık uyarı yok.", "tokens": 0}
     appts = q("SELECT a.starts_at, a.treatment, a.chair, p.display_name FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id WHERE a.clinic_id=? AND a.status IN ('booked','confirmed') ORDER BY a.starts_at LIMIT 10", cid)
     ans = "\n".join(f"- {a['starts_at'][:16].replace('T',' ')} K{a['chair']} {a['display_name']} ({a['treatment']})" for a in appts) or "Aktif randevu yok."
     return {"answer": f"Yaklaşan Randevular:\n{ans}", "tokens": 0}
 
 
 @app.post("/app/api/backup/create")
-async def create_encrypted_backup(u: dict = Depends(OWNER)):
+async def create_encrypted_backup(u: dict = Depends(HQ_OWNER)):
     if not await _LIMITER.hit(f"bak_c:{u['id']}", 10, 60):
         raise HTTPException(429, "Çok fazla yedekleme isteği")
     import gzip
@@ -2970,7 +4106,7 @@ class RestoreTestIn(BaseModel):
 
 
 @app.post("/app/api/backup/restore-test")
-async def restore_encrypted_backup_test(b: RestoreTestIn, u: dict = Depends(OWNER)):
+async def restore_encrypted_backup_test(b: RestoreTestIn, u: dict = Depends(HQ_OWNER)):
     if not await _LIMITER.hit(f"bak_r:{u['id']}", 10, 60):
         raise HTTPException(429, "Çok fazla geri yükleme testi isteği")
     import gzip
@@ -2995,16 +4131,19 @@ async def restore_encrypted_backup_test(b: RestoreTestIn, u: dict = Depends(OWNE
         raw_db = gzip.decompress(decrypted)
     except Exception:
         raise HTTPException(400, "Yedek şifresi çözülemedi veya dosya bozuk")
-    dst_file.write_bytes(raw_db)
-    rconn = sqlite3.connect(dst_file)
-    rconn.row_factory = sqlite3.Row
+    rconn = None
     try:
+        dst_file.write_bytes(raw_db)
+        rconn = sqlite3.connect(f"file:{dst_file}?mode=ro", uri=True)
+        rconn.row_factory = sqlite3.Row
         p_cnt = rconn.execute("SELECT count(*) AS n FROM patients").fetchone()["n"]
         a_cnt = rconn.execute("SELECT count(*) AS n FROM appointments").fetchone()["n"]
         aud_rows = [dict(r) for r in rconn.execute("SELECT id, ts, actor, action, target, meta, prev_hash, hash FROM audit_log ORDER BY id").fetchall()]
         chain_res = sec.verify_chain(aud_rows)
     finally:
-        rconn.close()
+        if rconn is not None:
+            rconn.close()
+        dst_file.unlink(missing_ok=True)
     write_audit(u["id"], u["email"], "backup.restore_test", dst_file.name, u["ip_h"], {"patients": p_cnt}, clinic_id=u["clinic_id"])
     return {"ok": True, "restored_patients": p_cnt, "restored_appointments": a_cnt, "audit_chain_ok": chain_res["ok"]}
 
@@ -3024,7 +4163,7 @@ def audit_list(u: dict = Depends(OWNER)):
 
 
 @app.get("/app/api/audit/verify")
-def audit_verify(u: dict = Depends(OWNER)):
+def audit_verify(u: dict = Depends(HQ_OWNER)):
     rows = q("SELECT id, ts, actor, action, target, meta, prev_hash, hash FROM audit_log ORDER BY id")
     return sec.verify_chain(rows)
 
@@ -3034,6 +4173,8 @@ class LeadIn(BaseModel):
     contact: str = Field(min_length=5, max_length=120)
     city: str | None = Field(default=None, max_length=40)
     chairs: int | None = Field(default=None, ge=1, le=200)
+    kvkk_aydinlatma: bool = False
+    yurt_disi_riza: bool = False
     website: str | None = Field(default=None, max_length=200)
 
 
@@ -3041,9 +4182,16 @@ class LeadIn(BaseModel):
 async def lead(b: LeadIn, request: Request):
     if b.website:
         return {"ok": True}
-    if not await _LIMITER.hit(f"lead:{client_ip(request)}", 5, 3600):
+    if not b.kvkk_aydinlatma:
+        raise HTTPException(400, "KVKK aydınlatma ve iletişim rızası onayı gereklidir")
+    if not await _LIMITER.hit(f"lead:{client_ip(request)}", int(os.environ.get("DC_LEAD_LIMIT", "5")), 3600):
         raise HTTPException(429, "Çok fazla talep")
-    ex("INSERT INTO leads (clinic,contact_enc,city,chairs,created_at) VALUES (?,?,?,?,?)", b.clinic, enc(b.contact), b.city, b.chairs, iso_now())
+    texts = sec.kvkk_texts("DentaCore")
+    k_hash = sec.kvkk_sha256(texts["lead"])
+    ex(
+        "INSERT INTO leads (clinic,contact_enc,city,chairs,kvkk_version,kvkk_sha256,yurt_disi_riza,created_at) VALUES (?,?,?,?,?,?,?,?)",
+        b.clinic, enc(b.contact), b.city, b.chairs, sec.KVKK_METIN_VER, k_hash, 1 if b.yurt_disi_riza else 0, iso_now(),
+    )
     ex("INSERT INTO alerts (clinic_id,kind,detail,created_at) VALUES (1,'web_talep',?,?)", f"Web sitesinden demo talebi: {b.clinic} ({b.city or '-'})", iso_now())
     return {"ok": True}
 
@@ -3051,4 +4199,5 @@ async def lead(b: LeadIn, request: Request):
 if __name__ == "__main__":
     host = os.environ.get("DC_HOST", "127.0.0.1")
     port = int(os.environ.get("DC_PORT", "8000"))
-    uvicorn.run(app, host=host, port=port, log_level="warning", server_header=False)
+    trusted_proxy = os.environ.get("TRUSTED_PROXY") == "1"
+    uvicorn.run(app, host=host, port=port, log_level="warning", server_header=False, proxy_headers=trusted_proxy)

@@ -11,12 +11,48 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from . import wa
-from .core import S, add_alert, add_consent, enc, env, patient, q, q1, sign
+from .core import S, add_alert, add_consent, enc, env, mask_phone, patient, q, q1, sign
+from .router import normalize
 
 log = logging.getLogger("modules")
 TZ = ZoneInfo("Europe/Istanbul")
 TPL = {k: env(f"WA_TPL_{k.upper()}") for k in ("waitlist", "postop", "reminder", "plan_followup", "feedback", "anamnesis", "brief")}
-YES = {"evet", "e", "yes", "y", "ja", "نعم", "да", "ok", "tamam", "1"}
+YES = {"evet", "yes", "ja", "نعم", "да", "ok", "tamam", "onayliyorum"}
+_CONFIRM_WORDS = {"evet", "tamam", "onayliyorum", "yes"}
+_CANCEL_WORDS = {"hayir", "iptal", "no"}
+_SCHED_LOCK = asyncio.Lock()
+DEFAULT_WORKING_HOURS_JSON = '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}'
+
+
+def _parse_hhmm(val: str) -> int:
+    parts = str(val or "00:00").strip().split(":")
+    return int(parts[0]) * 60 + (int(parts[1]) if len(parts) > 1 else 0)
+
+
+def is_within_work_hours(now_dt: datetime | None = None, working_hours_json: str | None = None) -> bool:
+    dt_loc = ((now_dt or now()) if (now_dt is None or now_dt.tzinfo) else now_dt.replace(tzinfo=TZ)).astimezone(TZ)
+    try:
+        wh = json.loads(working_hours_json or DEFAULT_WORKING_HOURS_JSON)
+        if not isinstance(wh, dict):
+            wh = json.loads(DEFAULT_WORKING_HOURS_JSON)
+    except Exception:
+        wh = json.loads(DEFAULT_WORKING_HOURS_JSON)
+    wd = dt_loc.weekday()
+    day_keys = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    dkey = day_keys[wd]
+    if dkey in wh:
+        hrs = wh[dkey]
+    elif wd < 5:
+        hrs = wh.get("mon_fri", ["09:00", "19:00"])
+    elif wd == 5:
+        hrs = wh.get("sat", ["09:00", "15:00"])
+    else:
+        hrs = wh.get("sun", None)
+    if not hrs or not isinstance(hrs, (list, tuple)) or len(hrs) < 2 or not hrs[0] or not hrs[1]:
+        return False
+    open_m, close_m = _parse_hhmm(hrs[0]), _parse_hhmm(hrs[1])
+    cur_m = dt_loc.hour * 60 + dt_loc.minute
+    return open_m <= cur_m < close_m
 
 
 def now() -> datetime:
@@ -35,15 +71,29 @@ async def alert_doctor(phone: str, text: str, pid: int | None, kind: str, clinic
 
 
 # ================= 1) Randevu hatırlatma (no-show önleme) =================
-async def send_reminders():
-    rows = await q("""SELECT a.id, a.starts_at, a.patient_id FROM appointments a
-                      WHERE a.status='booked' AND a.reminder_sent_at IS NULL AND a.patient_id IS NOT NULL
-                        AND a.starts_at BETWEEN now() + interval '20 hours' AND now() + interval '28 hours'""")
+async def send_reminders(clinic_id: int | None = None, now_dt: datetime | None = None, respect_hours: bool = True) -> int:
+    ref_now = (now_dt if now_dt.tzinfo else now_dt.replace(tzinfo=TZ)) if now_dt else now()
+    sql = """SELECT a.id, a.clinic_id, a.starts_at, a.patient_id, c.working_hours_json
+             FROM appointments a
+             JOIN clinics c ON c.id = a.clinic_id
+             WHERE a.status='booked' AND a.reminder_sent_at IS NULL AND a.patient_id IS NOT NULL
+               AND a.starts_at BETWEEN %s + interval '20 hours' AND %s + interval '28 hours'"""
+    args: list = [ref_now, ref_now]
+    if clinic_id is not None:
+        sql += " AND a.clinic_id=%s"
+        args.append(clinic_id)
+    rows = await q(sql, *args)
+    sent_cnt = 0
     for r in rows:
+        if respect_hours and not is_within_work_hours(ref_now, r.get("working_hours_json")):
+            continue
         p = await patient(r["patient_id"])
         d, t = fmt_dt(r["starts_at"])
-        await wa.send_template(p["phone"], TPL["reminder"], [d, t], quick_reply_payloads=[f"RMD_OK_{r['id']}", f"RMD_CHG_{r['id']}"])
-        await q("UPDATE appointments SET reminder_sent_at=now() WHERE id=%s", r["id"])
+        res = await wa.send_template(p["phone"], TPL["reminder"], [d, t], quick_reply_payloads=[f"RMD_OK_{r['id']}", f"RMD_CHG_{r['id']}"])
+        if not (isinstance(res, dict) and res.get("error")):
+            await q("UPDATE appointments SET reminder_sent_at=%s WHERE id=%s AND reminder_sent_at IS NULL", ref_now, r["id"])
+            sent_cnt += 1
+    return sent_cnt
 
 
 async def handle_reminder_reply(pid: int, payload: str, text: str) -> str | None:
@@ -52,11 +102,16 @@ async def handle_reminder_reply(pid: int, payload: str, text: str) -> str | None
         appt = await q1("SELECT * FROM appointments WHERE id=%s AND patient_id=%s", int(payload.rsplit("_", 1)[1]), pid)
         choice = "1" if "_OK_" in payload else "2"
     else:
-        choice = text.strip()
-        if choice not in ("1", "2"):
+        cleaned = normalize(text or "").strip()
+        if cleaned in _CONFIRM_WORDS:
+            choice = "1"
+        elif cleaned in _CANCEL_WORDS:
+            choice = "2"
+        else:
             return None
-        appt = await q1("""SELECT * FROM appointments WHERE patient_id=%s AND status='booked'
-                           AND reminder_sent_at > now() - interval '36 hours' ORDER BY starts_at LIMIT 1""", pid)
+        allowed = ("booked",) if choice == "1" else ("booked", "confirmed")
+        appt = await q1("""SELECT * FROM appointments WHERE patient_id=%s AND status = ANY(%s)
+                           AND starts_at >= now() - interval '15 minutes' ORDER BY starts_at LIMIT 1""", pid, list(allowed))
     if not appt:
         return None
     if choice == "1":
@@ -91,32 +146,47 @@ async def _send_wave(a: dict, wave: int) -> int:
                     cid, a["starts_at"], f"%{a['treatment']}%", a["patient_id"], a["patient_id"], a["id"], WAVE_SIZE)
     d, t = fmt_dt(a["starts_at"])
     for c in cands:
-        o = await q1("INSERT INTO slot_offers (appointment_id, waitlist_id, wave) VALUES (%s,%s,%s) RETURNING id", a["id"], c["id"], wave)
+        o = await q1(
+            "INSERT INTO slot_offers (appointment_id, waitlist_id, wave, expires_at) VALUES (%s,%s,%s, now() + interval '2 hours') RETURNING id",
+            a["id"], c["id"], wave,
+        )
         p = await patient(c["patient_id"])
         await wa.send_template(p["phone"], TPL["waitlist"], [d, t, a["treatment"]], quick_reply_payloads=[f"SLOT_{o['id']}"])
     return len(cands)
 
 
-async def advance_waves():
-    rows = await q("""SELECT a.*, max(o.wave) AS wave, max(o.sent_at) AS last_sent FROM appointments a
-                      JOIN slot_offers o ON o.appointment_id=a.id
-                      WHERE a.status='cancelled' AND a.starts_at > now() + interval '1 hour'
-                      GROUP BY a.id
-                      HAVING bool_and(o.status <> 'won') AND max(o.sent_at) < now() - make_interval(mins => %s)""", WAVE_MINUTES)
+async def advance_waves(clinic_id: int | None = None) -> int:
+    sql = """SELECT a.*, max(o.wave) AS wave, max(o.sent_at) AS last_sent FROM appointments a
+             JOIN slot_offers o ON o.appointment_id=a.id
+             WHERE a.status='cancelled' AND a.starts_at > now() + interval '1 hour'"""
+    args: list = []
+    if clinic_id is not None:
+        sql += " AND a.clinic_id=%s"
+        args.append(clinic_id)
+    sql += """ GROUP BY a.id
+               HAVING bool_and(o.status <> 'won') AND max(o.sent_at) < now() - make_interval(mins => %s)"""
+    args.append(WAVE_MINUTES)
+    rows = await q(sql, *args)
+    adv = 0
     for a in rows:
         await q("UPDATE slot_offers SET status='expired' WHERE appointment_id=%s AND status='sent'", a["id"])
         if a["wave"] < MAX_WAVES:
             await _send_wave(a, a["wave"] + 1)
+            adv += 1
+    return adv
 
 
 async def claim_slot(pid: int, offer_id: int | None) -> str | None:
     if offer_id is None:
         o = await q1("""SELECT o.* FROM slot_offers o JOIN waitlist w ON w.id=o.waitlist_id
-                        WHERE w.patient_id=%s AND o.status='sent' AND o.sent_at > now() - interval '2 hours'
+                        WHERE w.patient_id=%s AND o.status='sent'
+                          AND (o.expires_at IS NULL OR o.expires_at >= now())
+                          AND o.sent_at > now() - interval '2 hours'
                         ORDER BY o.sent_at DESC LIMIT 1""", pid)
     else:
         o = await q1("""SELECT o.* FROM slot_offers o JOIN waitlist w ON w.id=o.waitlist_id
-                        WHERE o.id=%s AND w.patient_id=%s""", offer_id, pid)
+                        WHERE o.id=%s AND w.patient_id=%s
+                          AND o.status='sent' AND (o.expires_at IS NULL OR o.expires_at >= now())""", offer_id, pid)
     if not o:
         return None
     won = await q1("""UPDATE appointments SET status='booked', patient_id=%s, reminder_sent_at=NULL
@@ -146,10 +216,7 @@ ANAMNEZ_SORULAR = [
     ("hamilelik", "Hamile misiniz veya hamilelik ihtimali var mı?", True),
     ("sigara", "Sigara kullanıyor musunuz?", False),
 ]
-KVKK_METIN_VER = "2026-11"
-KVKK_ACIK_RIZA = ("Sağlık verilerimin (anamnez cevapları, ağız içi fotoğraf ve röntgenler) yalnızca muayene ve tedavi planlaması "
-                  "amacıyla, {clinic} tarafından işlenmesine ve hizmet sağlayıcıların yurt dışındaki sunucularında (WhatsApp/Meta) "
-                  "iletilmesine açık rıza veriyorum. Rızamı her zaman geri alabileceğimi biliyorum.")
+KVKK_METIN_VER = "2026-11-v2"
 
 
 async def create_anamnesis_link(pid: int) -> str:
@@ -166,12 +233,19 @@ async def send_anamnesis(pid: int):
 
 
 def anamnesis_form_html(token: str, error: str = "") -> str:
+    from .security import KVKK_METIN_VER as _VER, kvkk_texts
+    texts = kvkk_texts(S.clinic)
     rows = "".join(
         f"""<fieldset><legend>{html.escape(t)}</legend>
         <label><input type="radio" name="{k}" value="evet" required> Evet</label>
         <label><input type="radio" name="{k}" value="hayir"> Hayır</label></fieldset>""" for k, t, _ in ANAMNEZ_SORULAR)
-    riza = html.escape(KVKK_ACIK_RIZA.replace("{clinic}", S.clinic))
-    err = f'<p class="err">{html.escape(error)}</p>' if error else ""
+    aydinlatma_html = html.escape(texts["aydinlatma"])
+    saglik_html = html.escape(texts["saglik"])
+    yurt_disi_html = html.escape(texts["yurt_disi"])
+    err = (
+        f'<p class="err" role="alert">{html.escape(error)}</p>'
+        '<p><a class="btn-back" href="/">Kliniğe / Ana Sayfaya Dön</a></p>'
+    ) if error else ""
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sağlık Bilgi Formu</title><style>
 body{{font-family:system-ui,Segoe UI,Arial;background:#F8FAFC;color:#0A2540;margin:0;padding:16px;line-height:1.5}}
@@ -180,38 +254,51 @@ h1{{font-size:19px;margin:0 0 6px}}p.s{{color:#475569;font-size:14px}}
 fieldset{{border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;padding:10px}}legend{{font-weight:600;font-size:14.5px}}
 label{{display:inline-flex;gap:6px;margin-right:18px;font-size:15px;padding:6px 0}}
 textarea,input[type=text]{{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit}}
-.riza{{background:#f1f5f9;border-radius:8px;padding:10px;font-size:13.5px}}
+.riza{{background:#f1f5f9;border-radius:8px;padding:12px;font-size:13.5px}}
+.riza .ayd{{margin:0 0 8px;color:#334155;font-size:13px}}
 button{{width:100%;background:#0F766E;color:#fff;border:0;border-radius:10px;padding:14px;font-size:16px;font-weight:700;margin-top:14px}}
-.err{{color:#b91c1c;font-weight:600}}</style></head><body><main>
+.err{{color:#b91c1c;font-weight:600;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 12px}}
+.f-err{{color:#b91c1c;font-size:13px;font-weight:600;margin:6px 0 0}}
+.btn-back{{display:inline-block;padding:10px 16px;border-radius:8px;background:#0A2540;color:#fff;text-decoration:none;font-weight:600;font-size:14px}}</style></head><body><main>
 <h1>{html.escape(S.clinic)} - Randevu Öncesi Sağlık Bilgi Formu</h1>
 <p class="s">Yaklaşık 1 dakika sürer. Cevaplarınız şifrelenerek saklanır ve yalnızca hekiminiz görür.</p>{err}
-<form method="post">{rows}
+<div id="form-err" class="err" role="alert" style="display:none"></div>
+<form method="post" novalidate>{rows}
 <fieldset><legend>Düzenli kullandığınız ilaçlar (varsa)</legend><textarea name="ilaclar" rows="2" maxlength="500"></textarea></fieldset>
-<div class="riza"><label style="display:flex"><input type="checkbox" name="kvkk_aydinlatma" required> KVKK Aydınlatma Metni'ni okudum.</label>
-<label style="display:flex"><input type="checkbox" name="acik_riza" required> {riza}</label></div>
-<fieldset><legend>Ad Soyad (imza yerine geçer)</legend><input type="text" name="imza" required minlength="5" maxlength="80"></fieldset>
-<button type="submit">Formu Onayla ve Gönder</button></form></main></body></html>"""
+<div class="riza" data-kvkk-ver="{html.escape(_VER)}">
+<p class="ayd"><strong>KVKK Aydınlatma Metni:</strong> {aydinlatma_html}</p>
+<label style="display:flex"><input type="checkbox" name="kvkk_aydinlatma" value="1" required> Aydınlatma Metni'ni okudum ve anladım.</label>
+<label style="display:flex"><input type="checkbox" name="saglik_riza" value="1" required> {saglik_html}</label>
+<label style="display:flex"><input type="checkbox" name="yurt_disi_riza" value="1"> {yurt_disi_html}</label>
+</div>
+<fieldset><legend>Ad Soyad (imza yerine geçer)</legend><input type="text" name="imza" required minlength="2" maxlength="80"></fieldset>
+<button type="submit">Formu Onayla ve Gönder</button></form>
+<script src="/form/validate.js" defer></script></main></body></html>"""
 
 
 async def submit_anamnesis(token: str, form: dict) -> tuple[bool, str]:
+    from .security import KVKK_METIN_VER as _VER, is_checked, kvkk_texts
     t = await q1("SELECT * FROM anamnesis_tokens WHERE token=%s AND used_at IS NULL AND expires_at > now()", token)
     if not t:
         return False, "Bu bağlantının süresi dolmuş veya daha önce kullanılmış."
-    if not (form.get("kvkk_aydinlatma") and form.get("acik_riza") and len((form.get("imza") or "").strip()) >= 5):
-        return False, "Lütfen onay kutularını işaretleyin ve adınızı soyadınızı yazın."
+    has_ayd = is_checked(form.get("kvkk_aydinlatma"))
+    has_saglik = is_checked(form.get("saglik_riza")) or is_checked(form.get("acik_riza"))
+    imza = (form.get("imza") or "").strip()[:80]
+    if not (has_ayd and has_saglik and len(imza) >= 2):
+        return False, "Lütfen aydınlatma metni ve sağlık verisi açık rıza onay kutularını işaretleyin ve adınızı soyadınızı yazın."
     answers = {k: form.get(k, "") for k, _, _ in ANAMNEZ_SORULAR}
     answers["ilaclar"] = (form.get("ilaclar") or "")[:500]
     flags = [k for k, _, red in ANAMNEZ_SORULAR if red and answers.get(k) == "evet"]
-    imza = form["imza"].strip()
     pid = t["patient_id"]
     signature = hashlib.sha256(f"{pid}|{imza}|{json.dumps(answers, sort_keys=True)}|{now().isoformat()}".encode()).hexdigest()
     row = await q1("""INSERT INTO anamnesis (patient_id, answers_enc, red_flags, signer_name, signature_sha256)
                       VALUES (%s,%s,%s,%s,%s) RETURNING id""", pid, enc(json.dumps(answers, ensure_ascii=False)), flags, imza, signature)
     await q("UPDATE anamnesis_tokens SET used_at=now() WHERE token=%s", token)
-    await add_consent(pid, "kvkk_aydinlatma", KVKK_METIN_VER, "aydinlatma", "web_form")
-    riza = KVKK_ACIK_RIZA.replace("{clinic}", S.clinic)
-    await add_consent(pid, "saglik_verisi_acik_riza", KVKK_METIN_VER, riza, "web_form")
-    await add_consent(pid, "yurt_disi_aktarim", KVKK_METIN_VER, riza, "web_form")
+    texts = kvkk_texts(S.clinic)
+    await add_consent(pid, "kvkk_aydinlatma", _VER, texts["aydinlatma"], "web_form")
+    await add_consent(pid, "saglik_verisi_acik_riza", _VER, texts["saglik"], "web_form")
+    if is_checked(form.get("yurt_disi_riza")):
+        await add_consent(pid, "yurt_disi_aktarim", _VER, texts["yurt_disi"], "web_form")
     if flags:
         p_row = await q1("SELECT clinic_id FROM patients WHERE id=%s", pid)
         cid_p = int(p_row["clinic_id"]) if p_row and p_row.get("clinic_id") else 1
@@ -248,12 +335,23 @@ async def schedule_postop(pid: int, procedure: str, done_at: datetime):
         await q("INSERT INTO postop_checks (patient_id, procedure, due_at, stage) VALUES (%s,%s,%s,%s)", pid, procedure, done_at + delta, stage)
 
 
-async def send_postop_checks():
-    rows = await q("SELECT * FROM postop_checks WHERE sent_at IS NULL AND due_at <= now() AND due_at > now() - interval '6 hours'")
+async def send_postop_checks(clinic_id: int | None = None) -> int:
+    sql = """SELECT pc.*, p.clinic_id FROM postop_checks pc
+             JOIN patients p ON p.id=pc.patient_id
+             WHERE pc.sent_at IS NULL AND pc.due_at <= now() AND pc.due_at > now() - interval '6 hours'"""
+    args: list = []
+    if clinic_id is not None:
+        sql += " AND p.clinic_id=%s"
+        args.append(clinic_id)
+    rows = await q(sql, *args)
+    sent_cnt = 0
     for r in rows:
         p = await patient(r["patient_id"])
-        await wa.send_template(p["phone"], TPL["postop"], [r["procedure"]])
-        await q("UPDATE postop_checks SET sent_at=now() WHERE id=%s", r["id"])
+        res = await wa.send_template(p["phone"], TPL["postop"], [r["procedure"]])
+        if not (isinstance(res, dict) and res.get("error")):
+            await q("UPDATE postop_checks SET sent_at=now() WHERE id=%s", r["id"])
+            sent_cnt += 1
+    return sent_cnt
 
 
 async def handle_postop_reply(pid: int, text: str, emergency: bool) -> str | None:
@@ -273,7 +371,7 @@ async def handle_postop_reply(pid: int, text: str, emergency: bool) -> str | Non
         cid_p = int(p.get("clinic_id") or 1)
         await alert_doctor(S.doctor_on_call or S.doctor_owner,
                            f"İŞLEM SONRASI ALARM: {p.get('display_name') or 'Hasta'} (#{pid}), {c['procedure']}, {c['stage']} kontrolü, "
-                           f"ağrı {score if score is not None else '?'}/10{', acil belirti bildirdi' if emergency else ''}. Geri arama: +{p['phone']}",
+                           f"ağrı {score if score is not None else '?'}/10{', acil belirti bildirdi' if emergency else ''}. Geri arama: {mask_phone(p['phone'])}",
                            pid, "postop_alarm", clinic_id=cid_p)
         return "Bilginiz nöbetçi hekimimize iletildi, sizi en kısa sürede arayacak. Nefes alma güçlüğü, durmayan kanama veya hızla artan şişlik varsa lütfen 112'yi arayın."
     if score is not None and score >= 5:
@@ -357,15 +455,41 @@ async def morning_brief_text(clinic_id: int = 1) -> str:
 
 
 # ================= Zamanlayıcı =================
+async def run_scheduler_tick(clinic_id: int | None = None, now_dt: datetime | None = None, respect_hours: bool = True) -> dict:
+    async with _SCHED_LOCK:
+        ref_now = (now_dt if now_dt.tzinfo else now_dt.replace(tzinfo=TZ)) if now_dt else now()
+        skipped_outside = False
+        if respect_hours and clinic_id is not None:
+            cinfo = await q1("SELECT working_hours_json FROM clinics WHERE id=%s", clinic_id)
+            if not is_within_work_hours(ref_now, cinfo.get("working_hours_json") if cinfo else None):
+                return {
+                    "ok": True,
+                    "at": ref_now.isoformat(),
+                    "skipped_outside_hours": True,
+                    "reminders_sent": 0,
+                    "waves_advanced": 0,
+                    "postop_sent": 0,
+                }
+        rmd_sent = await send_reminders(clinic_id=clinic_id, now_dt=ref_now, respect_hours=respect_hours)
+        waves_adv = await advance_waves(clinic_id=clinic_id)
+        postop_sent = await send_postop_checks(clinic_id=clinic_id)
+        return {
+            "ok": True,
+            "at": ref_now.isoformat(),
+            "skipped_outside_hours": skipped_outside,
+            "reminders_sent": rmd_sent,
+            "waves_advanced": waves_adv,
+            "postop_sent": postop_sent,
+        }
+
+
 async def scheduler_loop(redis):
     last_daily: dict[str, str] = {}
     while True:
         try:
             got = await redis.set("dc:sched:lock", "1", nx=True, ex=55) if redis else True
             if got:
-                await send_reminders()
-                await advance_waves()
-                await send_postop_checks()
+                await run_scheduler_tick(respect_hours=True)
                 local = datetime.now(TZ)
                 today = local.strftime("%Y%m%d")
                 if local.strftime("%H:%M") >= "08:30" and last_daily.get("brief") != today:

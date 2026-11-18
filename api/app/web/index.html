@@ -432,7 +432,7 @@
 
       <details class="tech-details">
       <summary>Teknik ayrıntı: BT ekibiniz için 12 güvenlik başlığı</summary>
-      <div class="table-wrap dark-table-wrap">
+      <div class="table-wrap dark-table-wrap" tabindex="0" role="region" aria-label="12 HTTP güvenlik başlığı tablosu">
         <table class="sec-table">
           <thead>
             <tr>
@@ -506,7 +506,7 @@
     <div class="wrap">
       <h2>Tipik mesaj botu ile DentaCore arasındaki fark</h2>
       <p class="sec-sub">Piyasadaki sıradan SaaS mesaj botlarının bıraktığı güvenlik, klinik takip ve maliyet açıklarını tek mimaride kapatır.</p>
-      <div class="table-wrap">
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Tipik mesaj botu ile DentaCore karşılaştırma tablosu">
         <table class="cmp">
           <thead>
             <tr>
@@ -603,8 +603,8 @@
           <a class="btn btn-ghost" href="#demo">Temel ile başlayın</a>
         </article>
         <article class="price best">
-          <span class="flag">En çok tercih edilen</span>
           <h3>Klinik</h3>
+          <span class="flag">En çok tercih edilen</span>
           <div class="price-val"><b>5.900 TL</b><span>+ KDV / ay</span></div>
           <ul>
             <li>Temel paketin tamamı</li>
@@ -691,6 +691,17 @@
               <input id="f-chairs" name="chairs" type="number" min="1" max="200" placeholder="3">
             </label>
           </div>
+          <div class="kvkk-note">
+            <strong>KVKK Aydınlatma Özeti:</strong> Girdiğiniz klinik adı ve iletişim bilgisi yalnızca tanıtım ve demo talebinize dönüş yapılması amacıyla şifreli olarak kaydedilir.
+          </div>
+          <label class="kvkk-check" for="f-kvkk">
+            <input id="f-kvkk" name="kvkk_aydinlatma" type="checkbox" value="1" required>
+            <span><strong class="kvkk-req">(Zorunlu)</strong> Aydınlatma metnini okudum; iletişim bilgilerimin tanıtım ve demo talebime dönüş yapılması amacıyla işlenmesine açık rıza veriyorum.</span>
+          </label>
+          <label class="kvkk-check" for="f-yurtdisi">
+            <input id="f-yurtdisi" name="yurt_disi_riza" type="checkbox" value="1">
+            <span><strong class="kvkk-opt">(İsteğe bağlı)</strong> İletişim sürecinde yurt dışı mesajlaşma/bulut servislerine aktarım yapılmasına izin veriyorum.</span>
+          </label>
           <label class="hp" aria-hidden="true">Web sitesi<input name="website" tabindex="-1" autocomplete="off"></label>
           <button class="btn btn-cta btn-lg" id="lead-submit" type="submit">Tanıtım talep et</button>
           <p class="form-msg" id="lead-msg" role="status" aria-live="polite"></p>

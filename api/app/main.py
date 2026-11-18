@@ -15,14 +15,15 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from pydantic import BaseModel, Field
 
 from . import ig, media, modules, panel, staff_bot, wa
-from .core import (S, add_alert, db_close, db_open, env, has_consent, log_msg, patient, phone_hmac, q, q1, run_migrations,
+from .core import (S, add_alert, db_close, db_open, env, has_consent, log_msg, mask_phone, patient, phone_hmac, q, q1, run_migrations,
                    tx, upsert_identity, upsert_patient, verify_sig)
 from .router import TokenRouter, normalize
-from .security import SecurityHeadersMiddleware
+from .security import SecurityHeadersMiddleware, WebhookDedupCache, audit as sec_audit
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("api")
 state: dict = {}
+_MEM_WEBHOOK_DEDUP = WebhookDedupCache(max_size=10_000, ttl_seconds=86_400)
 HERE = Path(__file__).parent
 WEB = HERE / "web"
 MIGRATION = Path(env("MIGRATION_FILE", str(HERE / "migrations" / "002_platform.sql")))
@@ -156,26 +157,60 @@ async def wa_verify(request: Request):
     raise HTTPException(403)
 
 
+async def _is_dup_webhook_msg(msg_id: str) -> bool:
+    if not msg_id:
+        return False
+    r = state.get("redis")
+    if r:
+        return not await r.set(f"dc:seen:{msg_id}", "1", nx=True, ex=86400)
+    return _MEM_WEBHOOK_DEDUP.seen_or_add(msg_id)
+
+
+async def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
+    if channel_id:
+        col = "wa_phone_id" if channel == "wa" else "ig_handle"
+        row = await q1(f"SELECT id FROM clinics WHERE {col}=%s AND active LIMIT 1", channel_id)  # nosec B608
+        if row:
+            return int(row["id"])
+    log.error("Eşleşmeyen webhook kanalı: channel=%s id=%s", channel, channel_id or "<boş>")
+    try:
+        await sec_audit(None, f"{channel}_webhook", "webhook.unmapped_clinic", f"{channel}:{channel_id or 'missing'}",
+                        meta={"channel": channel, "channel_id": channel_id[:80]}, clinic_id=1)
+    except Exception:
+        log.exception("webhook unmapped_clinic audit kaydı yazılamadı")
+    return None
+
+
 @app.post("/webhook/whatsapp")
 async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
     raw = await request.body()
     if not wa.verify_signature(raw, x_hub_signature_256):
         raise HTTPException(401, "imza geçersiz")
-    body = json.loads(raw)
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Geçersiz JSON gövdesi")
+    processed, dedup, unmapped = 0, 0, 0
     for entry in body.get("entry", []):
         for ch in entry.get("changes", []):
             v = ch.get("value", {})
+            phone_number_id = str((v.get("metadata") or {}).get("phone_number_id") or "").strip()
+            clinic_id = await _resolve_webhook_clinic("wa", phone_number_id)
+            if not clinic_id:
+                unmapped += len(v.get("messages", [])) or 1
+                continue
             names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in v.get("contacts", [])}
             for m in v.get("messages", []):
                 # Meta webhook'u yeniden deneyebilir: aynı mesajı iki kez işleme
-                r = state["redis"]
-                if r and not await r.set(f"dc:seen:{m.get('id')}", "1", nx=True, ex=86400):
+                if await _is_dup_webhook_msg(str(m.get("id") or "")):
+                    dedup += 1
                     continue
                 try:
-                    await handle_message(m, names.get(m.get("from")))
+                    await handle_message(m, names.get(m.get("from")), clinic_id=clinic_id)
+                    processed += 1
                 except Exception:
                     log.exception("mesaj işlenemedi")
-    return {"ok": True}
+    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
 
 
 # ======================= Instagram DM webhook =======================
@@ -192,23 +227,35 @@ async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(
     raw = await request.body()
     if not ig.verify_signature(raw, x_hub_signature_256):
         raise HTTPException(401, "imza geçersiz")
-    body = json.loads(raw)
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Geçersiz JSON gövdesi")
+    processed, dedup, unmapped = 0, 0, 0
     for entry in body.get("entry", []):
+        entry_id = str(entry.get("id") or "").strip()
         for ev in entry.get("messaging", []):
             msg = ev.get("message") or {}
             if msg.get("is_echo") or not msg.get("text"):
                 continue
-            r = state["redis"]
-            if r and not await r.set(f"dc:seen:{msg.get('mid')}", "1", nx=True, ex=86400):
+            ig_target = str((ev.get("recipient") or {}).get("id") or entry_id).strip()
+            clinic_id = await _resolve_webhook_clinic("ig", ig_target)
+            if not clinic_id:
+                unmapped += 1
+                continue
+            if await _is_dup_webhook_msg(str(msg.get("mid") or "")):
+                dedup += 1
                 continue
             try:
-                await handle_message({"from": ev["sender"]["id"], "type": "text", "text": {"body": msg["text"]}}, None, channel="ig")
+                await handle_message({"from": ev["sender"]["id"], "type": "text", "text": {"body": msg["text"]}},
+                                     None, channel="ig", clinic_id=clinic_id)
+                processed += 1
             except Exception:
                 log.exception("IG mesajı işlenemedi")
-    return {"ok": True}
+    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
 
 
-async def handle_message(m: dict, profile_name: str | None, channel: str = "wa"):
+async def handle_message(m: dict, profile_name: str | None, channel: str = "wa", clinic_id: int = 1):
     sender = m["from"]
     mtype = m.get("type")
     text, payload = "", ""
@@ -234,15 +281,17 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa")
     lang = detect_lang(text) if text else "tr"
     if channel == "ig":
         phone = f"ig:{sender}"
-        pid = await upsert_identity(phone, "ig", lang=lang, name=profile_name)
+        pid = await upsert_identity(phone, "ig", lang=lang, name=profile_name, clinic_id=clinic_id)
     else:
         phone = sender
-        pid = await upsert_patient(phone, lang=lang, name=profile_name)
-    await log_msg(pid, "in", intent=f"{channel}:{mtype}")
+        pid = await upsert_patient(phone, lang=lang, name=profile_name, clinic_id=clinic_id)
+    await log_msg(pid, "in", intent=f"{channel}:{mtype}", clinic_id=clinic_id, body=text or payload, delivery_status="received")
 
     async def reply(body: str, layer: str, intent: str, tin: int = 0, tout: int = 0):
-        await wa.send_text(phone, body)
-        await log_msg(pid, "out", layer, intent, tin, tout)
+        wa_res = await wa.send_text(phone, body)
+        st = "dry_run" if (wa_res or {}).get("dry_run") else ("failed" if (wa_res or {}).get("error") else "sent")
+        err = json.dumps(wa_res["error"], ensure_ascii=False)[:500] if (wa_res or {}).get("error") else None
+        await log_msg(pid, "out", layer, intent, tin, tout, clinic_id=clinic_id, body=body, delivery_status=st, delivery_error=err)
 
     # 1) Görsel: önce açık rıza, sonra kalite denetimi (tanı yok)
     if mtype in ("image", "document") and (m.get(mtype) or {}).get("mime_type", "image/").startswith("image/"):
@@ -261,27 +310,34 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa")
         return
 
     # 2) Bağlamsal deterministik cevaplar (0 token)
-    if payload.startswith("SLOT_") or (normalize(text) in modules.YES and not payload):
-        offer_id = int(payload.split("_")[1]) if payload.startswith("SLOT_") else None
-        ans = await modules.claim_slot(pid, offer_id)
-        if ans:
-            return await reply(ans, "L1-koltuk", "bekleme_listesi")
-    if payload.startswith("RMD_") or text.strip() in ("1", "2"):
-        ans = await modules.handle_reminder_reply(pid, payload, text)
-        if ans:
-            return await reply(ans, "L1-hatirlatma", "teyit")
+    if re.fullmatch(r"\s*(10|[1-9])\s*", text):
+        post = await modules.handle_postop_reply(pid, text, emergency=router.is_emergency(text))
+        if post:
+            return await reply(post, "L1-postop", "postop")
+    else:
+        norm_txt = normalize(text).strip()
+        if payload.startswith("SLOT_") or (norm_txt in modules.YES and not payload):
+            offer_id = int(payload.split("_")[1]) if payload.startswith("SLOT_") else None
+            ans = await modules.claim_slot(pid, offer_id)
+            if ans:
+                return await reply(ans, "L1-koltuk", "bekleme_listesi")
+        if payload.startswith("RMD_") or norm_txt in (modules._CONFIRM_WORDS | modules._CANCEL_WORDS):
+            ans = await modules.handle_reminder_reply(pid, payload, text)
+            if ans:
+                return await reply(ans, "L1-hatirlatma", "teyit")
 
-    post = await modules.handle_postop_reply(pid, text, emergency=router.is_emergency(text))
-    if post:
-        return await reply(post, "L1-postop", "postop")
+        post = await modules.handle_postop_reply(pid, text, emergency=router.is_emergency(text))
+        if post:
+            return await reply(post, "L1-postop", "postop")
 
-    # 3) Token Router
-    res = await router.route(text, lang, patient_id=pid)
+    # 3) Token Router (SEC-03: yurt_disi_aktarim rızası yoksa yalnız yerel L1/L2)
+    allow_llm = await has_consent(pid, "yurt_disi_aktarim")
+    res = await router.route(text, lang, allow_llm=allow_llm, patient_id=pid)
     await reply(res.answer, res.layer, res.intent, res.tokens_in, res.tokens_out)
     if res.alert == "acil":
         p = await patient(pid)
         await modules.alert_doctor(S.doctor_on_call or S.doctor_owner,
-                                   f"ACİL MESAJ: {p.get('display_name') or 'Hasta'} (#{pid}) acil belirti bildirdi. Geri arama: +{p['phone']}",
+                                   f"ACİL MESAJ: {p.get('display_name') or 'Hasta'} (#{pid}) acil belirti bildirdi. Geri arama: {mask_phone(p['phone'])}",
                                    pid, "acil")
     elif res.alert == "sikayet":
         await modules.alert_doctor(S.doctor_owner, f"ŞİKAYET: Hasta #{pid} memnuniyetsizlik bildirdi. Lütfen geri dönün.", pid, "sikayet")
@@ -301,6 +357,76 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa")
                     await log_msg(pid, "out", "L1-ses", "hekim_sesi")
         except Exception:
             log.exception("ses gönderilemedi")
+
+
+_FORM_VALIDATE_JS = """document.addEventListener("DOMContentLoaded",function(){
+  var f=document.querySelector("form[novalidate]");
+  if(!f)return;
+  var box=document.getElementById("form-err");
+  function clearErr(){
+    f.querySelectorAll(".f-err").forEach(function(n){n.remove();});
+    f.querySelectorAll(".has-err").forEach(function(n){n.classList.remove("has-err");});
+    if(box){box.style.display="none";box.textContent="";}
+  }
+  function addErr(host,msg){
+    var p=document.createElement("p");
+    p.className="f-err";
+    p.textContent=msg;
+    host.classList.add("has-err");
+    host.appendChild(p);
+  }
+  f.addEventListener("change",function(ev){
+    var fs=ev.target.closest("fieldset,label");
+    if(fs){fs.classList.remove("has-err");fs.querySelectorAll(".f-err").forEach(function(n){n.remove();});}
+  });
+  f.addEventListener("input",function(ev){
+    var p=ev.target.parentElement;
+    if(p){p.classList.remove("has-err");p.querySelectorAll(".f-err").forEach(function(n){n.remove();});}
+  });
+  f.addEventListener("submit",function(e){
+    clearErr();
+    var first=null;
+    f.querySelectorAll("fieldset").forEach(function(fs){
+      var reqRadio=fs.querySelector("input[type=radio][required]");
+      if(reqRadio && !fs.querySelector("input[type=radio]:checked")){
+        addErr(fs,"Lütfen bu soruyu yanıtlayın.");
+        if(!first)first=reqRadio;
+      }
+    });
+    f.querySelectorAll("input[required]:not([type=radio]):not([type=checkbox]),textarea[required]").forEach(function(el){
+      var v=(el.value||"").trim();
+      var ml=parseInt(el.getAttribute("minlength")||"0",10);
+      if(!v || (ml && v.length<ml)){
+        var msg=el.name==="imza"?"Lütfen adınızı ve soyadınızı yazın (en az 2 karakter).":"Lütfen bu alanı doldurun.";
+        addErr(el.parentElement,msg);
+        if(!first)first=el;
+      }
+    });
+    f.querySelectorAll("input[type=checkbox][required]").forEach(function(cb){
+      if(!cb.checked){
+        var lbl=cb.closest("label")||cb.parentElement;
+        var p=document.createElement("p");
+        p.className="f-err";
+        p.textContent="Lütfen zorunlu onay kutusunu işaretleyin.";
+        lbl.classList.add("has-err");
+        lbl.insertAdjacentElement("afterend",p);
+        if(!first)first=cb;
+      }
+    });
+    if(first){
+      e.preventDefault();
+      if(box){box.textContent="Lütfen işaretlenen eksik alanları tamamlayın.";box.style.display="block";}
+      first.scrollIntoView({behavior:"smooth",block:"center"});
+      try{first.focus({preventScroll:true});}catch(_){}
+    }
+  });
+});
+"""
+
+
+@app.get("/form/validate.js", include_in_schema=False)
+async def form_validate_js():
+    return Response(_FORM_VALIDATE_JS, media_type="application/javascript; charset=utf-8", headers={"cache-control": "no-store"})
 
 
 # ======================= Formlar =======================
@@ -333,13 +459,15 @@ async def feedback_form():
     qs = sign("/form/geri-bildirim", ttl=3600).split("?", 1)[1]
     tok = _html.escape(qs, quote=True)
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Başhekimliğe ilet</title></head><body style="font-family:system-ui;background:#F8FAFC;color:#0A2540;padding:16px">
+<title>Başhekimliğe ilet</title><style>.err,.f-err{{color:#b91c1c;font-size:13px;font-weight:600;margin:6px 0}}.err{{background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px}}.btn-back{{display:inline-block;padding:10px 16px;border-radius:8px;background:#0A2540;color:#fff;text-decoration:none;font-weight:600}}</style></head><body style="font-family:system-ui;background:#F8FAFC;color:#0A2540;padding:16px">
 <main style="max-width:520px;margin:auto;background:#fff;border-radius:12px;padding:18px;border:1px solid #e2e8f0">
 <h2 style="margin-top:0">{_html.escape(S.clinic)} - Başhekimliğe doğrudan ilet</h2>
 <p>Görüşünüz doğrudan başhekime ulaşır. Google'da değerlendirme yapma hakkınız bundan bağımsızdır: <a href="{_html.escape(S.google_review_url or '#', quote=True)}">Google'da değerlendir</a></p>
-<form method="post"><input type="hidden" name="csrf_token" value="{tok}"><textarea name="mesaj" rows="5" required maxlength="1500" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #cbd5e1"></textarea>
+<div id="form-err" class="err" role="alert" style="display:none"></div>
+<form method="post" novalidate><input type="hidden" name="csrf_token" value="{tok}"><label for="mesaj" style="display:block;font-weight:600;margin-bottom:6px">Mesajınız</label><div><textarea id="mesaj" name="mesaj" rows="5" required maxlength="1500" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #cbd5e1"></textarea></div>
 <input name="iletisim" placeholder="Size dönmemizi isterseniz telefon (isteğe bağlı)" maxlength="40" style="width:100%;box-sizing:border-box;padding:10px;margin-top:8px;border-radius:8px;border:1px solid #cbd5e1">
-<button style="width:100%;margin-top:12px;background:#0F766E;color:#fff;border:0;border-radius:10px;padding:13px;font-weight:700">Gönder</button></form></main></body></html>"""
+<button style="width:100%;margin-top:12px;background:#0F766E;color:#fff;border:0;border-radius:10px;padding:13px;font-weight:700">Gönder</button></form>
+<script src="/form/validate.js" defer></script></main></body></html>"""
 
 
 @app.post("/form/geri-bildirim", response_class=HTMLResponse)
@@ -350,8 +478,13 @@ async def feedback_submit(request: Request):
     if not verify_sig("/form/geri-bildirim", (tok_p.get("exp") or [""])[0], (tok_p.get("sig") or [""])[0]):
         raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş")
     msg = str(f.get("mesaj", ""))[:1500]
-    if msg.strip():
-        await modules.alert_doctor(S.doctor_owner, f"Başhekimliğe geri bildirim: {msg[:600]} | İletişim: {str(f.get('iletisim', ''))[:40] or 'yok'}", None, "geri_bildirim")
+    if not msg.strip():
+        return HTMLResponse(
+            "<meta charset=utf-8><body style='font-family:system-ui;padding:24px;color:#0A2540'>"
+            "<h2>Lütfen mesajınızı yazın</h2><p><a href='/' style='display:inline-block;padding:10px 16px;border-radius:8px;background:#0A2540;color:#fff;text-decoration:none;font-weight:600'>Kliniğe / Ana Sayfaya Dön</a></p></body>",
+            status_code=400,
+        )
+    await modules.alert_doctor(S.doctor_owner, f"Başhekimliğe geri bildirim: {msg[:600]} | İletişim: {str(f.get('iletisim', ''))[:40] or 'yok'}", None, "geri_bildirim")
     return HTMLResponse("<meta charset=utf-8><body style='font-family:system-ui;padding:24px'><h2>Teşekkür ederiz, mesajınız iletildi.</h2></body>")
 
 

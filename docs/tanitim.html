@@ -106,6 +106,10 @@ p, li, dd, dt, td, th, label, small, span, div, a, button, input, select, textar
   max-height: 999999px;
 }
 
+html {
+  scroll-padding-top: 80px;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -222,17 +226,21 @@ code {
   font-size: 19px;
   color: var(--navy);
   white-space: nowrap;
+  min-height: 44px;
 }
 .nav-links {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   font-size: 15px;
   font-weight: 600;
   color: var(--ink-2);
 }
 .nav-links a {
-  padding: var(--space-1) 4px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: var(--space-1) 6px;
   white-space: nowrap;
   transition: color 0.15s ease;
 }
@@ -266,6 +274,9 @@ code {
   gap: 4px;
 }
 .mobile-menu-in a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   padding: 12px 4px;
   font-weight: 600;
   color: var(--ink);
@@ -805,7 +816,7 @@ code {
 .range-row input[type="range"] {
   grid-column: 1 / -1;
   width: 100%;
-  min-height: 28px;
+  min-height: 44px;
   accent-color: var(--teal);
   cursor: pointer;
 }
@@ -928,7 +939,7 @@ code {
 }
 .demo-copy { color: var(--ink-2); margin: 0 0 20px; }
 .demo-panel-link { margin: 20px 0 0; font-size: 14.5px; color: var(--muted); }
-.demo-panel-link a { color: var(--teal); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.demo-panel-link a { display: inline-flex; align-items: center; min-height: 28px; color: var(--teal); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .lead-form {
   display: flex;
   flex-direction: column;
@@ -946,13 +957,20 @@ code {
   font-weight: 650;
   color: var(--navy);
 }
-.lead-form input {
+.lead-form input,
+.lead-form select,
+.lead-form textarea,
+.lead-form button {
+  font-size: 1rem;
+}
+.lead-form input,
+.lead-form select,
+.lead-form textarea {
   min-height: 44px;
   border: 1px solid var(--border-field);
   border-radius: var(--radius-sm);
   padding: 12px;
   font-family: inherit;
-  font-size: 15px;
   color: var(--ink);
   background: var(--bg-surface);
 }
@@ -977,6 +995,44 @@ code {
 }
 .form-msg.err { color: var(--danger); }
 .lead-form small { color: var(--muted); font-size: 13px; }
+.kvkk-note {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.lead-form label.kvkk-check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.kvkk-req {
+  color: var(--navy);
+  font-weight: 700;
+}
+.kvkk-opt {
+  color: var(--teal-ink);
+  font-weight: 700;
+}
+.lead-form label.kvkk-check input {
+  min-height: 24px;
+  min-width: 24px;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  padding: 0;
+  flex: none;
+  accent-color: var(--teal);
+}
 
 /* Footer */
 .foot {
@@ -994,8 +1050,8 @@ code {
 }
 .foot-brand { display: flex; flex-direction: column; gap: 4px; }
 .foot-brand strong { color: var(--on-dark); font-size: 16px; }
-.foot-links { display: flex; gap: 20px; flex-wrap: wrap; }
-.foot-links a { color: var(--teal-bright); font-weight: 600; }
+.foot-links { display: flex; gap: 16px; flex-wrap: wrap; }
+.foot-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 6px; color: var(--teal-bright); font-weight: 600; }
 
 @media (max-width: 960px) {
   .nav-links { display: none; }
@@ -1429,7 +1485,7 @@ code {
 
       <details class="tech-details">
       <summary>Teknik ayrıntı: BT ekibiniz için 12 güvenlik başlığı</summary>
-      <div class="table-wrap dark-table-wrap">
+      <div class="table-wrap dark-table-wrap" tabindex="0" role="region" aria-label="12 HTTP güvenlik başlığı tablosu">
         <table class="sec-table">
           <thead>
             <tr>
@@ -1503,7 +1559,7 @@ code {
     <div class="wrap">
       <h2>Tipik mesaj botu ile DentaCore arasındaki fark</h2>
       <p class="sec-sub">Piyasadaki sıradan SaaS mesaj botlarının bıraktığı güvenlik, klinik takip ve maliyet açıklarını tek mimaride kapatır.</p>
-      <div class="table-wrap">
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Tipik mesaj botu ile DentaCore karşılaştırma tablosu">
         <table class="cmp">
           <thead>
             <tr>
@@ -1600,8 +1656,8 @@ code {
           <a class="btn btn-ghost" href="#demo">Temel ile başlayın</a>
         </article>
         <article class="price best">
-          <span class="flag">En çok tercih edilen</span>
           <h3>Klinik</h3>
+          <span class="flag">En çok tercih edilen</span>
           <div class="price-val"><b>5.900 TL</b><span>+ KDV / ay</span></div>
           <ul>
             <li>Temel paketin tamamı</li>
@@ -1688,6 +1744,17 @@ code {
               <input id="f-chairs" name="chairs" type="number" min="1" max="200" placeholder="3">
             </label>
           </div>
+          <div class="kvkk-note">
+            <strong>KVKK Aydınlatma Özeti:</strong> Girdiğiniz klinik adı ve iletişim bilgisi yalnızca tanıtım ve demo talebinize dönüş yapılması amacıyla şifreli olarak kaydedilir.
+          </div>
+          <label class="kvkk-check" for="f-kvkk">
+            <input id="f-kvkk" name="kvkk_aydinlatma" type="checkbox" value="1" required>
+            <span><strong class="kvkk-req">(Zorunlu)</strong> Aydınlatma metnini okudum; iletişim bilgilerimin tanıtım ve demo talebime dönüş yapılması amacıyla işlenmesine açık rıza veriyorum.</span>
+          </label>
+          <label class="kvkk-check" for="f-yurtdisi">
+            <input id="f-yurtdisi" name="yurt_disi_riza" type="checkbox" value="1">
+            <span><strong class="kvkk-opt">(İsteğe bağlı)</strong> İletişim sürecinde yurt dışı mesajlaşma/bulut servislerine aktarım yapılmasına izin veriyorum.</span>
+          </label>
           <label class="hp" aria-hidden="true">Web sitesi<input name="website" tabindex="-1" autocomplete="off"></label>
           <button class="btn btn-cta btn-lg" id="lead-submit" type="submit">Tanıtım talep et</button>
           <p class="form-msg" id="lead-msg" role="status" aria-live="polite"></p>
@@ -3198,9 +3265,16 @@ code {
       const f = new FormData(form);
       const clinic = String(f.get("clinic") || "").trim();
       const contact = String(f.get("contact") || "").trim();
+      const kvkkOk = Boolean(form.querySelector('[name="kvkk_aydinlatma"]')?.checked);
+      const yurtDisiOk = Boolean(form.querySelector('[name="yurt_disi_riza"]')?.checked);
       if (clinic.length < 2 || contact.length < 5) {
         msg.classList.add("err");
         msg.textContent = "Lütfen klinik adını ve geçerli bir telefon veya e-posta girin.";
+        return;
+      }
+      if (!kvkkOk) {
+        msg.classList.add("err");
+        msg.textContent = "Lütfen KVKK aydınlatma ve iletişim rızası kutusunu işaretleyin.";
         return;
       }
       const body = {
@@ -3208,6 +3282,8 @@ code {
         contact,
         city: String(f.get("city") || "").trim() || null,
         chairs: f.get("chairs") ? Number(f.get("chairs")) : null,
+        kvkk_aydinlatma: kvkkOk,
+        yurt_disi_riza: yurtDisiOk,
         website: f.get("website") || null
       };
       if (submitBtn) submitBtn.disabled = true;

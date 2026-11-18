@@ -154,6 +154,12 @@ ALTER TABLE charges         ADD COLUMN IF NOT EXISTS clinic_id BIGINT NOT NULL D
 ALTER TABLE payments        ADD COLUMN IF NOT EXISTS clinic_id BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE alerts          ADD COLUMN IF NOT EXISTS clinic_id BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE message_log     ADD COLUMN IF NOT EXISTS clinic_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE message_log     ADD COLUMN IF NOT EXISTS body TEXT;
+ALTER TABLE message_log     ADD COLUMN IF NOT EXISTS delivery_status TEXT;
+ALTER TABLE message_log     ADD COLUMN IF NOT EXISTS delivery_error TEXT;
+ALTER TABLE slot_offers     ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS clinics_wa_phone_id_uq ON clinics (wa_phone_id) WHERE wa_phone_id <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS clinics_ig_handle_uq ON clinics (ig_handle) WHERE ig_handle <> '';
 
 CREATE TABLE IF NOT EXISTS message_templates (
   id         BIGSERIAL PRIMARY KEY,
@@ -176,6 +182,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS payments_idem_uq ON payments (clinic_id, idemp
 ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}';
 ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS buffer_min INT NOT NULL DEFAULT 0;
 ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS ai_custom_rules_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS cal_token_version INT NOT NULL DEFAULT 1;
+ALTER TABLE leads        ADD COLUMN IF NOT EXISTS kvkk_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE leads        ADD COLUMN IF NOT EXISTS kvkk_sha256 TEXT NOT NULL DEFAULT '';
+ALTER TABLE leads        ADD COLUMN IF NOT EXISTS yurt_disi_riza BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS tooth_records (
   id              BIGSERIAL PRIMARY KEY,

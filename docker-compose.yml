@@ -115,6 +115,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/dentacore
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       PUBLIC_URL: https://api.${DOMAIN}
+      TRUSTED_PROXY: "1"
       TZ: Europe/Istanbul
     volumes:
       - apidata:/data

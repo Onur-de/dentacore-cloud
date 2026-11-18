@@ -9,7 +9,9 @@ import json
 import os as _os
 import secrets
 import struct
+import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -224,3 +226,76 @@ def verify_chain(rows: list[dict]) -> dict:
             return {"ok": False, "broken_at": r["id"], "checked": rows.index(r)}
         prev = r["hash"]
     return {"ok": True, "checked": len(rows), "head": prev}
+
+
+# ---------------------------------------------------------------- Webhook TTL Dedup Önbelleği
+class WebhookDedupCache:
+    """Sınırlı boyutlu (10.000) ve TTL'li (24 saat) webhook tekrar işleme engeli."""
+
+    def __init__(self, max_size: int = 10_000, ttl_seconds: int = 86_400):
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+        self._items: OrderedDict[str, float] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def seen_or_add(self, msg_id: str, now: float | None = None) -> bool:
+        if not msg_id:
+            return False
+        ts = time.monotonic() if now is None else now
+        with self._lock:
+            cutoff = ts - self.ttl_seconds
+            while self._items:
+                _, oldest_ts = next(iter(self._items.items()))
+                if oldest_ts <= cutoff:
+                    self._items.popitem(last=False)
+                else:
+                    break
+            if msg_id in self._items:
+                self._items.move_to_end(msg_id)
+                return True
+            while len(self._items) >= self.max_size:
+                self._items.popitem(last=False)
+            self._items[msg_id] = ts
+            return False
+
+
+# ---------------------------------------------------------------- KVKK Metinleri & Rıza Yardımcıları
+KVKK_METIN_VER = "2026-11-v2"
+
+
+def kvkk_texts(clinic_name: str) -> dict[str, str]:
+    c = (clinic_name or "Kliniğimiz").strip()
+    return {
+        "aydinlatma": (
+            f"Veri Sorumlusu: {c}. Kimlik, iletişim ve beyan ettiğiniz sağlık bilgileriniz; randevu, "
+            "muayene ve tedavi planlaması amaçlarıyla şifreli olarak işlenir, yalnızca yetkili klinik hekim ve "
+            "personelince görülür. 6698 sayılı KVKK m.11 kapsamındaki bilgi, düzeltme, silme ve rıza geri alma "
+            "taleplerinizi kliniğimize iletebilirsiniz."
+        ),
+        "saglik": (
+            f"Sağlık verilerimin (anamnez cevapları ve klinik değerlendirme kayıtları) yalnızca muayene ve tedavi "
+            f"planlaması amacıyla {c} tarafından işlenmesine açık rıza veriyorum."
+        ),
+        "yurt_disi": (
+            "İletişim ve randevu hatırlatmaları kapsamında verilerimin yurt dışındaki mesajlaşma/altyapı "
+            "sağlayıcılarına (ör. WhatsApp/Meta veya bulut yapay zekâ servisleri) aktarılmasına açık rıza veriyorum "
+            "(isteğe bağlıdır)."
+        ),
+        "lead": (
+            "Aydınlatma metnini okudum; klinik adı ve iletişim bilgilerimin yalnızca tanıtım ve demo talebime "
+            "dönüş yapılması amacıyla işlenmesine açık rıza veriyorum."
+        ),
+        "lead_yurt_disi": (
+            "Tanıtım iletişiminde yurt dışı bulut/mesajlaşma sağlayıcılarına aktarım yapılmasına izin veriyorum (isteğe bağlı)."
+        ),
+    }
+
+
+def kvkk_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def is_checked(val: object) -> bool:
+    if isinstance(val, bool):
+        return val
+    return str(val or "").strip().lower() in ("1", "true", "on", "yes", "evet")

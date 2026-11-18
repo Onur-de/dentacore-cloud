@@ -204,9 +204,16 @@
       const f = new FormData(form);
       const clinic = String(f.get("clinic") || "").trim();
       const contact = String(f.get("contact") || "").trim();
+      const kvkkOk = Boolean(form.querySelector('[name="kvkk_aydinlatma"]')?.checked);
+      const yurtDisiOk = Boolean(form.querySelector('[name="yurt_disi_riza"]')?.checked);
       if (clinic.length < 2 || contact.length < 5) {
         msg.classList.add("err");
         msg.textContent = "Lütfen klinik adını ve geçerli bir telefon veya e-posta girin.";
+        return;
+      }
+      if (!kvkkOk) {
+        msg.classList.add("err");
+        msg.textContent = "Lütfen KVKK aydınlatma ve iletişim rızası kutusunu işaretleyin.";
         return;
       }
       const body = {
@@ -214,6 +221,8 @@
         contact,
         city: String(f.get("city") || "").trim() || null,
         chairs: f.get("chairs") ? Number(f.get("chairs")) : null,
+        kvkk_aydinlatma: kvkkOk,
+        yurt_disi_riza: yurtDisiOk,
         website: f.get("website") || null
       };
       if (submitBtn) submitBtn.disabled = true;
