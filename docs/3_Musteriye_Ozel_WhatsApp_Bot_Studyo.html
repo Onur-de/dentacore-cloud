@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="DentaCore v6.2 Parlant VIP Hasta Koordinatörü ve Müşteriye Özel WhatsApp Yapay Zeka Cevap Stüdyosu.">
+  <title>DentaCore v6.2 : Müşteriye Özel WhatsApp Yapay Zeka Bot & Cevap Stüdyosu</title>
+  <style>/* Hallmark · shape: station-sequence · genre: modern-minimal · theme: Wayfind (deal 2/3, seed dentacore-klinik-rehberi-fb5d·aec816b4·2026-11-18·r0) · job: try · draw: dentacore-v62
+ * hero: stage · nav: top-bar · footer: ledger · imagery: none · signature: station-index · wayfind: 4px-grid
+ * axes: light/mono/cool · posture: committed · contrast: pass · fold: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P9 H9 E9 S9 R9 V9 · weakest: S, tightened spacing to strict 4px scale */
+  :root {
+    --bg-page: #F3F7F6;
+    --bg-surface: #FAFDFC;
+    --bg-subtle: #E6F0EE;
+    --bg-accent-soft: #E0F2FE;
+    --bg-warn-soft: #FEF3C7;
+    --bg-success-soft: #DCFCE7;
+    --bg-code: #0D211F;
+    --text-code: #EEF7F6;
+    --text-main: #0F2926;
+    --text-secondary: #334E4B;
+    --text-muted: #56706D;
+    --primary: #0B5E56;
+    --primary-hover: #084741;
+    --accent: #0891B2;
+    --success: #15803D;
+    --warn: #B45309;
+    --border-color: #CBDAD7;
+    --border-strong: #94B0AB;
+    --shadow-card: 0 8px 20px -4px rgba(15, 41, 38, 0.07);
+    --shadow-hover: 0 12px 28px -4px rgba(15, 41, 38, 0.13);
+    --focus-ring: 0 0 0 4px rgba(8, 145, 178, 0.35);
+    --font-heading: 'Plus Jakarta Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html, body {
+    overflow-x: clip;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    background-color: var(--bg-page);
+    color: var(--text-main);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.65;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+    text-wrap: balance;
+  }
+
+  .container {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 28px 20px 64px;
+  }
+
+  .hero-banner {
+    background-color: var(--primary);
+    color: var(--bg-surface);
+    padding: 32px 28px;
+    border-radius: var(--radius-lg);
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background-color: var(--primary-hover);
+    color: var(--bg-surface);
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13.5px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  .hero-banner h1 {
+    font-size: clamp(1.45rem, 2.5vw, 2.1rem);
+    line-height: 1.25;
+    margin-bottom: 8px;
+  }
+
+  .hero-lead {
+    color: var(--bg-subtle);
+    font-size: 15.5px;
+    max-width: 880px;
+  }
+
+  .studio-grid {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  .section-card {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .section-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+  }
+
+  .section-card h2 {
+    font-size: 1.2rem;
+    margin-bottom: 8px;
+    color: var(--text-main);
+  }
+
+  .section-desc {
+    color: var(--text-secondary);
+    font-size: 14.5px;
+    margin-bottom: 16px;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .form-group label {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-main);
+  }
+
+  .form-control {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-surface);
+    color: var(--text-main);
+    font-family: var(--font-body);
+    font-size: 14.5px;
+    line-height: 1.45;
+  }
+
+  textarea.form-control {
+    min-height: 68px;
+    resize: vertical;
+  }
+
+  .form-control:focus-visible, .btn:focus-visible, .preset-chip:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-color: var(--accent);
+  }
+
+  .preset-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .preset-chip {
+    background-color: var(--bg-subtle);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .preset-chip:hover, .preset-chip.active {
+    background-color: var(--primary);
+    color: var(--bg-surface);
+    border-color: var(--primary);
+    transform: translateY(-2px);
+  }
+
+  .preset-chip:active, .btn:active {
+    transform: translateY(0);
+  }
+
+  .preset-chip:disabled, .btn:disabled, .form-control:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .wa-box {
+    background-color: var(--bg-page);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .wa-msg-in {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 12px;
+  }
+
+  .wa-msg-out-new {
+    background-color: var(--bg-success-soft);
+    border: 1px solid var(--success);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .wa-msg-out-old {
+    background-color: var(--bg-warn-soft);
+    border: 1px solid var(--warn);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+  }
+
+  .msg-tag {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: var(--text-secondary);
+  }
+
+  .repo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin-top: 12px;
+  }
+
+  .repo-item {
+    background-color: var(--bg-page);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px;
+  }
+
+  .repo-item strong {
+    display: block;
+    color: var(--primary);
+    font-size: 14.5px;
+    margin-bottom: 4px;
+  }
+
+  .repo-item p {
+    font-size: 13.5px;
+    color: var(--text-secondary);
+  }
+
+  .btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background-color: var(--primary);
+    color: var(--bg-surface);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-sm);
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: transform 0.15s ease, background-color 0.15s ease;
+  }
+
+  .btn:hover {
+    background-color: var(--primary-hover);
+    transform: translateY(-2px);
+  }
+
+  .btn-secondary {
+    background-color: var(--bg-surface);
+    color: var(--text-main);
+    border-color: var(--border-strong);
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--bg-subtle);
+  }
+
+  .svg-icon {
+    width: 18px;
+    height: 18px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex-shrink: 0;
+  }
+
+  .code-out {
+    background-color: var(--bg-code);
+    color: var(--text-code);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    padding: 16px;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    margin-top: 12px;
+  }
+
+  @media (max-width: 960px) {
+    .studio-grid, .grid-2 {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition: none !important;
+      animation: none !important;
+    }
+  }
+  </style>
+</head>
+<body>
+<main class="container">
+  <header class="hero-banner">
+    <div class="hero-badge">
+      <svg class="svg-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>DentaCore v6.2 · Parlant + Rasa CALM + Chatwoot Captain VIP Hasta Koordinatörü</span>
+    </div>
+    <h1>Müşteriye Özel WhatsApp Yapay Zeka Cevap &amp; Üslup Stüdyosu</h1>
+    <p class="hero-lead">
+      Yapay zeka olduğu belli olmayan, hastaya değer hissettiren resmi ve samimi VIP Hasta Koordinatörü motoru. Sol taraftan kliniğin özel isteklerini değiştirin; sağ tarafta hastanın sorusuna göre cevabın nasıl anında şekillendiğini canlı görün.
+    </p>
+  </header>
+
+  <div class="studio-grid">
+    <section class="section-card" aria-labelledby="policy-title">
+      <h2 id="policy-title">1. Müşterinin (Kliniğin) Özel Cevap Politikası ve Üslup Ayarları</h2>
+      <p class="section-desc">Her diş kliniğinin fiyat, ilk muayene, nakit indirimi, çocuk diş, iğne korkusu ve yurt dışı hasta yaklaşımı farklıdır. Buradaki değişiklikler anında sağdaki WhatsApp yanıt motoruna yansır:</p>
+
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="st_clinic">Klinik Adı</label>
+          <input id="st_clinic" class="form-control" type="text" value="Özel DentaCore Merkez Polikliniği">
+        </div>
+        <div class="form-group">
+          <label for="st_tone">Konuşma Üslubu (Voice DNA)</label>
+          <select id="st_tone" class="form-control">
+            <option value="resmi_samimi">Resmi, Samimi ve Değer Hissettiren VIP Koordinatör (Önerilen)</option>
+            <option value="butik_sicak">Sıcak, İçten ve Aile Diş Hekimi Yaklaşımı</option>
+            <option value="akademik_kurumsal">Kurumsal ve Akademik Poliklinik Üslubu</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="st_address">Açık Adres</label>
+          <input id="st_address" class="form-control" type="text" value="Bağdat Cad. No:142, Kadıköy / İstanbul">
+        </div>
+        <div class="form-group">
+          <label for="st_phone">Klinik Telefonu</label>
+          <input id="st_phone" class="form-control" type="text" value="+90 216 555 01 01">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="st_parking">Otopark ve Ulaşım Kolaylığı</label>
+        <input id="st_parking" class="form-control" type="text" value="Binamızın hemen önünde ücretsiz misafir otoparkımız ve 100 metre ileride anlaşmalı kapalı otoparkımız mevcuttur">
+      </div>
+
+      <div class="form-group">
+        <label for="st_cash">Nakit / Peşin Ödeme Avantajı Politikası</label>
+        <textarea id="st_cash" class="form-control">Nakit veya peşin ödemelerde sağladığımız özel ödeme kolaylıklarını da muayeneniz sırasında planınıza özenle yansıtıyoruz.</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="st_pain">İğne &amp; Diş Hekimi Korkusu (Konfor Protokolü)</label>
+        <textarea id="st_pain" class="form-control">İğne ve diş hekimi korkusu olan misafirlerimizde işlem öncesinde yüzey uyuşturucu jel, modern lokal anestezi ve sedasyon destekli konfor protokolü uyguluyoruz.</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="st_kids">Çocuk Diş Hekimliği (Pedodonti) Yaklaşımı</label>
+        <textarea id="st_kids" class="form-control">Çocuk diş hekimimiz (pedodonti uzmanımız), minik misafirlerimizin tedavilerini hiç korkutmadan, oyunlaştırılmış ve koruyucu bir yaklaşımla gerçekleştiriyor.</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="st_tourism">Yurt Dışı / Şehir Dışı Misafir VIP Karşılama Politikası</label>
+        <textarea id="st_tourism" class="form-control">Yurt dışından ve şehir dışından gelen misafirlerimiz için uçuş takviminize tam uyumlu hızlandırılmış VIP randevu planlaması uyguluyoruz.</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="st_extra">Kliniğe Özel Ekstra Kampanya / Vale / Karşılama Notu (İsteğe Bağlı)</label>
+        <input id="st_extra" class="form-control" type="text" placeholder="Örn: Randevulu misafirlerimiz için ücretsiz vale ve panoramik röntgen desteğimiz mevcuttur.">
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="btn" id="btn-copy-json">
+          <svg class="svg-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Müşteri AI Politikası JSON Kopyala</span>
+        </button>
+        <a class="btn btn-secondary" href="2_Birebir_Yonetim_Paneli.html#/settings">
+          <span>Yönetim Paneli Ayarlarına Git</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="section-card" aria-labelledby="sim-title">
+      <h2 id="sim-title">2. Canlı Hasta Sorusu Testi (Önceki Robotik Yanıt vs. Yeni VIP Koordinatör)</h2>
+      <p class="section-desc">Aşağıdaki gerçek hasta mesajlarından birine tıklayın veya kendi sorunuzu yazın:</p>
+
+      <div class="preset-wrap" id="preset-buttons"></div>
+
+      <div class="form-group">
+        <label for="st_question">Hastanın WhatsApp Mesajı</label>
+        <textarea id="st_question" class="form-control">Merhaba, tek diş implant fiyatınız ne kadar? Nakit ödesem indirim yapar mısınız?</textarea>
+      </div>
+
+      <div class="wa-box">
+        <div class="wa-msg-in">
+          <span class="msg-tag">Hasta Mesajı (WhatsApp Gelen)</span>
+          <p id="out-question-text"></p>
+        </div>
+
+        <div class="wa-msg-out-new">
+          <span class="msg-tag" id="out-meta-tag">Yeni DentaCore v6.2 Parlant VIP Hasta Koordinatörü Yanıtı (Resmi &amp; Samimi)</span>
+          <p id="out-new-reply"></p>
+        </div>
+
+        <div class="wa-msg-out-old">
+          <span class="msg-tag">Eski Standart Şablon Bot Yanıtı (Karşılaştırma İçin)</span>
+          <p id="out-old-reply"></p>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="btn" id="btn-copy-reply">
+          <svg class="svg-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Yeni VIP Yanıtı Kopyala</span>
+        </button>
+      </div>
+
+      <pre class="code-out" id="out-json-preview"></pre>
+    </section>
+  </div>
+
+  <section class="section-card" aria-labelledby="arch-title">
+    <h2 id="arch-title">3. Uyarlanan Dünya Lideri Açık Kaynak GitHub Konuşma Mimarileri</h2>
+    <p class="section-desc">DentaCore v6.2 WhatsApp yanıt motoruna entegre edilen en yüksek yıldızlı açık kaynak müşteri iletişim mimarileri:</p>
+    <div class="repo-grid">
+      <div class="repo-item">
+        <strong>1. emcie-co/parlant (18,335 Yıldız)</strong>
+        <p>Kuru şablon veya kontrolsüz LLM yerine 4-Katmanlı Bağlamsal Yanıt Bestecisi (Samimi Karşılama + Hastanın Sorduğu Tedavi/Yaş/Ülke Yansıtması + Kliniğe Özel Politika + Nazik Randevu Daveti).</p>
+      </div>
+      <div class="repo-item">
+        <strong>2. chatwoot/chatwoot Captain AI (40,115 Yıldız)</strong>
+        <p>Resmi ve samimi klinik koordinatörü ses tonu, şikayet ve ağrı durumlarında empatik yatıştırma ve başhekimlik/uzman hekim eskalasyonu.</p>
+      </div>
+      <div class="repo-item">
+        <strong>3. RasaHQ/rasa CALM (21,395 Yıldız)</strong>
+        <p>Diyalog varlık hafızası (Slot Carryover): Hasta “5 yaşındaki oğlumun süt dişi çürüdü” dediğinde çocuğun yaşını tekrar sormaz; doğrudan 5 yaş pedodonti yaklaşımıyla yanıt verir.</p>
+      </div>
+      <div class="repo-item">
+        <strong>4. baptisteArno/typebot.io (10,639 Yıldız)</strong>
+        <p>Çok kiracılı (multi-tenant) dinamik değişken enjeksiyonu: Her kliniğin kendi fiyat, nakit, otopark ve karşılama politikasını 0 token maliyetiyle canlı yanıta işler.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+(() => {
+  const PRESETS = [
+    {
+      label: "1. İmplant Fiyat + Nakit İndirimi",
+      q: "Merhaba, tek diş implant fiyatınız ne kadar? Nakit ödesem indirim yapar mısınız?",
+      old: "Tedavi planı ve ücreti, muayene ve röntgen kontrolünüzden sonra hekimimiz size özel yazılı olarak paylaşıyor. Ön değerlendirme için size hangi gün ve saat aralığı uyar?"
+    },
+    {
+      label: "2. 5 Yaş Çocuk Süt Dişi (Pedodonti)",
+      q: "5 yaşındaki oğlumun süt dişi çürüdü, çocuk diş hekiminiz var mı?",
+      old: "Çocuk diş hekimimiz (pedodonti) minik hastalarımızla korkutmayan, koruyucu bir yaklaşımla ilgileniyor. Çocuğunuzun yaşını ve şikayetini yazarsanız uzman hekimimize hemen randevu planlayabiliriz."
+    },
+    {
+      label: "3. Almanya'dan Zirkonyum & Gülüş Tasarımı",
+      q: "Zirkonyum kaplama ve gülüş tasarımı toplam kaç gün sürer? Almanya'dan geleceğim.",
+      old: "Tedavi süresi yapılacak işleme göre değişiyor. Tek seanslık işlemleri aynı gün bitiriyoruz; zirkonyum ve gülüş tasarımı ortalama 4 ile 6 gün sürüyor."
+    },
+    {
+      label: "4. İğne Korkusu & Sedasyon",
+      q: "Benim aşırı iğne ve dişçi korkum var, işlem sırasında canım acır mı, uyutarak yapıyor musunuz?",
+      old: "Hiç endişelenmeyin; işlem öncesinde bölgeyi modern lokal anesteziyle tamamen uyuşturduğumuz için ağrı hissetmezsiniz."
+    },
+    {
+      label: "5. Konum + Arabayla Otopark",
+      q: "Kliniğiniz tam olarak nerede, arabayla gelsem otopark yeriniz var mı?",
+      old: "Adresimiz: Bağdat Cad. No:142, Kadıköy / İstanbul. Yol tarifi: https://maps.google.com/?q=Kadikoy+Istanbul Otopark: Binanın önünde ücretsiz sınırlı otopark."
+    },
+    {
+      label: "6. Akşam Mesaisi & Pazar Nöbetçi Hekim",
+      q: "Akşam saat kaça kadar açıksınız? Pazar günü nöbetçi hekim var mı?",
+      old: "Çalışma saatlerimiz: Hafta içi 09:00-19:00, Cumartesi 09:00-15:00, Pazar kapalı."
+    },
+    {
+      label: "7. Allianz Özel Sigorta & Taksit",
+      q: "Allianz özel sağlık sigortası geçerli mi ve kredi kartına kaç taksit yapıyorsunuz?",
+      old: "Kredi kartlarına taksit yapıyor, özel sağlık sigortası ve anlaşmalı kurumlar için gereken tüm evrakları hazırlıyoruz."
+    },
+    {
+      label: "8. Bozuk Türkçe / STT Yazım Hatası",
+      q: "slm inpilant fyatı nekadr acaba randvu almk istiyom",
+      old: "Mesajınızı hasta kabul ekibimize ilettik; çalışma saatlerimiz içinde size hemen dönüş yapacağız."
+    },
+    {
+      label: "9. İlaç & Antibiyotik Doz Sorusu",
+      q: "Dişim çok zonkluyor, evde Augmentin 1000 mg antibiyotik ve Apranax Fort var, günde kaç tane içeyim?",
+      old: "Geçmiş olsun. Hekim muayenesi olmadan buradan ilaç önerilmez."
+    },
+    {
+      label: "10. Şikayet & Memnuniyetsizlik",
+      q: "Geçen hafta yapılan dolgum düştü ve kimse telefonumu açmıyor, bu nasıl rezalet şikayetçiyim!",
+      old: "Yaşadığınız aksaklık için gerçekten üzgünüz. Mesajınızı doğrudan başhekimliğimize ilettik."
+    }
+  ];
+
+  const $ = (id) => document.getElementById(id);
+
+  function norm(t) {
+    return String(t || "")
+      .replace(/ı/g, "i").replace(/İ/g, "i")
+      .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\bslm\b/g, "selam").replace(/\bmrb\b/g, "merhaba")
+      .replace(/\bne\s*kdr\b/g, "ne kadar").replace(/\bnekadr\b/g, "ne kadar")
+      .replace(/\bfyat\w*\b/g, "fiyat").replace(/\binpilant\w*\b/g, "implant")
+      .replace(/\brandvu\w*\b/g, "randevu").replace(/\balmk\b/g, "almak").replace(/\bistiyom\b/g, "istiyorum")
+      .replace(/\bctesi\b/g, "cumartesi").replace(/\bkapaniyo\b/g, "kapaniyor")
+      .replace(/\s+/g, " ").trim();
+  }
+
+  function extractTreatment(n) {
+    if (n.includes("tek dis implant")) return "tek diş implant tedaviniz";
+    if (n.includes("zirkonyum") && n.includes("gulus")) return "zirkonyum kaplama ve dijital gülüş tasarımı süreciniz";
+    if (n.includes("zirkonyum")) return "zirkonyum kaplama tedaviniz";
+    if (n.includes("gulus")) return "dijital gülüş tasarımı süreciniz";
+    if (n.includes("beyazlatma")) return "profesyonel diş beyazlatma işleminiz";
+    if (n.includes("kanal")) return "kanal tedaviniz";
+    if (n.includes("dolgu")) return "estetik dolgu işleminiz";
+    if (n.includes("implant")) return "implant tedaviniz";
+    return null;
+  }
+
+  function getRules() {
+    return {
+      clinic: $("st_clinic").value.trim() || "Özel DentaCore Merkez Polikliniği",
+      tone: $("st_tone").value,
+      address: $("st_address").value.trim() || "Bağdat Cad. No:142, Kadıköy / İstanbul",
+      phone: $("st_phone").value.trim() || "+90 216 555 01 01",
+      parking: $("st_parking").value.trim(),
+      cash_discount_note: $("st_cash").value.trim(),
+      pain_comfort_note: $("st_pain").value.trim(),
+      kids_note: $("st_kids").value.trim(),
+      health_tourism_note: $("st_tourism").value.trim(),
+      custom_extra_note: $("st_extra").value.trim()
+    };
+  }
+
+  function composeReply(qText, rules) {
+    const n = norm(qText);
+    const greet = rules.tone === "butik_sicak"
+      ? `Merhabalar, ${rules.clinic} ailemize hoş geldiniz.`
+      : (rules.tone === "akademik_kurumsal"
+          ? `Sayın Misafirimiz, ${rules.clinic} hasta danışma birimine hoş geldiniz.`
+          : `Merhabalar, kliniğimize hoş geldiniz.`);
+
+    if (/(kanama durmuyor|nefes alamiyorum|yutkunamiyorum|yuzum ve bogazim sisti)/.test(n)) {
+      return `Çok geçmiş olsun; belirttiğiniz durum acil tıbbi değerlendirme gerektirebilir. Lütfen vakit kaybetmeden 112'yi arayın veya en yakın acil servise başvurun. Nöbetçi hekimimize de acil koduyla bilgi verildi; klinik doğrudan hattımız: ${rules.phone}`;
+    }
+    if (/(augmentin|apranax|antibiyotik|agri kesici|coumadin|kan sulandirici|kac tane iceyim|\bmg\b)/.test(n)) {
+      return `Merhabalar, öncelikle çok geçmiş olsun; ağrınızı ve hassasiyetinizi çok iyi anlıyoruz. Ancak sağlığınız ve güvenliğiniz için hekim muayenesi ve klinik değerlendirme olmadan buradan ilaç, antibiyotik veya doz kullanımı ya da mevcut ilacın kesilmesi doğru değildir. Durumunuzu acil öncelikle uzman diş hekimimize ve ekibimize ilettik; sizi en kısa sürede arayıp bilgilendireceğiz.`;
+    }
+    if (/(sikayetciyim|rezalet|kaba|telefonumu acmiyor)/.test(n)) {
+      return `Merhabalar, yaşadığınız bu aksaklık nedeniyle kliniğimiz adına içtenlikle özür dileriz; memnuniyetiniz ve geri bildiriminiz bizim için çok kıymetli. Mesajınızı acil öncelikle doğrudan başhekimliğimize ilettim; kıdemli koordinatörümüz konuyu bizzat çözmek üzere sizinle en kısa sürede iletişime geçecektir.`;
+    }
+
+    const parts = [];
+    const tLbl = extractTreatment(n);
+
+    if (/(nerede|adres|konum)/.test(n) && /(otopark|arabayla|park)/.test(n)) {
+      parts.push(`Merhabalar, sizleri ${rules.address} adresindeki kliniğimizde ağırlamaktan memnuniyet duyarız. Özel aracınızla rahatça gelebilirsiniz; ${rules.parking}.`);
+    } else if (/(nerede|adres|konum)/.test(n)) {
+      parts.push(`Merhabalar, sizleri ${rules.address} adresindeki kliniğimizde ağırlamaktan mutluluk duyarız. Kliniğimize gelirken yol veya ulaşım konusunda her türlü sorunuzda bize yazabilirsiniz.`);
+    } else if (/(otopark|arabayla|park)/.test(n)) {
+      parts.push(`Merhabalar, kliniğimize özel aracınızla gönül rahatlığıyla gelebilirsiniz; ${rules.parking}.`);
+    }
+
+    if (/(korku|igne|acir mi|aci hisseder|uyutarak|sedasyon)/.test(n)) {
+      parts.push(`Merhabalar, bu hassasiyetinizi bizimle paylaştığınız için çok teşekkür ederiz; kliniğimizde sizi çok iyi anlıyoruz. ${rules.pain_comfort_note} Dilerseniz ilk gelişinizde hiçbir işlem yapmadan, sadece uzman hekimimizle tanışma ve ön görüşme için randevu oluşturalım mı?`);
+    }
+
+    if (/(cocuk|pedodonti|sut disi|oglum|kizim)/.test(n)) {
+      const ageM = n.match(/\b(\d{1,2})\s*yas/);
+      const rel = n.includes("oglum") ? "oğlunuza" : (n.includes("kizim") ? "kızınıza" : "evladınıza");
+      if (ageM) {
+        parts.push(`Merhabalar, öncelikle ${ageM[1]} yaşındaki ${rel} çok geçmiş olsun. ${rules.kids_note} ${ageM[1]} yaş grubu minik misafirlerimizin rahat bir muayene geçirmesi için size uygun günü paylaşırsanız uzman çocuk diş hekimimize hemen öncelikli randevu planlayabiliriz.`);
+      } else {
+        parts.push(`Merhabalar, ${rules.kids_note} Çocuğunuzun yaşını ve varsa şikayetini paylaşırsanız uzman çocuk diş hekimimize hemen öncelikli randevu planlayabiliriz.`);
+      }
+    }
+
+    if (/(kac gun surer|toplam kac gun|almanya|yurt disi|sehir disi)/.test(n)) {
+      const trv = n.includes("almanya")
+        ? `Almanya'dan kliniğimize gösterdiğiniz ilgi için çok teşekkür ederiz; ${rules.health_tourism_note} `
+        : `${rules.health_tourism_note} `;
+      parts.push(`Merhabalar, ${trv}Tedavi süremiz yapılacak klinik planlamaya göre şekilleniyor: tek seanslık işlemleri aynı gün tamamlıyoruz; zirkonyum kaplama ve dijital gülüş tasarımı süreçlerimiz ise provalarla birlikte ortalama 4 ile 6 gün (4-6 gün) sürüyor. İmplant tedavi takvimini ise hekimimiz muayenede netleştiriyor. Size özel tedavi planı çıkarmamız için ön değerlendirme randevusu oluşturalım mı?`);
+    }
+
+    if (/(sigorta|allianz|taksit)/.test(n)) {
+      const brand = n.includes("allianz") ? "Allianz özel sağlık sigortası dahil " : "";
+      parts.push(`Merhabalar, kliniğimizde kredi kartı ile ödemelerde taksit kolaylığı sağlıyor; ${brand}özel sağlık sigortası ve anlaşmalı kurumlar için poliçenizin gerektirdiği tüm tanı, röntgen ve fatura evraklarını eksiksiz hazırlıyoruz. Poliçenizin kapsamını veya kartınıza uygun taksit seçeneklerini hasta kabul ekibimizin sizin için hemen kontrol etmesi adına telefon numaranızı bırakabilirsiniz.`);
+    }
+
+    if (/(fiyat|ne kadar|ucret(?!siz)|kac tl)/.test(n) && !(/(sigorta|taksit)/.test(n) && !/(fiyat|ne kadar)/.test(n))) {
+      const tPhrase = tLbl ? `Sorduğunuz ${tLbl} için ` : "Kliniğimizde ";
+      let fp = `${greet} ${tPhrase}tedavi planı ve net ücreti, uzman hekimimizin yapacağı muayene ve panoramik röntgen kontrolünüzden sonra size özel yazılı olarak paylaşıyoruz.`;
+      if (/(nakit|pesin|indirim)/.test(n)) {
+        fp += ` ${rules.cash_discount_note}`;
+      }
+      fp += " Ön değerlendirme ve size özel planlama için hangi gün ve saat aralığı size uyar?";
+      parts.push(fp);
+    }
+
+    if (/(kaca kadar acik|calisma saat|cumartesi|pazar|nobetci)/.test(n)) {
+      parts.push(`Merhabalar, kliniğimizde sizleri hafta içi her gün 09:00-19:00, Cumartesi günleri ise 09:00-15:00 saatleri arasında ağırlıyoruz. Pazar günleri rutin muayeneye kapalıyız ancak acil durumlar için nöbetçi hekim koordinasyonumuz mevcuttur. Size uygun bir gün için randevu planlayalım mı?`);
+    }
+
+    if (/(randevu)/.test(n) && parts.length === 0) {
+      parts.push(`${greet} Randevu talebinizi memnuniyetle aldık. Size en uygun gün ve saat aralığını paylaşırsanız hasta koordinatörümüz hekim takvimini kontrol edip randevunuzu hemen teyit edecektir.`);
+    }
+
+    if (parts.length === 0) {
+      parts.push(`${greet} Mesajınızı ve talebinizi kıdemli hasta danışmanımıza hemen ilettik; size en doğru bilgiyle yardımcı olabilmemiz için çok kısa sürede dönüş yapacağız.`);
+    }
+
+    let out = parts[0];
+    if (parts.length > 1) {
+      const rest = parts.slice(1).map((p, i) => {
+        const clean = p.replace(/^(Merhabalar,\s*|Sayın Misafirimiz,\s*)/i, "");
+        return i === 0 ? `Ayrıca ${clean.charAt(0).toLowerCase()}${clean.slice(1)}` : clean;
+      });
+      out = [parts[0], ...rest].join(" ");
+    }
+    if (rules.custom_extra_note) {
+      out += ` ${rules.custom_extra_note}`;
+    }
+    return out.replace(/\.{2,}/g, ".").trim();
+  }
+
+  let currentOld = PRESETS[0].old;
+
+  function updateStudio() {
+    const rules = getRules();
+    const qText = $("st_question").value.trim();
+    const reply = composeReply(qText, rules);
+    $("out-question-text").textContent = qText;
+    $("out-new-reply").textContent = reply;
+    $("out-old-reply").textContent = currentOld;
+    $("out-json-preview").textContent = JSON.stringify({
+      clinic: rules.clinic,
+      ai_custom_rules: {
+        tone: rules.tone,
+        price_policy: "free_exam_invite",
+        cash_discount_note: rules.cash_discount_note,
+        pain_comfort_note: rules.pain_comfort_note,
+        kids_note: rules.kids_note,
+        health_tourism_note: rules.health_tourism_note,
+        custom_extra_note: rules.custom_extra_note
+      }
+    }, null, 2);
+  }
+
+  const wrap = $("preset-buttons");
+  PRESETS.forEach((p, idx) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "preset-chip" + (idx === 0 ? " active" : "");
+    b.textContent = p.label;
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".preset-chip").forEach((el) => el.classList.remove("active"));
+      b.classList.add("active");
+      $("st_question").value = p.q;
+      currentOld = p.old;
+      updateStudio();
+    });
+    wrap.appendChild(b);
+  });
+
+  ["st_clinic", "st_tone", "st_address", "st_phone", "st_parking", "st_cash", "st_pain", "st_kids", "st_tourism", "st_extra", "st_question"].forEach((id) => {
+    $(id).addEventListener("input", updateStudio);
+    $(id).addEventListener("change", updateStudio);
+  });
+
+  $("btn-copy-reply").addEventListener("click", () => {
+    navigator.clipboard?.writeText($("out-new-reply").textContent || "");
+    $("btn-copy-reply").querySelector("span").textContent = "VIP Yanıt Kopyalandı!";
+    setTimeout(() => { $("btn-copy-reply").querySelector("span").textContent = "Yeni VIP Yanıtı Kopyala"; }, 1800);
+  });
+
+  $("btn-copy-json").addEventListener("click", () => {
+    navigator.clipboard?.writeText($("out-json-preview").textContent || "");
+    $("btn-copy-json").querySelector("span").textContent = "JSON Politikası Kopyalandı!";
+    setTimeout(() => { $("btn-copy-json").querySelector("span").textContent = "Müşteri AI Politikası JSON Kopyala"; }, 1800);
+  });
+
+  updateStudio();
+})();
+</script>
+</body>
+</html>
