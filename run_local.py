@@ -3715,9 +3715,18 @@ def switch_clinic(cid: int, u: dict = Depends(OWNER)):
 
 @app.get("/app/api/conversations")
 def list_conversations(u: dict = Depends(ANY)):
-    rows = q("SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", u["clinic_id"])
+    cid = u["clinic_id"]
+    rows = q("SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", cid)
+    all_logs = q(
+        """SELECT patient_id, layer, intent, direction, body, delivery_status, delivery_error, created_at
+           FROM message_log WHERE clinic_id=? AND patient_id IS NOT NULL ORDER BY id DESC""",
+        cid,
+    )
+    by_pid: dict[int, list[dict]] = {}
+    for lg in all_logs:
+        by_pid.setdefault(lg["patient_id"], []).append(lg)
     for r in rows:
-        logs = q("SELECT layer, intent, direction, body, delivery_status, delivery_error, created_at FROM message_log WHERE patient_id=? ORDER BY id DESC", r["id"])
+        logs = by_pid.get(r["id"], [])
         out_logs = [l for l in logs if l["direction"] == "out"]
         body_logs = [l for l in logs if l.get("body")]
         r["last_at"] = logs[0]["created_at"] if logs else None
@@ -3901,7 +3910,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
 
 async def _probe_http(url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=0.9) as c:
+        async with httpx.AsyncClient(timeout=0.18) as c:
             resp = await c.get(url)
             return resp.status_code < 500
     except Exception:
