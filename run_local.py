@@ -2084,13 +2084,17 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
         if row:
             pid = row["id"]
             if profile_name and not row["display_name"]:
-                c.execute("UPDATE patients SET display_name=?, lang=? WHERE id=?", (profile_name, lang, pid))
+                c.execute("UPDATE patients SET display_name=?, lang=? WHERE id=?", _clean_sql_args((profile_name, lang, pid)))
         else:
-            cur_p = c.execute(
-                "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
-                (clinic_id, ph, enc(raw_id), profile_name or f"Misafir ({sender[-4:]})", lang, channel, t_now),
-            )
-            pid = cur_p.lastrowid
+            try:
+                cur_p = c.execute(
+                    "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
+                    _clean_sql_args((clinic_id, ph, enc(raw_id), profile_name or f"Misafir ({sender[-4:]})", lang, channel, t_now)),
+                )
+                pid = cur_p.lastrowid
+            except sqlite3.IntegrityError:
+                row2 = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", (clinic_id, ph)).fetchone()
+                pid = row2["id"] if row2 else 1
         c.execute(
             "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,?,'in',NULL,?,0,0,?)",
             (clinic_id, pid, f"{channel}:{mtype}", t_now),
@@ -2145,11 +2149,18 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
     if not hmac.compare_digest(good, x_hub_signature_256[7:]):
         raise HTTPException(401, "imza geçersiz")
     body = json.loads(raw)
+    if len(_SEEN_WEBHOOK_IDS) > 5000:
+        _SEEN_WEBHOOK_IDS.clear()
     processed = 0
     dedup = 0
     for entry in body.get("entry", []):
         for ch in entry.get("changes", []):
             v = ch.get("value", {})
+            raw_cid = (v.get("metadata") or {}).get("clinic_id") or entry.get("clinic_id") or 1
+            try:
+                target_cid = int(raw_cid) if int(raw_cid) >= 1 else 1
+            except Exception:
+                target_cid = 1
             names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in v.get("contacts", []) if isinstance(c, dict)}
             for m in v.get("messages", []):
                 mid = str(m.get("id") or "")
@@ -2170,7 +2181,7 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
                     rep = it.get("button_reply") or it.get("list_reply") or {}
                     text = str(rep.get("title") or "")
                 if sender:
-                    await _process_inbound_webhook_msg(sender, names.get(sender), mtype, text, channel="wa", clinic_id=1)
+                    await _process_inbound_webhook_msg(sender, names.get(sender), mtype, text, channel="wa", clinic_id=target_cid)
                 processed += 1
     return {"ok": True, "processed": processed, "dedup": dedup}
 
@@ -2185,8 +2196,15 @@ async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = H
     if not hmac.compare_digest(good, x_hub_signature_256[7:]):
         raise HTTPException(401, "imza geçersiz")
     body = json.loads(raw)
+    if len(_SEEN_WEBHOOK_IDS) > 5000:
+        _SEEN_WEBHOOK_IDS.clear()
     processed = 0
     for entry in body.get("entry", []):
+        raw_cid = entry.get("clinic_id") or 1
+        try:
+            target_cid = int(raw_cid) if int(raw_cid) >= 1 else 1
+        except Exception:
+            target_cid = 1
         for ev in entry.get("messaging", []):
             msg = ev.get("message") or {}
             if msg.get("is_echo") or not msg.get("text"):
@@ -2198,7 +2216,7 @@ async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = H
                 _SEEN_WEBHOOK_IDS.add(mid)
             sender = str((ev.get("sender") or {}).get("id") or "")
             if sender:
-                await _process_inbound_webhook_msg(sender, None, "text", str(msg["text"]), channel="ig", clinic_id=1)
+                await _process_inbound_webhook_msg(sender, None, "text", str(msg["text"]), channel="ig", clinic_id=target_cid)
                 processed += 1
     return {"ok": True, "processed": processed}
 
@@ -2211,9 +2229,12 @@ def alerts(u: dict = Depends(ANY)):
 @app.post("/app/api/alerts/{aid}/ack")
 def ack(aid: int, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    if not q1("SELECT id FROM alerts WHERE id=? AND clinic_id=? AND acknowledged_at IS NULL", aid, cid):
-        raise HTTPException(404, "uyarı yok")
-    ex("UPDATE alerts SET acknowledged_at=? WHERE id=? AND clinic_id=?", iso_now(), aid, cid)
+    with _DB_LOCK:
+        c = db()
+        cur = c.execute("UPDATE alerts SET acknowledged_at=? WHERE id=? AND clinic_id=? AND acknowledged_at IS NULL", (iso_now(), aid, cid))
+        c.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(404, "uyarı yok")
     write_audit(u["id"], u["email"], "alert.ack", f"alert:{aid}", u["ip_h"], clinic_id=cid)
     return {"ok": True}
 
