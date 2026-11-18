@@ -2,7 +2,7 @@
 <html lang="tr" data-view-mode="desktop">
 <head>
 <meta charset="utf-8">
-<meta id="dc-viewport" name="viewport" content="width=1360, user-scalable=yes">
+<meta id="dc-viewport" name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>DentaCore Yönetim Paneli</title>
 <link rel="icon" href="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%230A2540%22/%3E%3Cpath%20d%3D%22M20%2018c-5%200-8%204-8%2010%200%209%204%2020%208%2020%203%200%203-8%206-12%201-1%202-2%206-2s5%201%206%202c3%204%203%2012%206%2012%204%200%208-11%208-20%200-6-3-10-8-10-4%200-7%202-12%202s-8-2-12-2z%22%20fill%3D%22%230D9488%22/%3E%3Ccircle%20cx%3D%2246%22%20cy%3D%2218%22%20r%3D%225%22%20fill%3D%22%23EA580C%22/%3E%3C/svg%3E" type="image/svg+xml">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
@@ -939,13 +939,13 @@ textarea.input { min-height: 84px; }
 }
 .m-more-grid a.active { background: var(--teal-soft); border-color: var(--teal); color: var(--teal-ink); }
 
-@media (max-width: 1px) {
+@media (max-width: 1100px) {
   .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .g3, .eco-grid { grid-template-columns: 1fr; }
   .span-2 { grid-column: span 1; }
 }
 
-@media (max-width: 1px) {
+@media (max-width: 820px) {
   .login { grid-template-columns: 1fr; }
   .login-art { display: none; }
   .shell { grid-template-columns: 1fr; }
@@ -1016,7 +1016,7 @@ textarea.input { min-height: 84px; }
   .me { padding-top: var(--space-1); }
 }
 
-@media (max-width: 1px) {
+@media (max-width: 400px) {
   .g4 { grid-template-columns: 1fr; }
   .btn { white-space: normal; text-align: center; }
 }
