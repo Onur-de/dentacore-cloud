@@ -296,8 +296,152 @@ _LEET_ALPHA_RE = re.compile(r"(?<=[a-z])([0134])(?=[a-z])")
 _LEET_MAP = {"0": "o", "1": "i", "3": "e", "4": "a"}
 
 
-_WORD_DOTS_RUN_RE = re.compile(r"(?<=[a-z0-9])[.,!?;:_~]{2,}(?=[a-z0-9])")
-_REPEAT_CHAR_RE = re.compile(r"([a-z])\1{2,}")
+_WORD_DOTS_RUN_RE = re.compile(r"(?<=\w)[.,!?;:_~]{2,}(?=\w)", re.UNICODE)
+_REPEAT_CHAR_RE = re.compile(r"([a-z\u0400-\u04ff\u0600-\u06ff\u0370-\u03ff\u0590-\u05ff])\1{2,}", re.UNICODE)
+
+# 16 Dilde (TR, EN, DE, FR, NL, ES, IT, AZ, RO, RU, UK, BG, AR, FA, EL, HE)
+# Yazım Hatası (Typo), Klavye Kayması, Harf Yutma ve Kısaltmaları Otomatik Çeviren Sözlük (SymSpell / RapidFuzz Mimarisi)
+MULTILINGUAL_TYPO_TOKEN_MAP: dict[str, str] = {
+    # Türkçe (TR) yazım hataları & kısaltmalar
+    "slm": "selam", "mrb": "merhaba", "meraba": "merhaba", "merhba": "merhaba", "mrhaba": "merhaba",
+    "kdr": "kadar", "nekadr": "ne kadar", "nekadar": "ne kadar", "nkdr": "ne kadar",
+    "fyat": "fiyat", "fyati": "fiyat", "fiyta": "fiyat", "fiyati": "fiyat", "fiyatlari": "fiyat",
+    "ucrt": "ucret", "ucreti": "ucret", "ucrti": "ucret",
+    "inpilant": "implant", "implnt": "implant", "impalnt": "implant", "inplant": "implant",
+    "zirknyum": "zirkonyum", "zirkonyum": "zirkonyum", "zrkonyum": "zirkonyum", "zirkon": "zirkonyum",
+    "kaplma": "kaplama", "kplama": "kaplama", "tasarmi": "tasarimi", "tsarimi": "tasarimi", "guls": "gulus",
+    "beyzlatma": "beyazlatma", "byazlatma": "beyazlatma",
+    "randvu": "randevu", "randev": "randevu", "rndevu": "randevu", "randveu": "randevu",
+    "muayne": "muayene", "muyene": "muayene", "muayen": "muayene",
+    "otoprk": "otopark", "otpark": "otopark", "otoparl": "otopark", "otoparkiniz": "otopark",
+    "adrs": "adres", "adresi": "adres", "adresniz": "adresiniz", "nrde": "nerede", "nerde": "nerede",
+    "ctesi": "cumartesi", "cmtsi": "cumartesi", "cumrtesi": "cumartesi", "pztesi": "pazartesi",
+    "kapaniyo": "kapaniyor", "aciliyo": "aciliyor", "durmuyo": "durmuyor", "oluyo": "oluyor",
+    "istiyom": "istiyorum", "istiyrum": "istiyorum", "almk": "almak",
+    "kanma": "kanama", "yuzm": "yuzum", "bogzm": "bogazim", "krkum": "korkum", "korkm": "korkum",
+    "tksit": "taksit", "sgrta": "sigorta", "sgorta": "sigorta",
+    # İngilizce (EN) yazım hataları & kısaltmalar
+    "helo": "hello", "hllo": "hello", "hw": "how", "mch": "much", "hmuch": "how much",
+    "dntal": "dental", "dentl": "dental", "implnts": "implant", "impalnts": "implant",
+    "cst": "cost", "csts": "cost", "prce": "price", "pric": "price",
+    "apointmnt": "appointment", "apointment": "appointment", "appoitnment": "appointment", "appt": "appointment",
+    "bok": "book", "prking": "parking", "parkng": "parking",
+    "whre": "where", "addres": "address", "adress": "address", "clnic": "clinic",
+    "opning": "opening", "hrs": "hours", "horus": "hours",
+    "swolen": "swollen", "bleedng": "bleeding", "swllow": "swallow", "brathe": "breathe",
+    "insurnce": "insurance", "chld": "child", "peditric": "pediatric",
+    # Almanca (DE) yazım hataları
+    "gten": "guten", "ws": "was", "kstet": "kostet", "ksten": "kosten", "pris": "preis",
+    "zahnimplantt": "zahnimplantat", "zahnimplntat": "zahnimplantat",
+    "trmin": "termin", "termn": "termin", "parkpltz": "parkplatz", "prkplatz": "parkplatz",
+    "adrsse": "adresse", "klini": "klinik", "klnik": "klinik",
+    "offnungszeitn": "offnungszeiten", "oeffnungszeiten": "offnungszeiten", "geoffnt": "geoffnet",
+    "blutng": "blutung", "geschwllen": "geschwollen",
+    # Fransızca (FR) yazım hataları
+    "bjr": "bonjour", "bnjour": "bonjour", "slt": "salut",
+    "cmbien": "combien", "combienn": "combien", "prx": "prix", "trif": "tarif",
+    "horares": "horaires", "horaire": "horaires", "rdv": "rendez-vous", "rendezvous": "rendez-vous",
+    "stationement": "stationnement", "dentste": "dentiste", "pediatrq": "pediatrique",
+    # Felemenkçe (NL) yazım hataları
+    "goedemrgen": "goedemorgen", "afsprak": "afspraak", "afsprk": "afspraak",
+    "implntaat": "implantaat", "openingstjden": "openingstijden", "parkern": "parkeren",
+    "prjs": "prijs", "ksten": "kosten", "tndarts": "tandarts",
+    # İspanyolca (ES) yazım hataları
+    "hla": "hola", "bunos": "buenos", "cunto": "cuanto", "csta": "cuesta", "prcio": "precio",
+    "implnte": "implante", "clnica": "clinica", "dnde": "donde", "direcion": "direccion",
+    "horrio": "horario", "estacionamento": "estacionamiento", "aparcamento": "aparcamiento",
+    # İtalyanca (IT) yazım hataları
+    "bngiorno": "buongiorno", "bongiorno": "buongiorno", "qunto": "quanto", "przzo": "prezzo",
+    "impinto": "impianto", "appuntmento": "appuntamento", "prentare": "prenotare",
+    "indirizo": "indirizzo", "parchegio": "parcheggio", "dve": "dove",
+    # Azerbaycanca (AZ) yazım hataları
+    "qiymti": "qiymet", "qymet": "qiymet", "necyedir": "neceyedir", "ncyedir": "neceyedir",
+    "unvniniz": "unvaniniz", "unvn": "unvan", "hrdadir": "hardadir", "hardasnz": "hardasiniz",
+    "avtodayancaq": "avtodayanacaq", "qanxma": "qanaxma",
+    # Romence (RO) yazım hataları
+    "bna": "buna", "ct": "cat", "prt": "pret", "progrmare": "programare",
+    "adrsa": "adresa", "parcre": "parcare", "stomatolg": "stomatolog",
+    # Rusça (RU), Ukraynaca (UK), Bulgarca (BG) yazım hataları
+    "здраствуйте": "здравствуйте", "здрвствуйте": "здравствуйте", "сколко": "сколько", "склько": "сколько",
+    "имплантция": "имплантация", "имплнтация": "имплантация", "стоимсть": "стоимость",
+    "клинка": "клиника", "парквка": "парковка", "записатся": "записаться",
+    "дбрий": "добрий", "скілки": "скільки", "імплантція": "імплантація", "клінка": "клініка", "адрса": "адреса",
+    "здрвейте": "здравейте", "клко": "колко", "имплнт": "имплант", "паркнг": "паркинг", "работн": "работно",
+    # Arapça (AR) & Farsça (FA) yaygın harf/همزه/هاء yazım varyasyonları
+    "العياده": "العيادة", "عياده": "عيادة", "زراعه": "زراعة", "الاسنان": "الأسنان", "اسنان": "أسنان",
+    "تكلفه": "تكلفة", "التكلفه": "التكلفة", "اشعه": "أشعة", "صوره": "صورة", "اطفال": "أطفال",
+    "ادرس": "آدرس", "ايمپلنت": "ایمپلنت", "ايمپلنت": "ایمپلنت", "کلينيک": "کلینیک", "چقدره": "چقدر",
+    # Yunanca (EL) & İbranice (HE) yazım hataları
+    "καλημρα": "καλημερα", "κοστζει": "κοστιζει", "εμφυτεμα": "εμφυτευμα", "εμφτευμα": "εμφυτευμα",
+    "κλινκη": "κλινικη", "ραντεβυ": "ραντεβου", "παρκνγκ": "παρκινγκ", "διευθνση": "διευθυνση",
+    "שינים": "שיניים", "מרפא": "מרפאה", "כתבת": "כתובת", "חנייה": "חניה",
+}
+
+# RapidFuzz Token-Seviyesi Otomatik Düzeltme için 16 Dilde Kanonik Kelime Havuzu
+MULTILINGUAL_CANONICAL_VOCAB: dict[str, tuple[str, ...]] = {
+    "tr": (
+        "merhaba", "implant", "zirkonyum", "kaplama", "beyazlatma", "randevu", "muayene",
+        "fiyat", "ucret", "otopark", "adres", "nerede", "cumartesi", "pazartesi", "kapaniyor",
+        "aciliyor", "kanama", "durmuyor", "yutkunamiyorum", "sigorta", "taksit", "pedodonti",
+    ),
+    "en": (
+        "hello", "implant", "zirconia", "appointment", "parking", "address", "location",
+        "clinic", "opening", "hours", "price", "bleeding", "swollen", "swallow", "breathe",
+        "insurance", "pediatric", "dentist",
+    ),
+    "de": (
+        "guten", "hallo", "zahnimplantat", "kostet", "kosten", "termin", "parkplatz",
+        "adresse", "klinik", "offnungszeiten", "geoffnet", "blutung", "geschwollen",
+        "kinderzahnarzt", "versicherung",
+    ),
+    "fr": (
+        "bonjour", "combien", "horaires", "adresse", "parking", "stationnement",
+        "dentiste", "pediatrique", "clinique", "saignement", "gonfle", "assurance",
+    ),
+    "nl": (
+        "hallo", "goedemorgen", "afspraak", "implantaat", "openingstijden", "parkeren",
+        "parkeerplaats", "tandarts", "gezwollen", "bloeding", "verzekering",
+    ),
+    "es": (
+        "hola", "buenos", "cuanto", "cuesta", "precio", "implante", "clinica",
+        "direccion", "ubicacion", "horario", "estacionamiento", "aparcamiento", "sangrado",
+    ),
+    "it": (
+        "buongiorno", "quanto", "costa", "prezzo", "impianto", "appuntamento",
+        "prenotare", "indirizzo", "parcheggio", "clinica", "orari", "sanguinamento",
+    ),
+    "az": (
+        "salam", "qiymet", "neceyedir", "unvaniniz", "hardasiniz", "haradadir",
+        "avtodayanacaq", "qanaxma", "dayanmir",
+    ),
+    "ro": (
+        "buna", "costa", "programare", "adresa", "parcare", "clinica", "stomatolog",
+    ),
+    "ru": (
+        "здравствуйте", "сколько", "стоит", "стоимость", "имплантация", "клиника",
+        "парковка", "записаться", "кровотечение", "опухло",
+    ),
+    "uk": (
+        "добрий", "скільки", "коштує", "імплантація", "клініка", "адреса", "парковка", "записатися",
+    ),
+    "bg": (
+        "здравейте", "колко", "струва", "имплант", "клиниката", "паркинг", "работно", "адрес",
+    ),
+    "ar": (
+        "مرحبا", "العيادة", "زراعة", "الأسنان", "التكلفة", "ساعات", "موقف", "النزيف", "متورم",
+    ),
+    "fa": (
+        "سلام", "ایمپلنت", "دندان", "کلینیک", "آدرس", "پارکینگ", "خونریزی", "ساعات",
+    ),
+    "el": (
+        "καλημερα", "κοστιζει", "εμφυτευμα", "κλινικη", "ραντεβου", "παρκινγκ", "διευθυνση", "ωραριο",
+    ),
+    "he": (
+        "שלום", "שיניים", "מרפאה", "כתובת", "חניה", "הדימום", "נפוחות",
+    ),
+}
+
+_ALL_CANONICAL_SET: set[str] = {w for words in MULTILINGUAL_CANONICAL_VOCAB.values() for w in words}
 
 
 def normalize(s: str) -> str:
@@ -310,13 +454,53 @@ def normalize(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def normalize_tr_informal(n_text: str) -> str:
-    """Bozuk Türkçe, STT, noktalı/boşluksuz yazım ve uzatılmış harfleri standart Türkçe köklere dönüştürür."""
+def normalize_multilingual_typos(n_text: str, lang: str | None = None) -> str:
+    """
+    16 dilin tamamında (TR, EN, DE, AR, RU, FR, NL, ES, IT, FA, AZ, UK, BG, RO, EL, HE)
+    yanlış yazılan kelimeleri, harf düşmelerini, yer değiştiren harfleri (transposition),
+    Arapça/Farsça klavye farklarını ve kısaltmaları otomatik olarak doğru kelimeye çevirir.
+    """
+    if not n_text:
+        return ""
     out = _WORD_DOTS_RUN_RE.sub(" ", n_text)
     out = _REPEAT_CHAR_RE.sub(r"\1", out)
+    # Farsça/Arapça ortak klavye harf normalizasyonu (ك -> ک yalnız Farsça kelimelerde sözlükten çözülür)
+    out = out.replace("ـ", "")  # Arapça/Farsça tatweel (uzatma çizgisi) temizliği
+
+    # 1. Kelime bazlı hızlı çok dilli yazım hatası sözlüğü + RapidFuzz Damerau-Levenshtein otomatik çeviri
+    vocab_candidates = MULTILINGUAL_CANONICAL_VOCAB.get(lang, ()) if lang else ()
+
+    def _fix_word(m: re.Match) -> str:
+        w = m.group(0)
+        if w in MULTILINGUAL_TYPO_TOKEN_MAP:
+            return MULTILINGUAL_TYPO_TOKEN_MAP[w]
+        if w in _ALL_CANONICAL_SET or len(w) < 5 or _rf_fuzz is None or not vocab_candidates:
+            return w
+        best_cand = w
+        best_score = 0.0
+        for cand in vocab_candidates:
+            if abs(len(w) - len(cand)) > 2:
+                continue
+            # İlk harf aynıysa veya ilk iki harf yer değiştirmişse (transposition)
+            if w[0] != cand[0] and not (len(w) > 1 and len(cand) > 1 and w[0] == cand[1] and w[1] == cand[0]):
+                continue
+            sc = _rf_fuzz.ratio(w, cand)
+            if sc >= 82.0 and sc > best_score:
+                best_score = sc
+                best_cand = cand
+        return best_cand
+
+    out = re.sub(r"[a-z\u0400-\u04ff\u0600-\u06ff\u0370-\u03ff\u0590-\u05ff]{2,}", _fix_word, out)
+
+    # 2. Türkçe ekli/çekimli informal kalıplar
     for pat, repl in TR_INFORMAL_PATTERNS:
         out = pat.sub(repl, out)
     return re.sub(r"\s+", " ", out).strip()
+
+
+def normalize_tr_informal(n_text: str) -> str:
+    """Geriye dönük uyumluluk: Tüm 16 dildeki yazım hatalarını ve Türkçe sokak ağzını normalize eder."""
+    return normalize_multilingual_typos(n_text, lang="tr")
 
 
 def detect_lang(text: str, default: str = "tr") -> str:
@@ -324,9 +508,9 @@ def detect_lang(text: str, default: str = "tr") -> str:
     if re.search(r"[\u0590-\u05FF]", raw):
         return "he"
     if re.search(r"[\u0600-\u06FF]", raw):
-        if re.search(r"[پچژگک]", raw) or any(w in raw for w in ("نوبت", "قیمت", "دندان", "چند", "آدرس", "خونریزی", "صورتم")):
+        if re.search(r"[پچژگک]", raw) or any(w in raw for w in ("نوبت", "قیمت", "قيمت", "دندان", "چند", "آدرس", "ادرس", "خونریزی", "صورتم", "کلينيک", "کلینیک")):
             return "fa"
-        if re.search(r"[ةأإؤئ]", raw) or any(w in raw for w in ("مرحبا", "الأسنان", "العيادة", "النزيف", "خلع", "الضرس", "وجهي", "متورم", "البلع", "أين", "سعر")):
+        if re.search(r"[ةأإؤئ]", raw) or any(w in raw for w in ("مرحبا", "الأسنان", "الاسنان", "العيادة", "العياده", "النزيف", "خلع", "الضرس", "وجهي", "متورم", "البلع", "أين", "اين", "سعر")):
             return "ar"
         if any(w in raw for w in ("سلام", "ورم", "نفس")):
             return "fa"
@@ -334,15 +518,16 @@ def detect_lang(text: str, default: str = "tr") -> str:
     if re.search(r"[\u0370-\u03FF]", raw):
         return "el"
     if re.search(r"[\u0400-\u04FF]", raw):
-        cyr_words = set(re.findall(r"[а-яёіїєґъ]+", raw))
-        uk_score = (3 if re.search(r"[іїєґ]", raw) else 0) + len(
-            cyr_words & {"добрий", "вітаю", "ціна", "скільки", "запис", "записатися", "адреса", "лікар", "клініка", "години", "роботи", "імплантації", "яка", "який", "графік"}
+        norm_cyr = normalize_multilingual_typos(raw)
+        cyr_words = set(re.findall(r"[а-яёіїєґъ]+", norm_cyr))
+        uk_score = (3 if re.search(r"[іїєґ]", norm_cyr) else 0) + len(
+            cyr_words & {"добрий", "вітаю", "ціна", "скільки", "запис", "записатися", "адреса", "лікар", "клініка", "години", "роботи", "імплантації", "імплантація", "яка", "який", "графік"}
         )
         bg_score = len(
-            cyr_words & {"здравейте", "добър", "колко", "зъб", "зъби", "работно", "работното", "време", "струва", "къде", "час", "лекар", "адресът", "какво"}
-        ) + (2 if ("работно време" in raw or "работното време" in raw or "колко струва" in raw) else 0)
-        ru_score = (3 if re.search(r"[ыэё]", raw) else 0) + len(
-            cyr_words & {"здравствуйте", "сколько", "стоит", "стоимость", "записаться", "прием", "приём", "имплантация", "зубов", "часы", "работы", "какие", "какая", "цена", "вас", "где", "клиника", "можно"}
+            cyr_words & {"здравейте", "добър", "колко", "зъб", "зъби", "работно", "работното", "време", "струва", "къде", "час", "лекар", "адресът", "какво", "паркинг"}
+        ) + (2 if ("работно време" in norm_cyr or "работното време" in norm_cyr or "колко струва" in norm_cyr) else 0)
+        ru_score = (3 if re.search(r"[ыэё]", norm_cyr) else 0) + len(
+            cyr_words & {"здравствуйте", "сколько", "стоит", "стоимость", "записаться", "прием", "приём", "имплантация", "зубов", "часы", "работы", "какие", "какая", "цена", "вас", "где", "клиника", "можно", "парковка"}
         )
         if uk_score > ru_score and uk_score >= bg_score and uk_score > 0:
             return "uk"
@@ -353,18 +538,18 @@ def detect_lang(text: str, default: str = "tr") -> str:
         return "az"
     if re.search(r"[ğşıİĞŞ]", text or ""):
         return "tr"
-    n = normalize(text)
+    n = normalize_multilingual_typos(normalize(text))
     words = set(re.findall(r"[a-z]+", n))
     lexicons = {
-        "de": {"ich", "und", "nicht", "zahn", "zahne", "zahnimplantat", "termin", "bitte", "hallo", "wie", "viel", "kostet", "ist", "sie", "wir", "mein", "kosten", "danke", "guten", "wo", "adresse", "ihre", "klinik"},
-        "en": {"the", "and", "is", "my", "tooth", "teeth", "appointment", "please", "hello", "hi", "how", "much", "can", "you", "what", "price", "where", "there", "parking", "swollen", "swallow", "cost", "crowns", "extraction", "breathe"},
-        "tr": {"merhaba", "dis", "disim", "randevu", "randvu", "fiyat", "fyat", "ucret", "ucreti", "ne", "kadar", "kdr", "nekadr", "nerede", "var", "mi", "mu", "istiyorum", "istiyom", "tesekkur", "agri", "slm", "mrb", "selam", "kacta", "acik", "cumartesi", "ctesi", "kapaniyo", "kapaniyor", "yarin", "saat", "olur", "tamam", "bursa", "ankara", "sube", "subenizin", "otopark"},
-        "fr": {"bonjour", "salut", "bonsoir", "merci", "prix", "tarif", "combien", "adresse", "horaires", "rendez", "vous", "dent", "dents", "dentiste", "peur", "douloureux", "ou", "etes", "quels", "sont"},
-        "nl": {"hallo", "goedemorgen", "goedemiddag", "afspraak", "prijs", "kosten", "adres", "waar", "tandarts", "openingstijden", "bedankt", "hoe", "laat", "vandaag", "bang", "voor", "implantaat", "pijn", "sedatie", "hebben", "jullie"},
-        "es": {"hola", "buenos", "dias", "gracias", "precio", "cuanto", "cuesta", "cita", "direccion", "donde", "horario", "horarios", "diente", "dentista", "tengo", "sonrisa", "cuales"},
-        "it": {"ciao", "buongiorno", "buonasera", "salve", "grazie", "prezzo", "quanto", "costa", "appuntamento", "prenotare", "vorrei", "faccette", "indirizzo", "dove", "siete", "orari", "dente", "dentista"},
-        "az": {"salam", "sabahiniz", "xeyir", "qiymet", "unvan", "unvaniniz", "hardasiniz", "haradadir", "hekim", "nece", "gorus", "qanaxma"},
-        "ro": {"buna", "ziua", "multumesc", "pret", "cat", "costa", "programare", "adresa", "unde", "dinte", "stomatolog", "care", "este"},
+        "de": {"ich", "und", "nicht", "zahn", "zahne", "zahnimplantat", "termin", "bitte", "hallo", "wie", "viel", "kostet", "ist", "sie", "wir", "mein", "kosten", "danke", "guten", "wo", "adresse", "ihre", "klinik", "parkplatz", "offnungszeiten"},
+        "en": {"the", "and", "is", "my", "tooth", "teeth", "appointment", "please", "hello", "hi", "how", "much", "can", "you", "what", "price", "where", "there", "parking", "swollen", "swallow", "cost", "crowns", "extraction", "breathe", "clinic", "address", "opening", "hours"},
+        "tr": {"merhaba", "dis", "disim", "randevu", "randvu", "fiyat", "fyat", "ucret", "ucreti", "ne", "kadar", "kdr", "nekadr", "nerede", "var", "mi", "mu", "istiyorum", "istiyom", "tesekkur", "agri", "slm", "mrb", "selam", "kacta", "acik", "cumartesi", "ctesi", "kapaniyo", "kapaniyor", "yarin", "saat", "olur", "tamam", "bursa", "ankara", "sube", "subenizin", "otopark", "zirkonyum", "kaplama"},
+        "fr": {"bonjour", "salut", "bonsoir", "merci", "prix", "tarif", "combien", "adresse", "horaires", "rendez", "vous", "dent", "dents", "dentiste", "peur", "douloureux", "ou", "etes", "quels", "sont", "stationnement", "clinique"},
+        "nl": {"hallo", "goedemorgen", "goedemiddag", "afspraak", "prijs", "kosten", "adres", "waar", "tandarts", "openingstijden", "bedankt", "hoe", "laat", "vandaag", "bang", "voor", "implantaat", "pijn", "sedatie", "hebben", "jullie", "parkeren"},
+        "es": {"hola", "buenos", "dias", "gracias", "precio", "cuanto", "cuesta", "cita", "direccion", "donde", "horario", "horarios", "diente", "dentista", "tengo", "sonrisa", "cuales", "clinica", "estacionamiento", "implante"},
+        "it": {"ciao", "buongiorno", "buonasera", "salve", "grazie", "prezzo", "quanto", "costa", "appuntamento", "prenotare", "vorrei", "faccette", "indirizzo", "dove", "siete", "orari", "dente", "dentista", "parcheggio", "impianto"},
+        "az": {"salam", "sabahiniz", "xeyir", "qiymet", "unvan", "unvaniniz", "hardasiniz", "haradadir", "hekim", "nece", "neceyedir", "gorus", "qanaxma", "avtodayanacaq"},
+        "ro": {"buna", "ziua", "multumesc", "pret", "cat", "costa", "programare", "adresa", "unde", "dinte", "stomatolog", "care", "este", "parcare"},
     }
     scores = {k: len(words & v) for k, v in lexicons.items()}
     best = max(scores, key=scores.get)
