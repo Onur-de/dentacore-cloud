@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS clinics (
   slot_step_min      INTEGER NOT NULL DEFAULT 15,
   working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}',
   buffer_min         INTEGER NOT NULL DEFAULT 0,
+  ai_custom_rules_json TEXT NOT NULL DEFAULT '{}',
   active             INTEGER NOT NULL DEFAULT 1,
   created_at         TEXT NOT NULL
 );
@@ -546,6 +547,8 @@ def _migrate_sqlite():
             c.execute("""ALTER TABLE clinics ADD COLUMN working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}'""")
         if "buffer_min" not in clinic_cols:
             c.execute("ALTER TABLE clinics ADD COLUMN buffer_min INTEGER NOT NULL DEFAULT 0")
+        if "ai_custom_rules_json" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN ai_custom_rules_json TEXT NOT NULL DEFAULT '{}'")
         chg_cols = {r["name"] for r in c.execute("PRAGMA table_info(charges)").fetchall()}
         if "idempotency_key" not in chg_cols:
             c.execute("ALTER TABLE charges ADD COLUMN idempotency_key TEXT")
@@ -651,6 +654,8 @@ def init_and_seed():
             c.execute("""ALTER TABLE clinics ADD COLUMN working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}'""")
         if "buffer_min" not in clinic_cols:
             c.execute("ALTER TABLE clinics ADD COLUMN buffer_min INTEGER NOT NULL DEFAULT 0")
+        if "ai_custom_rules_json" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN ai_custom_rules_json TEXT NOT NULL DEFAULT '{}'")
         chg_cols = {r["name"] for r in c.execute("PRAGMA table_info(charges)").fetchall()}
         if "idempotency_key" not in chg_cols:
             c.execute("ALTER TABLE charges ADD COLUMN idempotency_key TEXT")
@@ -2042,7 +2047,7 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
     if not text:
         return
 
-    c_row = q1("SELECT name, address, phone FROM clinics WHERE id=?", clinic_id)
+    c_row = q1("SELECT name, address, phone, ai_custom_rules_json FROM clinics WHERE id=?", clinic_id)
     all_branches = q("SELECT id, name, city, address, phone FROM clinics WHERE active=1")
     facts: dict = {
         "clinic": (c_row and c_row["name"]) or os.environ.get("CLINIC_NAME", "Özel DentaCore Merkez Polikliniği"),
@@ -2052,6 +2057,8 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
         facts["adres"] = c_row["address"]
     if c_row and c_row.get("phone"):
         facts["telefon"] = c_row["phone"]
+    if c_row and c_row.get("ai_custom_rules_json"):
+        facts["ai_custom_rules_json"] = c_row["ai_custom_rules_json"]
 
     try:
         res = await asyncio.wait_for(_ROUTER.route(text, lang=lang, clinic_facts=facts, allow_llm=True, patient_id=pid), timeout=10.0)
@@ -2593,7 +2600,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
     if not await _LIMITER.hit(f"sim:{u['id']}", sim_limit, 60):
         raise HTTPException(429, "Çok fazla simülasyon isteği gönderildi; lütfen 1 dakika bekleyin")
     cid = u["clinic_id"]
-    c = q1("SELECT name, address, phone FROM clinics WHERE id=?", cid)
+    c = q1("SELECT name, address, phone, ai_custom_rules_json FROM clinics WHERE id=?", cid)
     all_branches = q("SELECT id, name, city, address, phone FROM clinics WHERE active=1")
     facts: dict = {
         "clinic": (c and c["name"]) or u["clinic_name"],
@@ -2603,6 +2610,8 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
         facts["adres"] = c["address"]
     if c and c.get("phone"):
         facts["telefon"] = c["phone"]
+    if c and c.get("ai_custom_rules_json"):
+        facts["ai_custom_rules_json"] = c["ai_custom_rules_json"]
     try:
         res = await asyncio.wait_for(
             _ROUTER.route(
@@ -2760,6 +2769,7 @@ class SettingsIn(BaseModel):
     google_review_url: str = ""
     working_hours_json: str | None = None
     buffer_min: int = Field(0, ge=0, le=120)
+    ai_custom_rules_json: str | None = None
 
 
 @app.post("/app/api/settings")
@@ -2771,12 +2781,42 @@ def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
             raise ValueError("dict değil")
     except Exception:
         raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı")
+    cur_c = q1("SELECT ai_custom_rules_json FROM clinics WHERE id=?", u["clinic_id"]) or {}
+    ai_rules_str = b.ai_custom_rules_json if b.ai_custom_rules_json is not None else (cur_c.get("ai_custom_rules_json") or "{}")
+    try:
+        parsed_ai = json.loads(ai_rules_str)
+        if not isinstance(parsed_ai, dict):
+            raise ValueError("dict değil")
+    except Exception:
+        raise HTTPException(400, "Geçersiz yapay zeka cevap kuralları JSON formatı")
     ex(
-        "UPDATE clinics SET name=?,city=?,address=?,phone=?,autopilot_name=?,default_lang=?,slot_step_min=?,google_review_url=?,working_hours_json=?,buffer_min=? WHERE id=?",
-        b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, wh_str, b.buffer_min, u["clinic_id"],
+        "UPDATE clinics SET name=?,city=?,address=?,phone=?,autopilot_name=?,default_lang=?,slot_step_min=?,google_review_url=?,working_hours_json=?,buffer_min=?,ai_custom_rules_json=? WHERE id=?",
+        b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, wh_str, b.buffer_min, ai_rules_str, u["clinic_id"],
     )
     write_audit(u["id"], u["email"], "settings.update", f"clinic:{u['clinic_id']}", u["ip_h"], clinic_id=u["clinic_id"])
     return {"ok": True}
+
+
+class AICustomRulesIn(BaseModel):
+    tone: str = Field("resmi_samimi", max_length=40)
+    coordinator_title: str = Field("Kıdemli Hasta Koordinatörü", max_length=80)
+    greeting_style: str = Field("Merhabalar, {clinic} hasta danışma hattımıza hoş geldiniz.", max_length=300)
+    price_policy: Literal["free_exam_invite", "starting_range", "direct_handoff"] = "free_exam_invite"
+    exam_policy: str = Field("", max_length=400)
+    cash_discount_note: str = Field("", max_length=400)
+    payment_note: str = Field("", max_length=400)
+    pain_comfort_note: str = Field("", max_length=400)
+    kids_note: str = Field("", max_length=400)
+    health_tourism_note: str = Field("", max_length=400)
+    custom_extra_note: str = Field("", max_length=500)
+
+
+@app.post("/app/api/settings/ai-rules")
+def save_ai_custom_rules(b: AICustomRulesIn, u: dict = Depends(OWNER)):
+    rules_str = json.dumps(b.model_dump(), ensure_ascii=False)
+    ex("UPDATE clinics SET ai_custom_rules_json=? WHERE id=?", rules_str, u["clinic_id"])
+    write_audit(u["id"], u["email"], "settings.ai_rules_update", f"clinic:{u['clinic_id']}", u["ip_h"], clinic_id=u["clinic_id"])
+    return {"ok": True, "ai_custom_rules": b.model_dump()}
 
 
 class AskIn(BaseModel):
