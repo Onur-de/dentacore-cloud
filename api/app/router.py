@@ -230,7 +230,7 @@ KVKK_TRAP_RE = re.compile(
 
 # Tehlikeli ev yapımı / kimyasal / kesici alet müdahale tuzakları (Japon yapıştırıcısı, çamaşır suyu, penseyle çekim vb.)
 DIY_HAZARD_RE = re.compile(
-    r"\b(japon\s+yapistirici\w*|pattex|super\s+glue|uhu\s+ile|camasir\s+suyu\w*|tuz\s+ruhu\w*|"
+    r"\b(japon\s+yapistirici\w*|pattex|super\s+glue|uhu\s+(?:ile|yapistirici\w*)|aspirin\s+ez\w*|camasir\s+suyu\w*|tuz\s+ruhu\w*|"
     r"pense\w*\s+.*cek\w*|penseyle|iple\s+cek\w*|kendi\s+kendime\s+cek\w*|igneyle\s+patlat\w*|"
     r"apseyi\s+patlat\w*|raki\s+bas\w*|kolonya\s+bas\w*|sarimsak\s+bas\w*|aspirin\s+bas\w*)\b"
 )
@@ -296,7 +296,7 @@ _LEET_ALPHA_RE = re.compile(r"(?<=[a-z])([0134])(?=[a-z])")
 _LEET_MAP = {"0": "o", "1": "i", "3": "e", "4": "a"}
 
 
-_WORD_PUNCT_RUN_RE = re.compile(r"(?<!\d)[.,!?;:/\\|_*~]{2,}(?!\d)")
+_WORD_DOTS_RUN_RE = re.compile(r"(?<=[a-z0-9])[.,!?;:_~]{2,}(?=[a-z0-9])")
 _REPEAT_CHAR_RE = re.compile(r"([a-z])\1{2,}")
 
 
@@ -306,15 +306,14 @@ def normalize(s: str) -> str:
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c) and unicodedata.category(c) not in ("Cf", "Cc")).casefold()
     s = _DOTTED_UNIT_RE.sub(r"\1 m\2", s)
-    s = _WORD_PUNCT_RUN_RE.sub(" ", s)
-    s = _REPEAT_CHAR_RE.sub(r"\1", s)
     s = _LEET_ALPHA_RE.sub(lambda m: _LEET_MAP.get(m.group(1), m.group(1)), s)
     return re.sub(r"\s+", " ", s).strip()
 
 
 def normalize_tr_informal(n_text: str) -> str:
-    """Bozuk Türkçe, STT ve sokak ağzı kısaltmalarını standart Türkçe köklere dönüştürür."""
-    out = n_text
+    """Bozuk Türkçe, STT, noktalı/boşluksuz yazım ve uzatılmış harfleri standart Türkçe köklere dönüştürür."""
+    out = _WORD_DOTS_RUN_RE.sub(" ", n_text)
+    out = _REPEAT_CHAR_RE.sub(r"\1", out)
     for pat, repl in TR_INFORMAL_PATTERNS:
         out = pat.sub(repl, out)
     return re.sub(r"\s+", " ", out).strip()
