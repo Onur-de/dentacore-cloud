@@ -2646,14 +2646,18 @@ def switch_clinic(cid: int, u: dict = Depends(OWNER)):
 
 @app.get("/app/api/conversations")
 def list_conversations(u: dict = Depends(ANY)):
-    rows = q("SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", u["clinic_id"])
-    for r in rows:
-        logs = q("SELECT layer, intent, direction, created_at FROM message_log WHERE patient_id=? ORDER BY id DESC", r["id"])
-        out_logs = [l for l in logs if l["direction"] == "out"]
-        r["last_at"] = logs[0]["created_at"] if logs else None
-        r["last_layer"] = out_logs[0]["layer"] if out_logs else None
-        r["last_intent"] = logs[0]["intent"] if logs else None
-        r["msg_count"] = len(logs)
+    cid = u["clinic_id"]
+    rows = q(
+        """SELECT p.id, p.display_name, p.channel, p.lang,
+                  (SELECT count(*) FROM message_log m WHERE m.patient_id=p.id) AS msg_count,
+                  (SELECT m.created_at FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+                  (SELECT m.intent FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_intent,
+                  (SELECT m.layer FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_layer
+           FROM patients p
+           WHERE p.clinic_id=? AND p.active=1
+           ORDER BY p.id DESC""",
+        cid,
+    )
     return rows
 
 
