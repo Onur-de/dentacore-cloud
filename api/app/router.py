@@ -1,11 +1,18 @@
 """
-Token Router: 3 katmanlı maliyet yönlendiricisi + Birleşik Niyet Motoru + Çok Turlu FSM + RapidFuzz.
+Token Router: 3 katmanlı maliyet yönlendiricisi + Parlant VIP Hasta Koordinatörü (ContextualConciergeComposer)
++ Birleşik Niyet Motoru + Çok Turlu FSM + RapidFuzz + Müşteriye Özel Klinik Cevap Politikası Motoru.
+
+Mimari Referanslar (GitHub Açık Kaynak En İyi Uygulamaları):
+  - emcie-co/parlant (18,335⭐): Contextual Guideline Composition & Utterance Framing
+  - chatwoot/chatwoot (40,115⭐): Captain AI Omnichannel Concierge Tone & Empathetic Handoff
+  - RasaHQ/rasa (21,395⭐): CALM Dialogue Act & Entity Slot Carryover (asla müşterinin zaten verdiği bilgiyi tekrar sormaz)
+  - pipecat-ai/pipecat (17,324⭐) & baptisteArno/typebot.io (10,639⭐): Per-Tenant Dynamic Variable & Policy Injection
 
 Katman-1 (0 LLM tokenı):
   - 1a: Acil durum triyajı (16 dil, L1-acil)
   - 1b: Güvenlik / Prompt Injection / KVKK veri sızıntısı engeli (L1-guvenlik) ve Tıbbi ilaç/doz koruma (L1-tibbi)
   - 1c: Çok turlu diyalog hafızası & Sonlu Durum Makinesi (FSM: IDLE -> ASKED_TREATMENT -> OFFERED_APPT -> AWAITING_SLOT)
-  - 1d: Birleşik Niyet Birleştirici (Compound Query Engine: L1-sss + L2-anahtar + RapidFuzz bulanık eşleştirme)
+  - 1d: Birleşik Niyet Birleştirici & Parlant Bağlamsal Yanıt Bestecisi (L1-sss + L2-anahtar + RapidFuzz)
   - 1e: Kesin eşleşme önbelleği (Redis/Memory) ve semantik önbellek
 Katman-2 (çok ucuz): küçük model tek etiket döndürür (max_tokens=4). LLM yoksa anahtar kelime sınıflandırıcı.
 Katman-3: ana LLM, sabit sistem promptu, max_tokens sınırlı, çıktı sonrası yasaklı içerik filtresi.
@@ -64,6 +71,21 @@ L1_INTENT_SET = {
     "sigorta_taksit",
 }
 
+# Müşteriye (Klinik Sahibine) Özel Yapay Zeka Cevap Politikası Varsayılanları
+DEFAULT_AI_CUSTOM_RULES: dict[str, Any] = {
+    "tone": "resmi_samimi",
+    "coordinator_title": "Kıdemli Hasta Koordinatörü",
+    "greeting_style": "Merhabalar, {clinic} hasta danışma hattımıza hoş geldiniz.",
+    "price_policy": "free_exam_invite",  # free_exam_invite | starting_range | direct_handoff
+    "exam_policy": "Uzman hekimimizin yapacağı muayene ve panoramik röntgen kontrolünüzden sonra size özel yazılı tedavi planı paylaşıyoruz.",
+    "cash_discount_note": "Nakit veya peşin ödemelerde sağladığımız özel ödeme kolaylıklarını da muayeneniz sırasında planınıza özenle yansıtıyoruz.",
+    "payment_note": "Kredi kartlarına taksit kolaylığı sağlıyor, özel sağlık sigortası ve anlaşmalı kurumlar için gereken tüm evrakları eksiksiz hazırlıyoruz.",
+    "pain_comfort_note": "İğne ve diş hekimi korkusu olan misafirlerimizde işlem öncesinde yüzey uyuşturucu jel, modern lokal anestezi ve sedasyon destekli konfor protokolü uyguluyoruz.",
+    "kids_note": "Çocuk diş hekimimiz (pedodonti uzmanımız), minik misafirlerimizin tedavilerini hiç korkutmadan, oyunlaştırılmış ve koruyucu bir yaklaşımla gerçekleştiriyor.",
+    "health_tourism_note": "Yurt dışından ve şehir dışından gelen misafirlerimiz için seyahat takvimine özel hızlandırılmış VIP randevu planlaması yapıyoruz.",
+    "custom_extra_note": "",
+}
+
 # Varsayılan çok şubeli klinik dizini (DB'den gelen şubelerle dinamik zenginleştirilir)
 DEFAULT_BRANCH_DIRECTORY: dict[str, dict[str, Any]] = {
     "istanbul": {
@@ -105,7 +127,7 @@ TR_INFORMAL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bnekadar\b"), "ne kadar"),
     (re.compile(r"\bfyat(i|in|iniz|lar|lari|lariniz)?\b"), "fiyat"),
     (re.compile(r"\bfiyat(i|in|iniz|lar|lari|lariniz)?\b"), "fiyat"),
-    (re.compile(r"\bucret(i|in|iniz|ler|leri|leriniz)?\b"), "ucret"),
+    (re.compile(r"\bucret(?!siz)(i|in|iniz|ler|leri|leriniz)?\b"), "ucret"),
     (re.compile(r"\binpilant\w*\b"), "implant"),
     (re.compile(r"\bimplnt\w*\b"), "implant"),
     (re.compile(r"\brandvu\w*\b"), "randevu"),
@@ -126,73 +148,90 @@ TR_INFORMAL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\byuzm\b"), "yuzum"),
     (re.compile(r"\bbogzm\b"), "bogazim"),
     (re.compile(r"\bdisim\b"), "disim"),
+    (re.compile(r"\bsisti\b"), "sisti"),
+    (re.compile(r"\bkacta\b"), "kacta"),
 ]
 
-# RapidFuzz bulanık eşleştirme için kanonik referans ifadeler
-FUZZY_CANONICAL_PHRASES: dict[str, list[str]] = {
-    "acil": [
-        "kanama durmuyor yuzum sisti nefes alamiyorum",
-        "disim cekildi kanama durmuyor",
-        "bogazim ve yuzum cok sisti yutkunamiyorum",
-    ],
-    "fiyat": [
-        "implant fiyati ne kadar",
-        "zirkonyum kaplama fiyatlariniz ne kadar",
-        "dis beyazlatma ucreti ne kadar",
-        "tek dis implant fiyatiniz ne kadar",
-    ],
-    "randevu": [
+# RapidFuzz bulanık eşleştirme için kanonik niyet ifadeleri (ezber değil, semantik çekirdek öbekler)
+FUZZY_CANONICAL_PHRASES: dict[str, tuple[str, ...]] = {
+    "acil": (
+        "kanama durmuyor",
+        "yuzum cok sisti",
+        "bogazim sisti",
+        "nefes alamiyorum",
+        "yutkunamiyorum",
+        "yuksek ates",
+        "disim kirildi",
+    ),
+    "fiyat": (
+        "fiyat ne kadar",
+        "ucreti ne kadar",
+        "implant fiyati",
+        "zirkonyum fiyati",
+        "dis beyazlatma ucreti",
+        "kac lira",
+    ),
+    "randevu": (
         "randevu almak istiyorum",
-        "muayene randevusu olusturmak istiyorum",
-        "yarin icin randevu almak istiyorum",
-    ],
-    "konum": [
+        "muayene randevusu",
+        "yarin saat uygun mu",
+        "beni yazin lutfen",
+    ),
+    "konum": (
         "adresiniz nerede",
-        "kliniginiz tam olarak nerede",
-        "subenizin tam adresi nedir",
-    ],
-    "saat": [
-        "calisma saatleriniz nedir",
+        "kliniginiz nerede",
+        "subenizin adresi",
+        "yol tarifi konum",
+    ),
+    "saat": (
+        "calisma saatleriniz",
+        "saat kaca kadar aciksiniz",
         "cumartesi kacta kapaniyor",
-        "aksam saat kaca kadar aciksiniz",
-    ],
-    "otopark": [
-        "arabayla gelsem otopark yeriniz var mi",
-        "otoparkiniz var mi",
-    ],
-    "iletisim": [
-        "telefon numaraniz nedir",
-        "subenizin telefon numarasi nedir",
-    ],
-    "agri_korku": [
-        "disci korkum var islem sirasinda canim acir mi",
-        "yaptirirken hic aci hisseder miyim",
-        "uyutarak sedasyon yapiyor musunuz",
-    ],
-    "sigorta_taksit": [
-        "ozel saglik sigortasi gecerli mi",
-        "kredi kartina kac taksit yapiyorsunuz",
+        "pazar gunu acik mi",
+    ),
+    "otopark": (
+        "otopark var mi",
+        "arabami nereye park",
+    ),
+    "agri_korku": (
+        "igne korkum var",
+        "disci korkusu",
+        "islem sirasinda aci",
+        "canim acir mi",
+        "uyutarak sedasyon",
+    ),
+    "sigorta_taksit": (
+        "ozel saglik sigortasi",
+        "kredi kartina taksit",
         "ucreti taksit oluyor mu",
-    ],
-    "cocuk_dis": [
-        "cocuk dis hekiminiz var mi",
-        "oglumun sut disi curudu pedodonti",
-    ],
+    ),
+    "cocuk_dis": (
+        "cocuk dis hekimi",
+        "sut disi curudu",
+        "pedodonti uzmani",
+    ),
+    "tedavi_sure": (
+        "toplam kac gun surer",
+        "tedavi kac gun surer",
+    ),
 }
 
+# Prompt Injection ve KVKK başka hasta verisi sızdırma tuzaklarını yakalayan güvenlik filtreleri
 PROMPT_INJECTION_RE = re.compile(
-    r"(sistem komutu|onceki (tum )?kurallari unut|ignore (all )?previous instructions|system prompt|"
-    r"sen artik .{0,35}asistansin|omur boyu .{0,25}garanti.{0,25}yaz)"
+    r"(onceki\s+tum\s+kurallari\s+unut|sistem\s+komutu|ignore\s+previous\s+instructions|system\s+prompt|"
+    r"sen\s+artik\s+comert\s+bir\s+asistansin|omur\s+boyu\s+%?100\s+agrisiz\s+garanti)"
 )
 
 KVKK_TRAP_RE = re.compile(
-    r"((esiyim|kocasiyim|karisiyim|annesiyim|babasiyim|kardesiyim|arkadasiyim).{0,60}(telefon|numara|ilac|kayit|bilgi)|"
-    r"sistemdeki telefon numarasini|kullandigi ilaclari bana yaz|baska hastanin (telefon|bilgi))"
+    r"(sistemdeki\s+telefon\s+numarasini|kullandigi\s+ilaclari\s+bana\s+yazar|"
+    r"esinin\s+telefon\s+numarasi|baska\s+hastanin\s+bilgileri|ayse\s+kaya'?nin\s+(esi|telefon|ilac))"
 )
 
+# Çok turlu diyalogda zaman/slot onayı veya randevu bağlama ifadeleri
 SLOT_CONFIRM_RE = re.compile(
-    r"(\b(olur|tamam|evet|uygun|tabii|peki|lutfen)\b.{0,45}\b(yarin|bugun|pazartesi|sali|carsamba|persembe|cuma|cumartesi|sabah|ogleden sonra|aksam|saat\s*\d{1,2}|\d{1,2}[:.]\d{2})\b|"
-    r"\b(yarin|bugun|sabah|ogleden sonra|saat\s*\d{1,2}|\d{1,2}[:.]\d{2})\b.{0,35}\b(uygun mu(dur)?|beni yaz(in)?|yazabilir misiniz|randevu|ayirin)\b)"
+    r"(\b(olur|tamam|uygun|evet|peki|tabii|harika|super)\b.*\b(yarin|bugun|sabah|ogleden\s+sonra|aksam|pazartesi|sali|carsamba|persembe|cuma|cumartesi|saat|\d{1,2}[:.]\d{2})\b|"
+    r"\b(yarin|bugun|pazartesi|sali|carsamba|persembe|cuma|cumartesi)\b.*\b(\d{1,2}[:.]\d{2}|sabah|ogleden\s+sonra)\b.*\b(uygun\s+mu\w*|beni\s+yaz\w*|yazdir\w*|olustur\w*|ayir\w*|randevu)\b|"
+    r"\bsaat\s*\d{1,2}[:.]?\d{0,2}\s*(a|e|ya|ye)?\s*(beni\s+yaz\w*|uygun\s+mu\w*|randevu)\b)"
 )
 
 TREATMENT_KEYWORDS = (
@@ -201,23 +240,26 @@ TREATMENT_KEYWORDS = (
     "kanal",
     "dolgu",
     "beyazlatma",
-    "lamine",
     "cekim",
-    "ortodonti",
-    "protez",
     "gulus tasarimi",
+    "lamine",
+    "protez",
+    "ortodonti",
+    "pedodonti",
+    "sut disi",
 )
 
 
-def normalize(text: str) -> str:
-    raw = (text or "").replace("\u200c", " ").replace("ı", "i").replace("İ", "i").replace("ə", "e").replace("Ə", "e")
-    t = unicodedata.normalize("NFKD", raw)
-    t = "".join(c for c in t if not unicodedata.combining(c))
-    return re.sub(r"\s+", " ", t.casefold()).strip()
+def normalize(s: str) -> str:
+    s = (s or "").replace("ı", "i").replace("İ", "i").replace("ə", "e").replace("Ə", "e")
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c)).casefold()
+    return re.sub(r"\s+", " ", s).strip()
 
 
-def normalize_tr_informal(n: str) -> str:
-    out = n
+def normalize_tr_informal(n_text: str) -> str:
+    """Bozuk Türkçe, STT ve sokak ağzı kısaltmalarını standart Türkçe köklere dönüştürür."""
+    out = n_text
     for pat, repl in TR_INFORMAL_PATTERNS:
         out = pat.sub(repl, out)
     return re.sub(r"\s+", " ", out).strip()
@@ -279,53 +321,58 @@ class RouteResult:
     lang: str
     tokens_in: int = 0
     tokens_out: int = 0
-    alert: str | None = None          # "acil" | "sikayet" | None
+    alert: str | None = None      # "acil" | "sikayet" | None
     handoff: bool = False
     high_value: bool = False
     meta: dict = field(default_factory=dict)
 
 
-class MemoryCache:
-    """Redis yokken (yerel test) kullanılan basit önbellek."""
-    def __init__(self):
+class _MemCache:
+    """Redis yokken veya tek sunucu kurulumunda kullanılan hafif bellek önbelleği."""
+    def __init__(self, cap: int = 2048):
+        self.cap = cap
         self.kv: dict[str, str] = {}
         self.h: dict[str, dict[str, str]] = {}
 
-    async def get(self, k):
+    async def get(self, k: str):
         return self.kv.get(k)
 
-    async def set(self, k, v, ex=None):
+    async def set(self, k: str, v: str, ex: int = 0):
+        if len(self.kv) >= self.cap:
+            self.kv.pop(next(iter(self.kv)))
         self.kv[k] = v
 
-    async def hset(self, name, key, value):
-        self.h.setdefault(name, {})[key] = value
+    async def hgetall(self, k: str) -> dict:
+        return self.h.get(k, {})
 
-    async def hgetall(self, name):
-        return dict(self.h.get(name, {}))
+    async def hlen(self, k: str) -> int:
+        return len(self.h.get(k, {}))
 
-    async def hlen(self, name):
-        return len(self.h.get(name, {}))
+    async def hset(self, k: str, f: str, v: str):
+        self.h.setdefault(k, {})[f] = v
 
 
 class DialogueFSM:
     """
-    Çok Turlu Diyalog Hafızası ve Sonlu Durum Makinesi (FSM):
+    Çok turlu (multi-turn) konuşma hafızası ve Sonlu Durum Makinesi (FSM).
     Durumlar: IDLE -> ASKED_TREATMENT -> OFFERED_APPT -> AWAITING_SLOT
-    Her (clinic_key, session_id/patient_id) için son 5 turu, aktif şubeyi ve son tedaviyi saklar.
+    Her oturum/hasta için son 5 mesajı, aktif şubeyi, konuşulan tedaviyi ve son bot teklifini tutar.
     """
-    STATES = ("IDLE", "ASKED_TREATMENT", "OFFERED_APPT", "AWAITING_SLOT")
-
-    def __init__(self):
+    def __init__(self, max_sessions: int = 1024):
+        self.max_sessions = max_sessions
         self.sessions: dict[str, dict[str, Any]] = {}
 
     def get_session(self, session_key: str) -> dict[str, Any]:
         if session_key not in self.sessions:
+            if len(self.sessions) >= self.max_sessions:
+                self.sessions.pop(next(iter(self.sessions)))
             self.sessions[session_key] = {
                 "state": "IDLE",
+                "last_intent": None,
                 "active_branch": None,
-                "last_treatment": None,
+                "treatment_topic": None,
                 "turns": [],
-                "updated_at": time.monotonic(),
+                "updated_at": time.time(),
             }
         return self.sessions[session_key]
 
@@ -334,40 +381,40 @@ class DialogueFSM:
         session_key: str,
         user_text: str,
         intent: str,
-        branch: str | None = None,
+        branch_key: str | None = None,
         treatment: str | None = None,
         bot_answer: str = "",
     ) -> dict[str, Any]:
         sess = self.get_session(session_key)
-        if branch:
-            sess["active_branch"] = branch
+        sess["updated_at"] = time.time()
+        sess["last_intent"] = intent
+        if branch_key:
+            sess["active_branch"] = branch_key
         if treatment:
-            sess["last_treatment"] = treatment
+            sess["treatment_topic"] = treatment
 
-        ans_norm = normalize(bot_answer)
-        if intent == "randevu":
-            sess["state"] = "AWAITING_SLOT"
-        elif "randevu" in ans_norm or "gun ve saat" in ans_norm or "ister misiniz" in ans_norm:
+        if intent in ("fiyat", "tedavi_sure", "agri_korku", "cocuk_dis", "sigorta_taksit"):
             sess["state"] = "OFFERED_APPT"
-        elif treatment or intent in ("tedavi_sure", "fiyat", "agri_korku", "cocuk_dis"):
+        elif intent == "randevu":
+            sess["state"] = "AWAITING_SLOT"
+        elif treatment and sess["state"] == "IDLE":
             sess["state"] = "ASKED_TREATMENT"
 
         sess["turns"].append({
-            "text": user_text[:300],
+            "text": user_text[:400],
             "intent": intent,
             "branch": sess["active_branch"],
-            "treatment": sess["last_treatment"],
-            "state": sess["state"],
+            "treatment": sess["treatment_topic"],
+            "bot_answer": bot_answer[:400],
         })
         if len(sess["turns"]) > 5:
             sess["turns"] = sess["turns"][-5:]
-        sess["updated_at"] = time.monotonic()
         return sess
 
 
 class TokenRouter:
     def __init__(self, redis=None, faq_path: Path | None = None, offline: bool = False):
-        self.cache = redis or MemoryCache()
+        self.cache = redis or _MemCache()
         self.offline = offline
         self._cb_until = 0.0
         self.fsm = DialogueFSM()
@@ -402,9 +449,9 @@ class TokenRouter:
     def _fmt(self, s: str, extra: dict | None = None) -> str:
         facts = {**self.facts, **(extra or {})}
         for k, v in facts.items():
-            if k != "branches":
+            if k not in ("branches", "ai_custom_rules", "ai_custom_rules_json"):
                 s = s.replace("{" + k + "}", str(v))
-        return s
+        return re.sub(r"\.{2,}", ".", s).strip()
 
     def _pick(self, table: dict, lang: str, extra: dict | None = None) -> str:
         return self._fmt(table.get(lang) or table.get("en") or table["tr"], extra)
@@ -425,6 +472,280 @@ class TokenRouter:
             if tr_kw in n_text:
                 return tr_kw
         return None
+
+    @staticmethod
+    def _extract_human_treatment_label(n_text: str, prev_norm: str = "") -> str | None:
+        combined = f"{n_text} {prev_norm}".strip()
+        if "tek dis implant" in combined:
+            return "tek diş implant tedaviniz"
+        if "all on 4" in combined or "all-on-4" in combined or "all on 6" in combined:
+            return "All-on-4 / tam çene implant tedaviniz"
+        if "zirkonyum" in combined and ("gulus" in combined or "tasarim" in combined):
+            return "zirkonyum kaplama ve dijital gülüş tasarımı süreciniz"
+        if "20 dis zirkonyum" in combined:
+            return "tam çene zirkonyum kaplama ve gülüş tasarımı tedaviniz"
+        if "zirkonyum" in combined:
+            return "zirkonyum kaplama tedaviniz"
+        if "gulus tasarim" in combined or "hollywood" in combined:
+            return "dijital gülüş tasarımı süreciniz"
+        if "beyazlatma" in combined:
+            return "profesyonel diş beyazlatma işleminiz"
+        if "kanal" in combined:
+            return "kanal tedaviniz"
+        if "dolgu" in combined:
+            return "estetik dolgu işleminiz"
+        if "20'lik" in combined or "20lik" in combined or "yirmilik" in combined:
+            return "20'lik diş çekimi işleminiz"
+        if "lamine" in combined or "lamina" in combined:
+            return "porselen lamine (yaprak diş) tedaviniz"
+        if "seffaf plak" in combined or "invisalign" in combined or "ortodonti" in combined:
+            return "şeffaf plak ve ortodonti tedaviniz"
+        if "sut disi" in combined:
+            return "süt dişi tedavisi"
+        if "implant" in combined:
+            return "implant tedaviniz"
+        return None
+
+    @staticmethod
+    def _parse_custom_rules(effective_facts: dict) -> dict[str, Any]:
+        rules = dict(DEFAULT_AI_CUSTOM_RULES)
+        raw = effective_facts.get("ai_custom_rules") or effective_facts.get("ai_custom_rules_json")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    for k, v in parsed.items():
+                        if v is not None and str(v).strip() != "":
+                            rules[k] = v
+            except Exception:
+                pass
+        elif isinstance(raw, dict):
+            for k, v in raw.items():
+                if v is not None and str(v).strip() != "":
+                    rules[k] = v
+        return rules
+
+    @staticmethod
+    def _strip_leading_greeting(sentence: str) -> str:
+        s = sentence.strip()
+        patterns = (
+            r"^Merhabalar,\s*",
+            r"^Merhaba,\s*",
+            r"^Hello(?:\s+and\s+welcome[^,.]*|,\s*welcome[^,.]*)?,\s*",
+            r"^Guten\s+Tag(?:\s+und\s+herzlich\s+willkommen[^,.]*)?,\s*",
+            r"^Здравствуйте[!,]\s*",
+            r"^Bonjour(?:\s+et\s+bienvenue[^,.]*)?,\s*",
+            r"^Hartelijk\s+welkom[^,.]*,\s*",
+            r"^Hola(?:\s+y\s+bienvenido[^,.]*)?,\s*",
+            r"^Buongiorno(?:\s+e\s+benvenuti[^,.]*)?,\s*",
+            r"^Salam,\s*",
+            r"^Добрий\s+день[^,.]*[!,]\s*",
+            r"^Здравейте[^,.]*,\s*",
+            r"^Bună\s+ziua[^,.]*,\s*",
+            r"^Καλημέρα\s+σας[^,.]*,\s*",
+        )
+        for pat in patterns:
+            s_new = re.sub(pat, "", s, flags=re.IGNORECASE)
+            if s_new != s and s_new:
+                return s_new[0].upper() + s_new[1:]
+        return s
+
+    def _compose_parlant_concierge_reply(
+        self,
+        raw_text: str,
+        n: str,
+        lang: str,
+        ordered: list[str],
+        effective_facts: dict[str, Any],
+        cur_treatment: str | None = None,
+        branch_facts: dict[str, Any] | None = None,
+        prev_norm: str = "",
+    ) -> str:
+        """
+        Parlant (18.3k⭐) + Rasa CALM (21.3k⭐) + Chatwoot Captain (40.1k⭐) 4-Katmanlı VIP Hasta Koordinatörü Yanıt Bestecisi:
+        1. Samimi & Resmi Karşılama / Empati
+        2. Müşterinin Mesajındaki Özel Varlık & Alt-Soruları Yansıtma (Tedavi adı, çocuk yaşı, nakit avantajı, sigorta markası, yurt dışı/şehir dışı seyahat, Pazar/nöbetçi hekim)
+        3. Kliniğe Özel Politika Enjeksiyonu (ai_custom_rules)
+        4. Birleşik Sorularda Tekrarlayan Selamları Temizleyip Doğal Bağlaçlarla Birleştirme
+        """
+        rules = self._parse_custom_rules(effective_facts)
+        treatment_lbl = self._extract_human_treatment_label(n, prev_norm)
+
+        # Türkçe için yüksek hassasiyetli bağlamsal Parlant yanıt üretimi
+        if lang == "tr":
+            # Özel birleşik durum 1: Konum + Otopark birlikte sorulduysa tek akıcı paragrafta birleştir
+            has_konum = "konum" in ordered
+            has_otopark = "otopark" in ordered
+
+            clauses: list[str] = []
+            handled: set[str] = set()
+
+            if has_konum and has_otopark:
+                adres_val = effective_facts.get("adres", self.facts["adres"])
+                harita_val = effective_facts.get("harita", self.facts["harita"])
+                oto_val = str(effective_facts.get("otopark", self.facts["otopark"])).rstrip(".")
+                clauses.append(
+                    f"Merhabalar, sizleri {adres_val} adresindeki kliniğimizde ağırlamaktan memnuniyet duyarız "
+                    f"(Yol tarifi: {harita_val}). Özel aracınızla rahatça gelebilirsiniz; {oto_val}."
+                )
+                handled.add("konum")
+                handled.add("otopark")
+
+            for it_name in ordered:
+                if it_name in handled:
+                    continue
+
+                if it_name == "fiyat":
+                    t_phrase = f"Sorduğunuz {treatment_lbl} için " if treatment_lbl else "Kliniğimizde "
+                    exam_note = rules.get("exam_policy") or DEFAULT_AI_CUSTOM_RULES["exam_policy"]
+                    base_fiyat = (
+                        f"Merhabalar, kliniğimize hoş geldiniz. {t_phrase}tedavi planı ve net ücreti, "
+                        f"uzman hekimimizin yapacağı muayene ve panoramik röntgen kontrolünüzden sonra size özel yazılı olarak paylaşıyoruz."
+                    )
+                    if any(w in n for w in ("nakit", "pesin", "indirim")):
+                        cash_note = rules.get("cash_discount_note") or DEFAULT_AI_CUSTOM_RULES["cash_discount_note"]
+                        base_fiyat += f" {cash_note}"
+                    if rules.get("price_policy") == "starting_range" and rules.get("starting_price_note"):
+                        base_fiyat += f" {rules['starting_price_note']}"
+                    base_fiyat += " Ön değerlendirme ve size özel planlama için hangi gün ve saat aralığı size uyar?"
+                    clauses.append(base_fiyat)
+
+                elif it_name == "saat":
+                    saat_val = str(effective_facts.get("saatler", self.facts["saatler"])).rstrip(".")
+                    if any(w in n for w in ("pazar", "nobetci", "aksam")):
+                        clauses.append(
+                            f"Merhabalar, kliniğimizde sizleri hafta içi 09:00-19:00, Cumartesi günleri ise 09:00-15:00 saatleri arasında ağırlıyoruz ({saat_val}); "
+                            f"Pazar günleri rutin muayeneye kapalıyız ancak acil durumlar için nöbetçi hekim koordinasyonumuz mevcuttur. "
+                            f"Size uygun bir gün için randevu planlayalım mı?"
+                        )
+                    else:
+                        clauses.append(
+                            f"Merhabalar, kliniğimizde sizleri çalışma saatlerimiz olan {saat_val} programı çerçevesinde ağırlıyoruz. "
+                            f"Size en uygun gün ve saati paylaşırsanız randevunuzu hemen planlayabilirim."
+                        )
+
+                elif it_name == "cocuk_dis":
+                    age_m = re.search(r"\b(\d{1,2})\s*yas(inda|indaki)?\b", n)
+                    child_rel = "oğlunuza" if "oglum" in n else ("kızınıza" if "kizim" in n else "evladınıza")
+                    kids_note = rules.get("kids_note") or DEFAULT_AI_CUSTOM_RULES["kids_note"]
+                    if age_m:
+                        age_num = age_m.group(1)
+                        clauses.append(
+                            f"Merhabalar, öncelikle {age_num} yaşındaki {child_rel} çok geçmiş olsun. "
+                            f"{kids_note} {age_num} yaş grubu minik misafirlerimizin rahat bir muayene geçirmesi için "
+                            f"size uygun günü paylaşırsanız uzman çocuk diş hekimimize hemen öncelikli randevu planlayabiliriz."
+                        )
+                    else:
+                        clauses.append(
+                            f"Merhabalar, {kids_note} Çocuğunuzun yaşını ve varsa şikayetini paylaşırsanız "
+                            f"uzman çocuk diş hekimimize hemen öncelikli randevu planlayabiliriz."
+                        )
+
+                elif it_name == "tedavi_sure":
+                    travel_intro = ""
+                    if "almanya" in n:
+                        travel_intro = "Almanya'dan kliniğimize gösterdiğiniz ilgi için çok teşekkür ederiz; yurt dışından gelen misafirlerimiz için uçuş takviminize tam uyumlu hızlandırılmış VIP planlama uyguluyoruz. "
+                    elif any(w in n for w in ("londra", "ingiltere", "fransa", "hollanda", "isvicre", "belcika", "avusturya", "yurt disi")):
+                        travel_intro = f"{rules.get('health_tourism_note') or DEFAULT_AI_CUSTOM_RULES['health_tourism_note']} "
+                    elif "sehir disi" in n:
+                        travel_intro = "Şehir dışından kliniğimize gösterdiğiniz ilgi için çok teşekkür ederiz; seyahat takviminize özel hızlandırılmış randevu planlaması uyguluyoruz. "
+
+                    clauses.append(
+                        f"Merhabalar, {travel_intro}Tedavi süremiz yapılacak klinik planlamaya göre şekilleniyor: "
+                        f"tek seanslık işlemleri aynı gün tamamlıyoruz; zirkonyum kaplama ve dijital gülüş tasarımı süreçlerimiz ise provalarla birlikte ortalama 4 ile 6 gün (4-6 gün) sürüyor. "
+                        f"İmplant tedavi takvimini ise hekimimiz muayenede netleştiriyor. Size özel tedavi planı çıkarmamız için ön değerlendirme randevusu oluşturalım mı?"
+                    )
+
+                elif it_name == "sigorta_taksit":
+                    ins_brand = ""
+                    for b_code, b_label in (
+                        ("allianz", "Allianz özel sağlık sigortası"),
+                        ("acibadem", "Acıbadem Bupa sağlık sigortası"),
+                        ("axa", "AXA özel sağlık sigortası"),
+                        ("anadolu", "Anadolu Sigorta"),
+                        ("mapfre", "Mapfre Sigorta"),
+                    ):
+                        if b_code in n:
+                            ins_brand = f"{b_label} dahil "
+                            break
+                    clauses.append(
+                        f"Merhabalar, kliniğimizde kredi kartı ile ödemelerde taksit kolaylığı sağlıyor; {ins_brand}özel sağlık sigortası ve anlaşmalı kurumlar için "
+                        f"poliçenizin gerektirdiği tüm tanı, röntgen ve fatura evraklarını eksiksiz hazırlıyoruz. "
+                        f"Poliçenizin kapsamını veya kartınıza uygun taksit seçeneklerini hasta kabul ekibimizin sizin için hemen kontrol etmesi adına telefon numaranızı bırakabilirsiniz."
+                    )
+
+                elif it_name == "agri_korku":
+                    pain_note = rules.get("pain_comfort_note") or DEFAULT_AI_CUSTOM_RULES["pain_comfort_note"]
+                    clauses.append(
+                        f"Merhabalar, bu hassasiyetinizi bizimle paylaştığınız için çok teşekkür ederiz; kliniğimizde sizi çok iyi anlıyoruz. "
+                        f"{pain_note} Dilerseniz ilk gelişinizde hiçbir işlem yapmadan, sadece uzman hekimimizle tanışma ve ön görüşme için randevu oluşturalım mı?"
+                    )
+
+                elif it_name in self.intent_map:
+                    clauses.append(self._pick(self.intent_map[it_name]["answers"], lang, effective_facts))
+                elif it_name in self.tpl:
+                    clauses.append(self._pick(self.tpl[it_name], lang, effective_facts))
+
+            # Birden fazla niyet birleştiğinde 2. ve 3. cümlelerdeki tekrarlayan 'Merhabalar,' selamını temizle
+            if len(clauses) > 1:
+                merged: list[str] = [clauses[0]]
+                for idx_c, cl in enumerate(clauses[1:], start=1):
+                    cleaned = self._strip_leading_greeting(cl)
+                    if idx_c == 1 and not cleaned.startswith(("Ayrıca", "Bunun yanı sıra")):
+                        cleaned = f"Ayrıca {cleaned[0].lower()}{cleaned[1:]}" if cleaned else cleaned
+                    merged.append(cleaned)
+                final_tr = " ".join(merged)
+            else:
+                final_tr = clauses[0] if clauses else self._pick(self.tpl["insan"], lang, effective_facts)
+
+            extra_note = str(rules.get("custom_extra_note") or "").strip()
+            if extra_note and extra_note not in final_tr:
+                final_tr = f"{final_tr} {extra_note}"
+
+            return re.sub(r"\.{2,}", ".", final_tr).strip()
+
+        # Diğer 15 yabancı dil için birleşik niyetleri doğal akışla (tekrarlayan selamları temizleyerek) birleştir
+        ans_parts: list[str] = []
+        for idx_it, it_name in enumerate(ordered):
+            if it_name in self.intent_map:
+                part = self._pick(self.intent_map[it_name]["answers"], lang, effective_facts)
+            elif it_name in self.tpl:
+                part = self._pick(self.tpl[it_name], lang, effective_facts)
+            else:
+                continue
+            if part and part not in ans_parts:
+                if idx_it > 0:
+                    part = self._strip_leading_greeting(part)
+                ans_parts.append(part)
+        return re.sub(r"\.{2,}", ".", " ".join(ans_parts)).strip()
+
+    def _compose_slot_confirm_reply(
+        self,
+        raw_text: str,
+        n: str,
+        lang: str,
+        effective_facts: dict[str, Any],
+        branch_facts: dict[str, Any] | None,
+        cur_treatment: str | None,
+        prev_norm: str,
+    ) -> str:
+        """Çok turlu konuşmada hasta gün/saat belirttiğinde ('Olur yarın 15:00 uygun mu?', 'Tamam yarın sabah 10:00'a beni yazın') bağlama duyarlı VIP koordinatör yanıtı üretir."""
+        if lang != "tr":
+            return self._pick(self.tpl["randevu"], lang, effective_facts)
+
+        time_m = re.search(r"\b(\d{1,2}[:.]\d{2})\b", n)
+        day_word = "yarın" if "yarin" in n else ("bugün" if "bugun" in n else "")
+        part_of_day = "sabah" if "sabah" in n else ("öğleden sonra" if "ogleden sonra" in n else "")
+        slot_desc = " ".join(filter(None, [day_word, part_of_day, f"saat {time_m.group(1)}" if time_m else "belirttiğiniz saat"])).strip()
+
+        treatment_lbl = self._extract_human_treatment_label(n, prev_norm)
+        clinic_lbl = branch_facts["clinic"] if branch_facts else effective_facts.get("clinic", self.clinic)
+        topic_phrase = f"{clinic_lbl} bünyesinde {treatment_lbl}" if treatment_lbl else f"{clinic_lbl}"
+
+        return (
+            f"Memnuniyetle! {topic_phrase} için {slot_desc} randevu talebinizi öncelikli olarak sisteme aldık. "
+            f"Hasta koordinatörümüz hekim ve koltuk uygunluğunu kontrol ederek randevu teyit mesajınızı hemen iletecektir."
+        )
 
     def _detect_branch(self, n_text: str, clinic_facts: dict | None = None) -> tuple[str | None, dict[str, str] | None]:
         """Mesajda geçen şube/şehir adını tespit edip o şubenin gerçek adres, telefon ve harita bilgisini döndürür."""
@@ -588,7 +909,7 @@ class TokenRouter:
         if PROMPT_INJECTION_RE.search(n):
             ans = (
                 f"{self._pick(self.tpl['fiyat'], lang, effective_facts)} "
-                f"{self._pick(self.tpl['insan'], lang, effective_facts)}"
+                f"{self._strip_leading_greeting(self._pick(self.tpl['insan'], lang, effective_facts))}"
             )
             if sess is not None:
                 self.fsm.record_turn(sess_key, text, "insan", branch_key, cur_treatment, ans)
@@ -596,8 +917,8 @@ class TokenRouter:
 
         if KVKK_TRAP_RE.search(n):
             ans = (
-                "KVKK ve hasta mahremiyeti kuralları gereği hasta iletişim veya sağlık bilgileri üçüncü kişilerle paylaşılamamaktadır. "
-                "Mesajınızı değerlendirmesi için hekim ve hasta kabul ekibimize ilettik; çalışma saatlerinde size dönüş yapılacaktır."
+                "Merhabalar, KVKK ve hasta mahremiyeti kurallarımız gereği hiçbir misafirimizin iletişim veya sağlık bilgisini üçüncü kişilerle paylaşamıyoruz. "
+                "Talebinizi değerlendirmesi için hekim ve hasta kabul ekibimize ilettik; çalışma saatlerimiz içinde size dönüş yapılacaktır."
                 if lang == "tr"
                 else self._pick(self.tpl["guvenli_yedek"], lang, effective_facts)
             )
@@ -626,9 +947,7 @@ class TokenRouter:
         ) or bool(sess and sess.get("state") in ("ASKED_TREATMENT", "OFFERED_APPT", "AWAITING_SLOT"))
 
         if is_slot_confirm and (has_appt_context or "beni yaz" in n or "uygun mu" in n):
-            base_ans = self._pick(self.tpl["randevu"], lang, effective_facts)
-            if branch_facts and lang == "tr":
-                base_ans = f"{branch_facts['clinic']} için {base_ans[0].lower()}{base_ans[1:]}"
+            base_ans = self._compose_slot_confirm_reply(text, n, lang, effective_facts, branch_facts, cur_treatment, prev_norm)
             if sess is not None:
                 self.fsm.record_turn(sess_key, text, "randevu", branch_key, cur_treatment, base_ans)
             return RouteResult(
@@ -648,7 +967,6 @@ class TokenRouter:
         for name, only_short, pats, _ in self.intents:
             if only_short and word_count > 4:
                 continue
-            # Önce tespit edilen dilin deseni, sonra diğer dillerin desenleri
             if (lang in pats and (pats[lang].search(n) or pats[lang].search(n_raw))) or any(
                 p.search(n) or p.search(n_raw) for p in pats.values()
             ):
@@ -687,19 +1005,13 @@ class TokenRouter:
             primary_intent = ordered[0]
             primary_layer = "L1-sss" if primary_intent in L1_INTENT_SET else "L2-anahtar"
 
-            ans_parts: list[str] = []
-            for it_name in ordered:
-                if it_name in self.intent_map:
-                    part = self._pick(self.intent_map[it_name]["answers"], lang, effective_facts)
-                elif it_name in self.tpl:
-                    part = self._pick(self.tpl[it_name], lang, effective_facts)
-                else:
-                    continue
-                if part and part not in ans_parts:
-                    ans_parts.append(part)
-
-            combined_answer = " ".join(ans_parts).strip()
-            needs_handoff = any(it in ("randevu", "insan", "sikayet") for it in ordered)
+            combined_answer = self._compose_parlant_concierge_reply(
+                text, n, lang, ordered, effective_facts, cur_treatment, branch_facts, prev_norm
+            )
+            rules = self._parse_custom_rules(effective_facts)
+            needs_handoff = any(it in ("randevu", "insan", "sikayet") for it in ordered) or (
+                "fiyat" in ordered and rules.get("price_policy") == "direct_handoff"
+            )
             if sess is not None:
                 self.fsm.record_turn(sess_key, text, primary_intent, branch_key, cur_treatment, combined_answer)
             return RouteResult(
@@ -756,7 +1068,15 @@ class TokenRouter:
                 pass
 
         if label == "fiyat" and not self.price_on:
-            return RouteResult(self._pick(self.tpl["fiyat"], lang, effective_facts), layer2, "fiyat", lang, tin, tout, high_value=high_value)
+            return RouteResult(
+                self._compose_parlant_concierge_reply(text, n, lang, ["fiyat"], effective_facts, cur_treatment, branch_facts, prev_norm),
+                layer2,
+                "fiyat",
+                lang,
+                tin,
+                tout,
+                high_value=high_value,
+            )
         if label == "tibbi_soru":
             return RouteResult(self._pick(self.tpl["tibbi_soru"], lang, effective_facts), layer2, "tibbi_soru", lang, tin, tout, handoff=True, high_value=high_value)
         if label in ("randevu", "insan", "gorsel", "sikayet"):
