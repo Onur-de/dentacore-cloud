@@ -276,7 +276,7 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa")
         return await reply(post, "L1-postop", "postop")
 
     # 3) Token Router
-    res = await router.route(text, lang)
+    res = await router.route(text, lang, patient_id=pid)
     await reply(res.answer, res.layer, res.intent, res.tokens_in, res.tokens_out)
     if res.alert == "acil":
         p = await patient(pid)

@@ -912,7 +912,10 @@
 
   async function openPatient(pid, reveal) {
     document.querySelectorAll(".drawer-wrap").forEach((el) => el.remove());
-    const p = await run(() => api(`/app/api/patients/${pid}${reveal ? "?reveal=true" : ""}`));
+    const [p, odo] = await Promise.all([
+      run(() => api(`/app/api/patients/${pid}${reveal ? "?reveal=true" : ""}`)),
+      api(`/app/api/patients/${pid}/odontogram`).catch(() => ({ records: [], summary: {} })),
+    ]);
     if (!p) return;
     const onEsc = (ev) => {
       if (ev.key !== "Escape") return;
@@ -926,10 +929,199 @@
     const ledger = [...p.charges.map((c) => ({ ...c, t: "Hizmet", info: c.description })), ...p.payments.map((c) => ({ ...c, t: "Tahsilat", info: c.method }))]
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+    const genIdem = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // --- FDI Odontogram (32 Daimi Diş 11-48 + 20 Süt Dişi 51-85, 5 Yüzey M/D/O/B/L) ---
+    const ODO_STATUS_META = {
+      healthy: ["Sağlıklı", "#0F766E"],
+      caries: ["Çürük", "#B91C1C"],
+      planned: ["Planlanan", "#C2410C"],
+      treated: ["Tedavi Edildi", "#15803D"],
+      implant: ["İmplant", "#0A2540"],
+      crown: ["Zirkonyum / Kron", "#0D9488"],
+      root_canal: ["Kanal Tedavisi", "#854D0E"],
+      extraction: ["Çekim Planı", "#9A3412"],
+      missing: ["Eksik Diş", "#64748B"],
+    };
+    const odoByTooth = {};
+    (odo.records || []).forEach((r) => {
+      (odoByTooth[r.tooth_fdi] = odoByTooth[r.tooth_fdi] || []).push(r);
+    });
+
+    function openToothModal(fdiNum, preSurface) {
+      const existing = odoByTooth[fdiNum] || [];
+      const idemKey = genIdem("odo");
+      modal(`Diş #${fdiNum} (FDI) · Klinik İşlem & Yüzey Kaydı`, [
+        existing.length ? h("div", { class: "cal-box" },
+          h("b", { text: `Diş #${fdiNum} Mevcut Kayıtlar (${existing.length})` }),
+          existing.map((er) => h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;font-size:13px" },
+            h("span", { text: `[${er.surface}] ${er.procedure_name} (${(ODO_STATUS_META[er.status] || [er.status])[0]}) · ${fmtTL(er.amount_try || 0)}` }),
+            S.user.role !== "secretary" ? h("button", {
+              class: "btn btn-sm btn-danger",
+              type: "button",
+              on: {
+                click: async () => {
+                  await run(() => api(`/app/api/patients/${pid}/odontogram/${er.id}`, { method: "DELETE" }), "Diş kaydı silindi");
+                  document.querySelectorAll(".overlay .modal").forEach((m) => m.closest(".overlay")?.remove());
+                  openPatient(pid, reveal);
+                },
+              },
+            }, "Sil") : null
+          ))
+        ) : null,
+        h("div", { class: "row" },
+          fld("Diş Yüzeyi (5 Yüzey)", sel("surface", [
+            ["FULL", "Tüm Diş (FULL)"],
+            ["O", "Oklüzal / İnsizal (O)"],
+            ["M", "Mezial (M)"],
+            ["D", "Distal (D)"],
+            ["B", "Bukkal / Vestibül (B)"],
+            ["L", "Lingual / Palatinal (L)"],
+          ], preSurface || "FULL")),
+          fld("Klinik Durum", sel("status", Object.entries(ODO_STATUS_META).map(([k, [lbl]]) => [k, lbl]), "planned"))
+        ),
+        fld("İşlem / Tedavi Adı", inp("procedure_name", { required: true, minLength: 2, placeholder: "Kompozit Dolgu, İmplant, Zirkonyum Kron..." })),
+        h("div", { class: "row" },
+          fld("İşlem Kodu (Opsiyonel)", inp("procedure_code", { placeholder: "FDI-204" })),
+          fld("Tutar (TL)", inp("amount", { type: "number", step: "0.01", min: "0", value: "0" }))
+        ),
+        fld("Klinik Not", inp("note", { placeholder: "Periapikal lezyon izlendi..." })),
+        h("label", { class: "odo-check-row" },
+          h("input", { type: "checkbox", name: "auto_charge", value: "1", checked: true }),
+          h("span", { text: "Tutar > 0 ise kasaya otomatik hizmet borcu olarak aktar" })
+        ),
+      ], async (f) => {
+        await api(`/app/api/patients/${pid}/odontogram`, {
+          method: "POST",
+          body: {
+            tooth_fdi: fdiNum,
+            surface: f.get("surface"),
+            status: f.get("status"),
+            procedure_code: f.get("procedure_code") || "",
+            procedure_name: f.get("procedure_name"),
+            amount: f.get("amount") || "0",
+            note: f.get("note") || "",
+            auto_charge: f.get("auto_charge") === "1",
+            idempotency_key: idemKey,
+          },
+        });
+        toast(`Diş #${fdiNum} işlemi kaydedildi`);
+        openPatient(pid, reveal);
+      }, "Kaydet");
+    }
+
+    function renderToothButton(fdiNum) {
+      const recs = odoByTooth[fdiNum] || [];
+      const topRec = recs[0];
+      const stColor = topRec ? (ODO_STATUS_META[topRec.status] || ["", "#0F766E"])[1] : "#CBD5E1";
+      const surfMap = {};
+      recs.forEach((r) => { surfMap[r.surface] = (ODO_STATUS_META[r.status] || ["", "#0F766E"])[1]; });
+      const fullCol = surfMap.FULL || "";
+
+      const svg = document.createElementNS(SVG, "svg");
+      svg.setAttribute("viewBox", "0 0 36 36");
+      svg.setAttribute("class", "odo-svg");
+      svg.setAttribute("aria-hidden", "true");
+
+      const addSurf = (tagN, attrs, sCode) => {
+        const el = document.createElementNS(SVG, tagN);
+        for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+        el.setAttribute("fill", surfMap[sCode] || fullCol || "#F8FAFC");
+        el.setAttribute("stroke", recs.length ? stColor : "#64748B");
+        el.setAttribute("stroke-width", "1.4");
+        svg.appendChild(el);
+      };
+      // 5 yüzey: Üst(B), Alt(L), Sol(M), Sağ(D), Merkez(O)
+      addSurf("polygon", { points: "3,3 33,3 24,12 12,12" }, "B");
+      addSurf("polygon", { points: "3,33 33,33 24,24 12,24" }, "L");
+      addSurf("polygon", { points: "3,3 12,12 12,24 3,33" }, "M");
+      addSurf("polygon", { points: "33,3 24,12 24,24 33,33" }, "D");
+      addSurf("rect", { x: "12", y: "12", width: "12", height: "12", rx: "2" }, "O");
+
+      return h("button", {
+        type: "button",
+        class: "odo-tooth" + (recs.length ? " has-rec" : ""),
+        "data-tooth": String(fdiNum),
+        title: recs.length ? `Diş #${fdiNum}: ${recs.map((x) => `${x.surface} ${x.procedure_name}`).join(", ")}` : `Diş #${fdiNum} işlem ekle`,
+        on: { click: () => openToothModal(fdiNum, "FULL") },
+      },
+        svg,
+        h("span", { class: "odo-num", text: String(fdiNum) })
+      );
+    }
+
+    const permUpper = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+    const permLower = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+    const pedoUpper = [55, 54, 53, 52, 51, 61, 62, 63, 64, 65];
+    const pedoLower = [85, 84, 83, 82, 81, 71, 72, 73, 74, 75];
+
+    const permGrid = h("div", { class: "odo-arch-wrap" },
+      h("div", { class: "odo-row" }, permUpper.map(renderToothButton)),
+      h("div", { class: "odo-row" }, permLower.map(renderToothButton))
+    );
+    const pedoGrid = h("div", { class: "odo-arch-wrap hidden" },
+      h("div", { class: "odo-row odo-pedo" }, pedoUpper.map(renderToothButton)),
+      h("div", { class: "odo-row odo-pedo" }, pedoLower.map(renderToothButton))
+    );
+
+    const btnPerm = h("button", {
+      type: "button",
+      class: "btn btn-sm btn-primary",
+      on: {
+        click: () => {
+          permGrid.classList.remove("hidden");
+          pedoGrid.classList.add("hidden");
+          btnPerm.className = "btn btn-sm btn-primary";
+          btnPedo.className = "btn btn-sm btn-ghost";
+        },
+      },
+    }, "Erişkin (11–48)");
+    const btnPedo = h("button", {
+      type: "button",
+      class: "btn btn-sm btn-ghost",
+      on: {
+        click: () => {
+          pedoGrid.classList.remove("hidden");
+          permGrid.classList.add("hidden");
+          btnPedo.className = "btn btn-sm btn-primary";
+          btnPerm.className = "btn btn-sm btn-ghost";
+        },
+      },
+    }, "Süt Dişi / Pedodonti (51–85)");
+
+    const odoSection = h("div", { class: "odo-box", id: "patient-odontogram" },
+      h("div", { class: "odo-head" },
+        h("div", null,
+          h("strong", { text: "FDI İnteraktif Odontogram (5 Yüzey M/D/O/B/L)" }),
+          h("small", { text: `Toplam ${odo.summary?.total_records || 0} diş kaydı · Dişe tıklayarak yüzey ve işlem girin` })
+        ),
+        h("div", { class: "actions" }, btnPerm, btnPedo)
+      ),
+      permGrid,
+      pedoGrid
+    );
+
     const drawer = h("div", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-label": p.name || `Hasta #${p.id}` },
       h("div", { class: "top" },
-        h("div", null, h("h2", { text: p.name || `Hasta #${p.id}` }), h("p", { text: `#${p.id} · ${p.channel === "ig" ? "Instagram" : "WhatsApp"} · ${(p.lang || "tr").toUpperCase()}` })),
-        h("button", { class: "btn btn-ghost btn-sm", type: "button", on: { click: close } }, "Kapat")
+        h("div", null,
+          h("h2", { text: p.name || `Hasta #${p.id}` }),
+          h("p", { text: `#${p.id} · ${p.channel === "ig" ? "Instagram" : "WhatsApp"} · ${(p.lang || "tr").toUpperCase()}${p.active === false ? " · ARŞİVLİ" : ""}` })
+        ),
+        h("div", { class: "actions" },
+          S.user.role !== "secretary" ? h("button", {
+            class: "btn btn-sm btn-ghost",
+            type: "button",
+            on: {
+              click: async () => {
+                const ep = p.active === false ? "unarchive" : "archive";
+                await run(() => api(`/app/api/patients/${pid}/${ep}`, { method: "POST" }), p.active === false ? "Hasta aktifleştirildi" : "Hasta arşivlendi");
+                close();
+                route();
+              },
+            },
+          }, p.active === false ? "Aktifleştir" : "Arşivle") : null,
+          h("button", { class: "btn btn-ghost btn-sm", type: "button", on: { click: close } }, "Kapat")
+        )
       ),
       h("div", { class: "kv" },
         h("span", { text: "Telefon" }),
@@ -942,28 +1134,53 @@
           class: "btn btn-sm btn-primary",
           type: "button",
           on: {
-            click: () => modal("Hizmet ekle", [
-              fld("Açıklama", inp("description", { required: true, minLength: 2, placeholder: "Zirkonyum kron x2" })),
-              fld("Tutar (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", required: true })),
-            ], async (f) => {
-              await api("/app/api/charges", { method: "POST", body: { patient_id: pid, description: f.get("description"), amount: f.get("amount") } });
-              toast("Hizmet eklendi");
-              openPatient(pid);
-            }),
+            click: () => {
+              const chgIdem = genIdem("chg");
+              modal("Hizmet ekle", [
+                fld("Açıklama", inp("description", { required: true, minLength: 2, placeholder: "Zirkonyum kron x2" })),
+                fld("Tutar (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", required: true })),
+              ], async (f) => {
+                await api("/app/api/charges", {
+                  method: "POST",
+                  body: { patient_id: pid, description: f.get("description"), amount: f.get("amount"), idempotency_key: chgIdem },
+                });
+                toast("Hizmet eklendi");
+                openPatient(pid, reveal);
+              });
+            },
           },
         }, "Hizmet ekle"),
         h("button", {
           class: "btn btn-sm btn-cta",
           type: "button",
           on: {
-            click: () => modal("Tahsilat al", [
-              fld("Tutar (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", required: true, value: p.balance > 0 ? p.balance : "" })),
-              fld("Yöntem", sel("method", [["kart", "Kart"], ["nakit", "Nakit"], ["havale", "Havale/EFT"], ["diger", "Diğer"]], "kart")),
-            ], async (f) => {
-              await api("/app/api/payments", { method: "POST", body: { patient_id: pid, amount: f.get("amount"), method: f.get("method") } });
-              toast("Tahsilat kaydedildi");
-              openPatient(pid);
-            }),
+            click: () => {
+              const payIdem = genIdem("pay");
+              const amtIn = inp("amount", { type: "number", step: "0.01", min: "0.01", required: true, value: p.balance > 0 ? p.balance : "" });
+              const advCheck = h("input", { type: "checkbox", name: "allow_advance", value: "1", checked: p.balance <= 0 });
+              const advBox = h("label", { class: "odo-check-row" },
+                advCheck,
+                h("span", { text: `Bakiye üstü / Avans (Ön Ödeme) tahsilatı olarak onayla (Açık bakiye: ${fmtTL(Math.max(0, p.balance))})` })
+              );
+              modal("Tahsilat al", [
+                fld("Tutar (TL)", amtIn),
+                fld("Yöntem", sel("method", [["kart", "Kart"], ["nakit", "Nakit"], ["havale", "Havale/EFT"], ["diger", "Diğer"]], "kart")),
+                advBox,
+              ], async (f) => {
+                await api("/app/api/payments", {
+                  method: "POST",
+                  body: {
+                    patient_id: pid,
+                    amount: f.get("amount"),
+                    method: f.get("method"),
+                    idempotency_key: payIdem,
+                    allow_advance: f.get("allow_advance") === "1",
+                  },
+                });
+                toast("Tahsilat kaydedildi");
+                openPatient(pid, reveal);
+              });
+            },
           },
         }, "Tahsilat al"),
         h("button", {
@@ -972,7 +1189,7 @@
           on: {
             click: async () => {
               const r = await run(() => api(`/app/api/patients/${pid}/anamnesis`, { method: "POST" }), "Anamnez formu oluşturuldu");
-              if (r) openPatient(pid);
+              if (r) openPatient(pid, reveal);
             },
           },
         }, "Anamnez gönder"),
@@ -987,6 +1204,7 @@
           },
         }, "Bekleme listesi")
       ),
+      odoSection,
       h("div", { class: "section-t", text: "Anamnez" }),
       p.anamnesis.length ? p.anamnesis.map((a) => h("div", { class: "alert-item" },
         h("div", { class: "k" }, a.red_flags.length ? tag(`${a.red_flags.length} kırmızı bayrak`, "red") : tag("Temiz", "green")),
@@ -1713,6 +1931,7 @@
           if (!owner) return toast("Yalnızca yönetici kaydedebilir", true);
           const f = Object.fromEntries(new FormData(form));
           f.slot_step_min = Number(f.slot_step_min || 15);
+          f.buffer_min = Number(f.buffer_min || 0);
           await run(() => api("/app/api/settings", { method: "POST", body: f }), "Klinik ayarları kaydedildi");
           S.clinic = f.name;
           document.querySelectorAll(".brand small, .m-topbar-brand small").forEach((el) => { el.textContent = S.clinic; });
@@ -1732,6 +1951,10 @@
       h("div", { class: "row" },
         fld("Varsayılan Dil (16 Dil)", sel("default_lang", LANG_OPTIONS, s.default_lang || "tr")),
         fld("Randevu Slot Aralığı (dk)", sel("slot_step_min", [["5", "5 dakika"], ["10", "10 dakika"], ["15", "15 dakika (varsayılan)"], ["20", "20 dakika"], ["30", "30 dakika"], ["60", "60 dakika"]], String(s.slot_step_min || 15)))
+      ),
+      h("div", { class: "row" },
+        fld("Çalışma Saatleri Kuralı (JSON)", inp("working_hours_json", { value: s.working_hours_json || '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}' })),
+        fld("İşlem Arası Sterilizasyon Payı (buffer dk)", inp("buffer_min", { type: "number", min: 0, max: 120, value: s.buffer_min || 0 }))
       ),
       fld("Google Haritalar Yorum Bağlantısı", inp("google_review_url", { value: s.google_review_url || "", placeholder: "https://search.google.com/local/writereview?placeid=..." })),
       owner ? h("button", { class: "btn btn-cta", type: "submit" }, "Ayarları Kaydet") : null
