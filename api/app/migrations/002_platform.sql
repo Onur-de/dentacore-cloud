@@ -175,6 +175,7 @@ ALTER TABLE payments     ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS payments_idem_uq ON payments (clinic_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}';
 ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS buffer_min INT NOT NULL DEFAULT 0;
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS ai_custom_rules_json TEXT NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS tooth_records (
   id              BIGSERIAL PRIMARY KEY,

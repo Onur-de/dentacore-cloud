@@ -1364,6 +1364,7 @@ class SettingsIn(BaseModel):
     google_review_url: str = Field("", max_length=250)
     working_hours_json: str | None = None
     buffer_min: int = Field(0, ge=0, le=120)
+    ai_custom_rules_json: str | None = None
 
 
 @router.get("/app/api/settings")
@@ -1381,11 +1382,41 @@ async def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
             raise ValueError("dict değil")
     except Exception:
         raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı")
+    cur_c = await q1("SELECT ai_custom_rules_json FROM clinics WHERE id=%s", u["clinic_id"]) or {}
+    ai_rules_str = b.ai_custom_rules_json if b.ai_custom_rules_json is not None else (cur_c.get("ai_custom_rules_json") or "{}")
+    try:
+        parsed_ai = json.loads(ai_rules_str)
+        if not isinstance(parsed_ai, dict):
+            raise ValueError("dict değil")
+    except Exception:
+        raise HTTPException(400, "Geçersiz yapay zeka cevap kuralları JSON formatı")
     await q("""UPDATE clinics SET name=%s, city=%s, address=%s, phone=%s, autopilot_name=%s, default_lang=%s,
-               slot_step_min=%s, google_review_url=%s, working_hours_json=%s, buffer_min=%s WHERE id=%s""",
-            b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, wh_str, b.buffer_min, u["clinic_id"])
+               slot_step_min=%s, google_review_url=%s, working_hours_json=%s, buffer_min=%s, ai_custom_rules_json=%s WHERE id=%s""",
+            b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, wh_str, b.buffer_min, ai_rules_str, u["clinic_id"])
     await log(u, "settings.update", f"clinic:{u['clinic_id']}")
     return {"ok": True}
+
+
+class AICustomRulesIn(BaseModel):
+    tone: str = Field("resmi_samimi", max_length=40)
+    coordinator_title: str = Field("Kıdemli Hasta Koordinatörü", max_length=80)
+    greeting_style: str = Field("Merhabalar, {clinic} hasta danışma hattımıza hoş geldiniz.", max_length=300)
+    price_policy: Literal["free_exam_invite", "starting_range", "direct_handoff"] = "free_exam_invite"
+    exam_policy: str = Field("", max_length=400)
+    cash_discount_note: str = Field("", max_length=400)
+    payment_note: str = Field("", max_length=400)
+    pain_comfort_note: str = Field("", max_length=400)
+    kids_note: str = Field("", max_length=400)
+    health_tourism_note: str = Field("", max_length=400)
+    custom_extra_note: str = Field("", max_length=500)
+
+
+@router.post("/app/api/settings/ai-rules")
+async def save_ai_custom_rules(b: AICustomRulesIn, u: dict = Depends(OWNER)):
+    rules_str = json.dumps(b.model_dump(), ensure_ascii=False)
+    await q("UPDATE clinics SET ai_custom_rules_json=%s WHERE id=%s", rules_str, u["clinic_id"])
+    await log(u, "settings.ai_rules_update", f"clinic:{u['clinic_id']}")
+    return {"ok": True, "ai_custom_rules": b.model_dump()}
 
 
 class AskIn(BaseModel):
@@ -1435,7 +1466,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
     if not await limiter.hit(f"sim:{u['id']}", sim_limit, 60):
         raise HTTPException(429, "Çok fazla simülasyon isteği gönderildi; lütfen 1 dakika bekleyin")
     cid = u["clinic_id"]
-    c = await q1("SELECT name, address, phone FROM clinics WHERE id=%s", cid)
+    c = await q1("SELECT name, address, phone, ai_custom_rules_json FROM clinics WHERE id=%s", cid)
     all_branches = await q("SELECT id, name, city, address, phone FROM clinics WHERE active")
     facts: dict = {
         "clinic": (c and c["name"]) or u.get("clinic_name") or S.clinic,
@@ -1445,6 +1476,8 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
         facts["adres"] = c["address"]
     if c and c.get("phone"):
         facts["telefon"] = c["phone"]
+    if c and c.get("ai_custom_rules_json"):
+        facts["ai_custom_rules_json"] = c["ai_custom_rules_json"]
     rtr = _get_sim_router()
     try:
         res = await asyncio.wait_for(
