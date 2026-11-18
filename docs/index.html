@@ -3,88 +3,97 @@
 <head>
 <meta charset="utf-8">
 <meta id="dc-viewport" name="viewport" content="width=1360, user-scalable=yes">
+<meta name="description" content="DentaCore v6.2 diş klinikleri için 16 dilde hasta iletişimi, takvim, kasa, envanter ve çok şubeli klinik yönetim sistemi.">
 <meta name="theme-color" content="#0A2540">
-<title>DentaCore v6.2 — Kurumsal Klinik Otomasyon Sistemi (Tam Sürüm)</title>
+<title>DentaCore v6.2: Kurumsal Klinik Otomasyon Sistemi</title>
 <link rel="icon" href="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%230A2540%22/%3E%3Cpath%20d%3D%22M20%2018c-5%200-8%204-8%2010%200%209%204%2020%208%2020%203%200%203-8%206-12%201-1%202-2%206-2s5%201%206%202c3%204%203%2012%206%2012%204%200%208-11%208-20%200-6-3-10-8-10-4%200-7%202-12%202s-8-2-12-2z%22%20fill%3D%22%230D9488%22/%3E%3Ccircle%20cx%3D%2246%22%20cy%3D%2218%22%20r%3D%225%22%20fill%3D%22%23EA580C%22/%3E%3C/svg%3E" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
 <style id="dc-switcher-css">
-  .dc-master-bar {
-    background: #06182B;
-    color: #F5F8FC;
-    border-bottom: 2px solid #0D9488;
-    padding: 8px 18px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
-    font-size: 13.5px;
-    z-index: 100;
-    position: relative;
-  }
-  .dc-master-left, .dc-master-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .dc-master-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 800;
-    color: #5EEAD4;
-    font-size: 14px;
-    margin-right: 6px;
-  }
-  .dc-master-badge i {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #22C55E;
-    box-shadow: 0 0 8px #22C55E;
-  }
-  .dc-mbtn {
-    appearance: none;
-    border: 1px solid rgba(255,255,255,0.22);
-    background: rgba(255,255,255,0.07);
-    color: #F5F8FC;
-    padding: 6px 13px;
-    min-height: 34px;
-    border-radius: 8px;
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
-  }
-  .dc-mbtn:hover {
-    background: rgba(94, 234, 212, 0.18);
-    border-color: #5EEAD4;
-  }
-  .dc-mbtn.active {
-    background: #0F766E;
-    border-color: #5EEAD4;
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(15, 118, 110, 0.35);
-  }
-  .dc-msep {
-    width: 1px;
-    height: 20px;
-    background: rgba(255,255,255,0.18);
-    margin: 0 2px;
-  }
-  #dc-landing-view.dc-view-hidden,
-  #dc-panel-view.dc-view-hidden {
-    display: none !important;
-  }
+:root {
+  --dc-bar-bg: #06182B;
+  --dc-bar-ink: #F5F8FC;
+  --dc-bar-border: #0D9488;
+  --dc-bar-accent: #5EEAD4;
+  --dc-bar-dot: #22C55E;
+  --dc-btn-border: rgba(255, 255, 255, 0.22);
+  --dc-btn-bg: rgba(255, 255, 255, 0.07);
+  --dc-btn-hover: rgba(94, 234, 212, 0.18);
+  --dc-btn-active: #0F766E;
+  --dc-btn-shadow: 0 2px 8px rgba(15, 118, 110, 0.35);
+  --dc-sep-bg: rgba(255, 255, 255, 0.18);
+}
+.dc-master-bar {
+  background: var(--dc-bar-bg);
+  color: var(--dc-bar-ink);
+  border-bottom: 2px solid var(--dc-bar-border);
+  padding: var(--space-1) var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  z-index: 100;
+  position: relative;
+}
+.dc-master-left, .dc-master-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.dc-master-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 800;
+  color: var(--dc-bar-accent);
+  font-size: 14px;
+  margin-right: 4px;
+}
+.dc-master-badge i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dc-bar-dot);
+  box-shadow: 0 0 8px var(--dc-bar-dot);
+}
+.dc-mbtn {
+  appearance: none;
+  border: 1px solid var(--dc-btn-border);
+  background: var(--dc-btn-bg);
+  color: var(--dc-bar-ink);
+  padding: 4px 12px;
+  min-height: 36px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.dc-mbtn:hover {
+  background: var(--dc-btn-hover);
+  border-color: var(--dc-bar-accent);
+}
+.dc-mbtn.active {
+  background: var(--dc-btn-active);
+  border-color: var(--dc-bar-accent);
+  color: var(--dc-bar-ink);
+  box-shadow: var(--dc-btn-shadow);
+}
+#dc-landing-view.dc-view-hidden,
+#dc-panel-view.dc-view-hidden {
+  display: none !important;
+}
 </style>
 <style id="dc-style-landing">/* Hallmark · v2.0.0 · target: DentaCore landing (Persuade) · surface: clinical precision */
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 · cut glass blur and uniform box shadows for crisp clinical hierarchy */
@@ -1345,7 +1354,7 @@ textarea.input { min-height: 84px; }
   flex-direction: column;
   padding: var(--space-2) 12px;
   position: sticky;
-  top: 0;
+  top: 1px;
   height: 100dvh;
 }
 .brand {
@@ -3240,7 +3249,7 @@ textarea.input { min-height: 84px; }
   flex-direction: column;
   padding: var(--space-2) 12px;
   position: sticky;
-  top: 0;
+  top: 1px;
   height: 100dvh;
 }
 .brand {
@@ -3883,23 +3892,23 @@ textarea.input { min-height: 84px; }
     <span class="dc-master-badge"><i></i> DentaCore v6.2 Canlı Sistem</span>
     <button type="button" class="dc-mbtn" id="btn-show-panel" onclick="window.__switchMasterTab('panel')">
       <svg class="ico" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
-      Yönetim Paneli (3 Şube Canlı)
+      Yönetim Paneli
     </button>
     <button type="button" class="dc-mbtn" id="btn-show-landing" onclick="window.__switchMasterTab('landing')">
       <svg class="ico" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
-      Tanıtım Sitesi (Ana Sayfa)
+      Tanıtım Sitesi
     </button>
     <button type="button" class="dc-mbtn" id="btn-show-login" onclick="window.__switchMasterTab('login')">
       <svg class="ico" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
-      Giriş &amp; Demo Hesaplar
+      Demo Şubeler
     </button>
   </div>
   <div class="dc-master-right">
     <button type="button" class="dc-mbtn active" id="btn-mode-desktop" onclick="window.__setViewMode('desktop')" title="Telefonda ve bilgisayarda %100 birebir masaüstü görünümü">
-      Masaüstü Görünümü (1:1 Aynı)
+      Masaüstü Görünümü (1:1)
     </button>
     <button type="button" class="dc-mbtn" id="btn-mode-mobile" onclick="window.__setViewMode('mobile')" title="Mobil dar ekran görünümü">
-      Mobil Dar Görünüm
+      Mobil Görünüm
     </button>
   </div>
 </div>
@@ -4502,7 +4511,6 @@ textarea.input { min-height: 84px; }
   const FAQ_DATA = {"_not":"Katman-1 ve Katman-2 (0 token, 16 dil). Desenler aksan/büyük harf temizlenmiş metne uygulanır. Klinik bilgileri 'facts' altında güncellenir; LLM de yalnızca bu bilgiyi kullanır.","facts":{"adres":"Bağdat Cad. No:142, Kadıköy / İstanbul","harita":"https://maps.google.com/?q=Kadikoy+Istanbul","saatler":"Hafta içi 09:00-19:00, Cumartesi 09:00-15:00, Pazar kapalı","otopark":"Binanın önünde ücretsiz sınırlı otopark, 100 m ileride kapalı otopark mevcut","telefon":"+90 216 555 01 01","diller":"Türkçe, İngilizce, Almanca, Arapça, Rusça, Fransızca, Felemenkçe, İspanyolca, İtalyanca, Farsça, Azerbaycanca, Ukraynaca, Bulgarca, Rumence, Yunanca, İbranice","odeme":"Nakit ve kredi kartı kabul edilir"},"supported_langs":["tr","en","de","ar","ru","fr","nl","es","it","fa","az","uk","bg","ro","el","he"],"intents":{"selam":{"only_short":true,"patterns":{"tr":"^(merhaba|merhabalar|selam|selamlar|iyi gunler|iyi aksamlar|gunaydin|slm|mrb)[\\s!.,]*$","en":"^(hi|hello|hey|good (morning|afternoon|evening))[\\s!.,]*$","de":"^(hallo|guten (tag|morgen|abend)|servus|moin)[\\s!.,]*$","ar":"^(مرحبا|السلام عليكم|اهلا|أهلا)[\\s!.,]*$","ru":"^(здравствуйте|привет|добрый (день|вечер)|доброе утро)[\\s!.,]*$","fr":"^(bonjour|salut|bonsoir)[\\s!.,]*$","nl":"^(hallo|goedemorgen|goedemiddag|hoi)[\\s!.,]*$","es":"^(hola|buenos dias|buenas tardes)[\\s!.,]*$","it":"^(ciao|buongiorno|buonasera|salve)[\\s!.,]*$","fa":"^(سلام|درود|صبح بخیر)[\\s!.,]*$","az":"^(salam|sabahiniz xeyir|axsaminiz xeyir)[\\s!.,]*$","uk":"^(добрий день|привіт|вітаю)[\\s!.,]*$","bg":"^(здравейте|добър ден|привет)[\\s!.,]*$","ro":"^(buna ziua|salut|buna)[\\s!.,]*$","el":"^(γεια σας|καλημέρα|καλησπέρα)[\\s!.,]*$","he":"^(שלום|בוקר טוב|היי)[\\s!.,]*$"},"answers":{"tr":"Merhaba, {clinic} hasta iletişim hattına hoş geldiniz. Size nasıl yardımcı olabiliriz? Randevu, adres veya çalışma saatleri için yazabilirsiniz.","en":"Hello, welcome to {clinic}. How can we help you? You can ask about appointments, our address or opening hours.","de":"Hallo, willkommen bei {clinic}. Wie können wir Ihnen helfen? Fragen Sie gern nach Terminen, Adresse oder Öffnungszeiten.","ar":"مرحباً بكم في {clinic}. كيف يمكننا مساعدتكم؟ يمكنكم السؤال عن المواعيد أو العنوان أو ساعات العمل.","ru":"Здравствуйте, добро пожаловать в {clinic}. Чем можем помочь? Спросите о записи, адресе или часах работы.","fr":"Bonjour, bienvenue chez {clinic}. Comment pouvons-nous vous aider ? Vous pouvez demander un rendez-vous, notre adresse ou nos horaires.","nl":"Hallo, welkom bij {clinic}. Waarmee kunnen wij u helpen? U kunt vragen naar afspraken, adres of openingstijden.","es":"Hola, bienvenido a {clinic}. ¿En qué podemos ayudarle? Puede consultar por citas, dirección u horarios.","it":"Buongiorno, benvenuti da {clinic}. Come possiamo aiutarvi? Potete chiedere appuntamenti, indirizzo o orari.","fa":"سلام، به کلینیک {clinic} خوش آمدید. چگونه می‌توانیم کمکتان کنیم؟ می‌توانید درباره نوبت، آدرس یا ساعات کاری بپرسید.","az":"Salam, {clinic} pasiyent xəttinə xoş gəlmisiniz. Sizə necə kömək edə bilərik? Görüş, ünvan və iş saatları barədə yaza bilərsiniz.","uk":"Вітаємо у {clinic}. Чим можемо допомогти? Запитайте про запис, адресу або години роботи.","bg":"Здравейте, добре дошли в {clinic}. Как можем да помогнем? Можете да попитате за час, адрес или работно време.","ro":"Bună ziua, bun venit la {clinic}. Cu ce vă putem ajuta? Puteți întreba despre programări, adresă sau program.","el":"Γεια σας, καλώς ήρθατε στο {clinic}. Πώς μπορούμε να σας βοηθήσουμε; Ρωτήστε για ραντεβού, διεύθυνση ή ωράριο.","he":"שלום, ברוכים הבאים ל-{clinic}. במה נוכל לעזור? ניתן לשאול על תורים, כתובת או שעות פעילות."}},"konum":{"patterns":{"tr":"\\b(adres|adresiniz|konum|nerede|neredesiniz|yol tarifi|nasil gelirim)\\b","en":"\\b(address|location|where are you|directions|how do i get)\\b","de":"\\b(adresse|wo (sind|ist|befindet)|anfahrt|standort)\\b","ar":"(عنوان|موقع|أين|اين)","ru":"(адрес|где вы|где находит|как добраться)","fr":"\\b(adresse|ou etes|itineraire|localisation)\\b","nl":"\\b(adres|waar zit|locatie|routebeschrijving)\\b","es":"\\b(direccion|ubicacion|donde estan|como llegar)\\b","it":"\\b(indirizzo|dove siete|posizione|come arrivare)\\b","fa":"(آدرس|کجا هستید|نشانی|لوکیشن)","az":"\\b(unvan(iniz)?|harda(siniz)?|harada(dir)?|adres(iniz)?)\\b","uk":"(адреса|де ви|як дістатися)","bg":"(адрес|къде се|как да стигна)","ro":"\\b(adresa|unde sunteti|locatie)\\b","el":"(διεύθυνση|πού βρίσκεστε|τοποθεσία)","he":"(כתובת|איפה אתם|מיקום)"},"answers":{"tr":"Adresimiz: {adres}. Yol tarifi: {harita}","en":"Our address: {adres}. Directions: {harita}","de":"Unsere Adresse: {adres}. Wegbeschreibung: {harita}","ar":"عنواننا: {adres}. الاتجاهات: {harita}","ru":"Наш адрес: {adres}. Маршрут: {harita}","fr":"Notre adresse : {adres}. Itinéraire : {harita}","nl":"Ons adres: {adres}. Routebeschrijving: {harita}","es":"Nuestra dirección: {adres}. Mapa: {harita}","it":"Il nostro indirizzo: {adres}. Mappa: {harita}","fa":"آدرس ما: {adres}. مسیریابی: {harita}","az":"Ünvanımız: {adres}. Xəritə: {harita}","uk":"Наша адреса: {adres}. Маршрут: {harita}","bg":"Нашият адрес: {adres}. Карта: {harita}","ro":"Adresa noastră: {adres}. Hartă: {harita}","el":"Η διεύθυνσή μας: {adres}. Οδηγίες: {harita}","he":"הכתובת שלנו: {adres}. מפה: {harita}"}},"saat":{"patterns":{"tr":"\\b(kacta|saat kac|calisma saat|acik mi|acikmisiniz|kapali mi|mesai)\\b","en":"\\b(opening hours|open today|what time|are you open|closing time)\\b","de":"\\b(offnungszeit|geoffnet|wann (offen|habt|haben)|sprechzeit)\\b","ar":"(ساعات العمل|متى تفتح|مفتوح)","ru":"(часы работы|во сколько|вы открыты|режим работы)","fr":"\\b(horaires|heures d ouverture|ouvert aujourd hui)\\b","nl":"\\b(openingstijden|open vandaag|hoe laat open)\\b","es":"\\b(horario|a que hora|estan abiertos)\\b","it":"\\b(orari|a che ora|siete aperti)\\b","fa":"(ساعات کاری|کی باز|تعطیل)","az":"\\b(is saatlari|neceye kimi|aciqsiniz)\\b","uk":"(години роботи|коли відкрит|графік)\\b","bg":"(работно време|отворени ли)\\b","ro":"\\b(program de lucru|cand deschideti)\\b","el":"(ωράριο|πότε ανοίγετε)\\b","he":"(שעות פעילות|מתי פתוח)\\b"},"answers":{"tr":"Çalışma saatlerimiz: {saatler}.","en":"Opening hours: {saatler}.","de":"Öffnungszeiten: {saatler}.","ar":"ساعات العمل: {saatler}.","ru":"Часы работы: {saatler}.","fr":"Nos horaires d'ouverture : {saatler}.","nl":"Openingstijden: {saatler}.","es":"Nuestro horario: {saatler}.","it":"Orari di apertura: {saatler}.","fa":"ساعات کاری ما: {saatler}.","az":"İş saatlarımız: {saatler}.","uk":"Години роботи: {saatler}.","bg":"Работно време: {saatler}.","ro":"Program de lucru: {saatler}.","el":"Ώρες λειτουργίας: {saatler}.","he":"שעות הפעילות שלנו: {saatler}."}},"otopark":{"patterns":{"tr":"\\b(otopark|park yeri|arabayla|park edebilir)\\b","en":"\\b(parking|park my car|car park)\\b","de":"\\b(parkplatz|parken)\\b","ar":"(موقف|ركن السيارة)","ru":"(парковк|припарковать)"},"answers":{"tr":"Otopark: {otopark}.","en":"Parking: {otopark}.","de":"Parken: {otopark}.","ar":"الموقف: {otopark}.","ru":"Парковка: {otopark}.","fr":"Parking : {otopark}.","nl":"Parkeren: {otopark}.","es":"Estacionamiento: {otopark}.","it":"Parcheggio: {otopark}."}},"iletisim":{"patterns":{"tr":"\\b(telefon numara|numaraniz|sizi nasil ararim|arayabilir miyim)\\b","en":"\\b(phone number|call you|contact number)\\b","de":"\\b(telefonnummer|anrufen)\\b","ar":"(رقم الهاتف|اتصال)","ru":"(номер телефона|позвонить)"},"answers":{"tr":"Bize {telefon} numarasından ulaşabilirsiniz.","en":"You can reach us at {telefon}.","de":"Sie erreichen uns unter {telefon}.","ar":"يمكنكم التواصل معنا على {telefon}.","ru":"Вы можете связаться с нами по номеру {telefon}."}},"odeme":{"patterns":{"tr":"\\b(kredi karti|kart gecerli|nakit|odeme yontem)\\b","en":"\\b(credit card|payment method|pay by card|cash)\\b","de":"\\b(kreditkarte|zahlung|bar zahlen)\\b","ar":"(بطاقة ائتمان|طريقة الدفع|نقدا)","ru":"(кредитн|оплата картой|наличн)"},"answers":{"tr":"{odeme}.","en":"Cash and credit cards are accepted.","de":"Bar- und Kartenzahlung sind möglich.","ar":"نقبل الدفع نقداً وبالبطاقة.","ru":"Принимаем наличные и банковские карты."}}},"emergency":{"patterns":{"tr":"(kanama (durmuyor|dinmiyor|kesilmiyor|cok fazla)|yuzum sis|yuz.{0,12}sis|bogaz.{0,12}sis|nefes alam|yutkunam|ates(im)? (var|yuksek|cikti)|39 derece|dis(im)? (kirildi|dustu|yerinden cikti)|kaza gecird|darbe ald)","en":"(bleeding (won'?t|doesn'?t|does not|will not) stop|face (is )?swollen|swelling (in|on) my (face|throat)|can'?t (breathe|swallow)|high fever|knocked out (a |my )?tooth|accident)","de":"(blutung (hort nicht|stoppt nicht)|gesicht.{0,10}geschwollen|schwellung|atemnot|kann nicht schlucken|hohes fieber|zahn ausgeschlagen|unfall)","ar":"(نزيف (لا يتوقف|مستمر)|تورم (الوجه|الحلق)|صعوبة في التنفس|لا أستطيع البلع|حمى|سقط سني)","ru":"(кровотечение не (останавлива|прекраща)|опухло лицо|отек (лица|горла)|не могу (дышать|глотать)|высокая температура|выбил зуб)","fr":"(saignement ne s arrete pas|visage gonfle|du mal a respirer|du mal a avaler|fievre elevee|dent cassee)","es":"(sangrado no para|cara hinchada|no puedo (respirar|tragar)|fiebre alta|diente roto)"},"answers":{"tr":"Belirttiğiniz durum acil değerlendirme gerektirebilir. Lütfen vakit kaybetmeden 112'yi arayın veya en yakın acil servise başvurun. Nöbetçi hekimimize de bilgi verildi; klinik hattımız: {telefon}","en":"This may need urgent care. Please call 112 or go to the nearest emergency department now. Our on-call dentist has been notified; clinic line: {telefon}","de":"Das kann dringend sein. Bitte rufen Sie sofort 112 an oder gehen Sie in die nächste Notaufnahme. Unser diensthabender Zahnarzt wurde informiert; Praxis: {telefon}","ar":"قد تحتاج حالتك إلى رعاية عاجلة. يرجى الاتصال بالرقم 112 أو التوجه إلى أقرب قسم طوارئ فوراً. تم إبلاغ الطبيب المناوب؛ رقم العيادة: {telefon}","ru":"Ваше состояние может требовать срочной помощи. Пожалуйста, немедленно позвоните 112 или обратитесь в ближайшее отделение неотложной помощи. Дежурный врач уведомлен; телефон клиники: {telefon}","fr":"Cette situation peut nécessiter des soins urgents. Appelez immédiatement le 112 ou rendez-vous aux urgences les plus proches. Notre dentiste de garde a été prévenu : {telefon}","es":"Esta situación puede requerir atención urgente. Llame al 112 o acuda a urgencias de inmediato. Nuestro dentista de guardia ha sido avisado: {telefon}","nl":"Dit kan spoedeisende zorg vereisen. Bel direct 112 of ga naar de dichtstbijzijnde spoedeisende hulp. Onze dienstdoende tandarts is gewaarschuwd: {telefon}","it":"Questa situazione potrebbe richiedere cure urgenti. Chiami subito il 112 o si rechi al pronto soccorso più vicino. Il nostro dentista di turno è stato avvisato: {telefon}"}},"templates":{"fiyat":{"tr":"Tedavi planı ve ücret; muayene ve gerekli görüntüleme sonrası hekimimiz tarafından size özel ve yazılı olarak paylaşılır. Ön değerlendirme için size uygun gün ve saat aralığını yazar mısınız?","en":"Your treatment plan and its cost are shared in writing by our dentist after the examination and any required imaging. Which day and time would suit you for an initial consultation?","de":"Behandlungsplan und Kosten erhalten Sie nach der Untersuchung und ggf. Röntgenaufnahmen schriftlich von unserem Zahnarzt. Welcher Tag und welche Uhrzeit passen Ihnen für einen ersten Termin?","ar":"تتم مشاركة خطة العلاج وتكلفتها كتابياً من قبل طبيبنا بعد الفحص والتصوير اللازم. ما اليوم والوقت المناسبان لكم لموعد الاستشارة الأولى؟","ru":"План лечения и его стоимость врач сообщает письменно после осмотра и необходимых снимков. Какой день и время удобны вам для первичной консультации?","fr":"Votre plan de traitement et son tarif vous sont remis par écrit par notre dentiste après l'examen clinique et la radiographie. Quel jour et quelle heure vous conviendraient ?","nl":"Uw behandelplan en kosten worden na het onderzoek schriftelijk gedeeld door onze tandarts. Welke dag en tijd schikken u?","es":"Nuestro dentista comparte su plan de tratamiento y presupuesto por escrito tras la valoración clínica. ¿Qué día y horario prefiere para su cita?","it":"Il piano di trattamento e il preventivo vengono condivisi per iscritto dal nostro medico dopo la visita. Quale giorno e orario preferisce?","fa":"طرح درمان و هزینه پس از معاینه و رادیوگرافی به صورت مکتوب توسط پزشک اعلام می‌شود. چه روز و ساعتی برای ویزیت اولیه مناسب است؟","az":"Müalicə planı və qiymət müayinə və rentgendən sonra həkimimiz tərəfindən sizə yazılı təqdim olunur. İlkin baxış üçün sizə uyğun gün və saatı yazarsınızmı?","uk":"План лікування та вартість лікар надає письмово після огляду та знімків. Який день і час вам зручні для консультації?","bg":"Планът на лечение и цената се предоставят писмено от нашия лекар след преглед и снимка. Кой ден и час ви е удобен?","ro":"Planul de tratament și costul sunt comunicate în scris de medicul nostru după consultație. Ce zi și oră preferați?","el":"Το πλάνο θεραπείας και το κόστος κοινοποιούνται εγγράφως από τον ιατρό μετά την εξέταση. Ποια ημέρα και ώρα σας εξυπηρετεί;","he":"תוכנית הטיפול והעלות נמסרות בכתב על ידי הרופא לאחר בדיקה וצילום. איזה יום ושעה נוחים לכם לבדיקה?"},"randevu":{"tr":"Randevu talebinizi aldık. Size uygun gün ve saat aralığını (örn. Salı öğleden sonra) yazarsanız ekibimiz çalışma saatlerinde teyit edecektir.","en":"We have received your appointment request. Please tell us a preferred day and time (e.g. Tuesday afternoon); our team will confirm during working hours.","de":"Ihre Terminanfrage ist eingegangen. Nennen Sie uns bitte Wunschtag und Uhrzeit (z. B. Dienstagnachmittag); unser Team bestätigt während der Öffnungszeiten.","ar":"تم استلام طلب الموعد. يرجى إخبارنا باليوم والوقت المفضلين (مثلاً الثلاثاء بعد الظهر) وسيؤكد فريقنا خلال ساعات العمل.","ru":"Ваш запрос на запись получен. Укажите удобный день и время (например, вторник после обеда); наша команда подтвердит в рабочие часы.","fr":"Votre demande de rendez-vous est bien reçue. Indiquez votre créneau préféré (ex. mardi après-midi) pour confirmation.","nl":"Wij hebben uw afspraakverzoek ontvangen. Laat ons weten welke dag en tijd uw voorkeur heeft.","es":"Hemos recibido su solicitud de cita. Indíquenos el día y la hora de su preferencia para confirmarle.","it":"Abbiamo ricevuto la sua richiesta di appuntamento. Ci indichi giorno e orario preferiti per la conferma.","fa":"درخواست نوبت شما ثبت شد. روز و ساعت پیشنهادی خود را بنویسید تا همکاران ما تایید کنند.","az":"Görüş sorğunuz qəbul edildi. Sizə uyğun gün və saatı yazın, komandamız təsdiqləsin.","uk":"Ваш запит на запис отримано. Напишіть зручний день та час, і ми підтвердимо візит.","bg":"Заявката ви за час е приета. Напишете удобен ден и час за потвърждение.","ro":"Am primit cererea de programare. Scrieți ziua și ora dorită, iar echipa va confirma.","el":"Λάβαμε το αίτημά σας για ραντεβού. Γράψτε μας την προτιμώμενη ημέρα και ώρα.","he":"בקשת התור התקבלה. כתבו לנו איזה יום ושעה מתאימים ונאשר מולכם."},"insan":{"tr":"Mesajınızı ekibimize ilettik; çalışma saatlerinde size dönüş yapılacaktır.","en":"We have forwarded your message to our team; they will get back to you during working hours.","de":"Wir haben Ihre Nachricht an unser Team weitergeleitet; Sie erhalten während der Öffnungszeiten eine Antwort.","ar":"تم تحويل رسالتكم إلى فريقنا وسيتواصلون معكم خلال ساعات العمل.","ru":"Мы передали ваше сообщение команде; с вами свяжутся в рабочие часы.","fr":"Votre message a été transmis à notre équipe qui vous répondra pendant les horaires d'ouverture.","nl":"Uw bericht is doorgestuurd naar ons team; wij nemen tijdens kantooruren contact op.","es":"Hemos enviado su mensaje a nuestro equipo; le responderán en horario laboral.","it":"Abbiamo inoltrato il messaggio al nostro team; le risponderemo in orario di apertura.","fa":"پیام شما به تیم کلینیک ارجاع شد؛ در ساعات کاری با شما تماس می‌گیریم.","az":"Mesajınız komandamıza ötürüldü; iş saatlarında sizinlə əlaqə saxlanılacaq.","uk":"Ми передали ваше повідомлення команді; з вами зв'яжуться в робочий час.","bg":"Предадохме съобщението ви на екипа; ще се свържем с вас в работно време.","ro":"Am transmis mesajul echipei noastre; veți fi contactat în timpul programului.","el":"Προωθήσαμε το μήνυμά σας στην ομάδα μας και θα επικοινωνήσουμε μαζί σας.","he":"העברנו את הודעתכם לצוות שלנו ונחזור אליכם בשעות הפעילות."},"sikayet":{"tr":"Yaşadığınız durum için üzgünüz. Mesajınız doğrudan başhekimliğimize iletildi; en kısa sürede sizinle iletişime geçilecektir.","en":"We are sorry to hear this. Your message has been forwarded directly to our clinical director, who will contact you shortly.","de":"Das tut uns leid. Ihre Nachricht wurde direkt an unsere Praxisleitung weitergeleitet; wir melden uns zeitnah.","ar":"نأسف لما حدث. تم تحويل رسالتكم مباشرة إلى المدير الطبي وسيتم التواصل معكم قريباً.","ru":"Нам очень жаль. Ваше сообщение передано главному врачу, с вами свяжутся в ближайшее время.","fr":"Nous sommes désolés pour cette expérience. Votre message a été transmis directement au médecin-chef.","es":"Lamentamos lo ocurrido. Su mensaje fue remitido directamente a la dirección médica."},"gorsel":{"tr":"Fotoğraf veya röntgen paylaşmadan önce sağlık verisi açık rıza formunu onaylamanız gerekir. Onay bağlantısı ekibimiz tarafından iletilecektir.","en":"Before sharing photos or X-rays, you need to approve the health data consent form. Our team will send you the consent link.","de":"Bevor Sie Fotos oder Röntgenbilder senden, bestätigen Sie bitte die Einwilligung zur Verarbeitung von Gesundheitsdaten. Den Link sendet Ihnen unser Team.","ar":"قبل مشاركة الصور أو الأشعة يجب الموافقة على نموذج الموافقة على البيانات الصحية. سيرسل فريقنا رابط الموافقة.","ru":"Перед отправкой фото или снимков необходимо подтвердить согласие на обработку медицинских данных. Ссылку пришлёт наша команда.","fr":"Avant d'envoyer des photos ou radios, merci de valider le formulaire de consentement médical envoyé par notre équipe.","es":"Antes de enviar radiografías o fotos, es necesario aprobar el consentimiento de datos médicos que le enviará nuestro equipo."},"guvenli_yedek":{"tr":"Bu konuda doğru bilgiyi hekimimiz verebilir; mesajınızı ekibimize ilettik.","en":"Our dentist is the right person to answer this; we have forwarded your message to our team.","de":"Diese Frage beantwortet am besten unser Zahnarzt; wir haben Ihre Nachricht weitergeleitet.","ar":"طبيبنا هو الأنسب للإجابة على ذلك؛ تم تحويل رسالتكم إلى فريقنا.","ru":"На этот вопрос лучше ответит наш врач; мы передали ваше сообщение команде.","fr":"Notre dentiste répondra au mieux à cette question médicale ; votre message a été transmis.","es":"Nuestro dentista es la persona indicada para responderle; hemos remitido su consulta al equipo."}},"classifier_keywords":{"fiyat":"(fiyat|ucret|ne kadar|kac (tl|para|lira)|price|cost|how much|preis|kosten|wie viel|tarif|combien|cout|prijs|kosten|precio|cuanto|costo|prezzo|quanto|qiymet|neceye|ціна|скільки|цена|колко|pret|cat costa|τιμή|πόσο|מחיר|כמה|سعر|تكلفة|كم|قیمت|چند)","randevu":"(randevu|muayene olmak|gelmek istiyorum|appointment|book|termin|rendez-vous|afspraak|cita|appuntamento|gorus|nə vaxt|запис|час|programare|ραντεβού|תור|موعد|نوبت)","sikayet":"(sikayet|memnun degil|rezalet|magdur|complain|disappointed|beschwerde|reclamation|queja|klacht|reclamo|şikayət|скарга|оплакване|plangere|παράπονο|תלונה|شكوى|жалоб|شکایت)","gorsel":"(rontgen|fotograf|resim gonder|x-?ray|photo|panoramik|röntgen|radio|radiographie|radiografia|foto|şəkil|знімок|снимок|рентген|ауто|ακτινογραφία|צילום|רנטגן|صورة|أشعة|عکس|رادیوگرافی)","yuksek_deger":"(implant|all.?on.?4|all.?on.?6|zirkonyum|zirconia|zirkon|gulus tasarimi|smile design|veneer|lamina|seffaf plak|invisalign|clear aligner|hollywood smile|couronne|facette|corona|implan)"}};
   const DEFAULT_TAB = "panel";
 
-  // Safe localStorage wrapper
   function sGet(k, def) {
     try {
       const v = window.localStorage.getItem(k);
@@ -4513,7 +4521,6 @@ textarea.input { min-height: 84px; }
     try { window.localStorage.setItem(k, String(v)); } catch (e) {}
   }
 
-  // Master View Mode (Desktop 1:1 vs Mobile)
   window.__setViewMode = function(mode) {
     const vp = document.getElementById("dc-viewport");
     const mobStyle = document.getElementById("dc-style-mobile-override");
@@ -4540,7 +4547,6 @@ textarea.input { min-height: 84px; }
       document.body.style.zoom = "";
       return;
     }
-    // If a mobile webview ignores viewport width=1360 and keeps innerWidth < 1000, scale cleanly via zoom
     const w = window.innerWidth || document.documentElement.clientWidth || 1360;
     if (w > 0 && w < 1024) {
       document.body.style.zoom = String(Math.max(0.26, Math.min(1, w / 1360)));
@@ -4551,7 +4557,6 @@ textarea.input { min-height: 84px; }
   window.addEventListener("resize", applyDesktopFitIfNeeded);
   applyDesktopFitIfNeeded();
 
-  // Master Tab Switcher (Panel vs Landing vs Login)
   window.__switchMasterTab = function(which) {
     const vLand = document.getElementById("dc-landing-view");
     const vPan = document.getElementById("dc-panel-view");
@@ -4611,9 +4616,6 @@ textarea.input { min-height: 84px; }
     }
   });
 
-  // =========================================================================
-  // FULL IN-BROWSER DENTACORE v6.2 ENGINE (100% Parity with run_local.py)
-  // =========================================================================
   const now = new Date();
   const todayAt = (h, m, dOff = 0) => {
     const x = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dOff, h, m, 0, 0);
@@ -4811,7 +4813,6 @@ textarea.input { min-height: 84px; }
     saveDB();
   }
 
-  // 16-Language Simulator Engine (Matches router.py + faq.json)
   function normText(t) {
     return String(t || "")
       .replace(/ı/g, "i").replace(/İ/g, "i").replace(/ə/g, "e").replace(/Ə/g, "e")
@@ -4865,12 +4866,11 @@ textarea.input { min-height: 84px; }
     };
     const fmt = (str) => {
       let s = String(str || "");
-      for (const [k, v] of Object.entries(facts)) s = s.replaceAll("{" + k + "}", String(v)).replaceAll(" + k + ", String(v));
+      for (const [k, v] of Object.entries(facts)) s = s.replaceAll("{" + k + "}", String(v));
       return s;
     };
     const pick = (tbl) => fmt(tbl[lang] || tbl.en || tbl.tr);
 
-    // 1. Emergency check
     for (const [lg, patStr] of Object.entries(FAQ_DATA.emergency.patterns)) {
       try {
         if (new RegExp(normText(patStr)).test(n)) {
@@ -4878,7 +4878,6 @@ textarea.input { min-height: 84px; }
         }
       } catch (e) {}
     }
-    // 2. FAQ intents
     for (const [intentName, spec] of Object.entries(FAQ_DATA.intents)) {
       if (spec.only_short && n.split(" ").length > 4) continue;
       for (const [lg, patStr] of Object.entries(spec.patterns)) {
@@ -4889,7 +4888,6 @@ textarea.input { min-height: 84px; }
         } catch (e) {}
       }
     }
-    // 3. Keyword classifier
     for (const lbl of ["sikayet", "fiyat", "gorsel", "randevu"]) {
       const patStr = FAQ_DATA.classifier_keywords[lbl];
       if (patStr) {
@@ -4922,7 +4920,6 @@ textarea.input { min-height: 84px; }
     };
   }
 
-  // Intercept window.fetch for all /auth/*, /app/api/*, and /lead routes
   const origFetch = window.fetch.bind(window);
   window.fetch = async function(input, init = {}) {
     const urlStr = typeof input === "string" ? input : (input && input.url ? input.url : "");
@@ -4949,7 +4946,6 @@ textarea.input { min-height: 84px; }
     const cid = window.__DC_STATE.activeClinicId || (u ? u.clinic_id : 1);
     const curClinic = DB.clinics.find(c => c.id === cid) || DB.clinics[0];
 
-    // --- /lead (Landing page demo request) ---
     if (path === "/lead" && method === "POST") {
       if (body && body.clinic) {
         DB.alerts.unshift({
@@ -4962,7 +4958,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true });
     }
 
-    // --- /auth/* ---
     if (path === "/auth/login" && method === "POST") {
       const em = String((body && body.email) || "").trim().toLowerCase();
       const pw = String((body && body.password) || "");
@@ -5023,7 +5018,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true });
     }
 
-    // --- /app/api/overview ---
     if (path === "/app/api/overview") {
       const todayYmd = new Date().toISOString().slice(0, 10);
       const appts = DB.appointments.filter(a => a.clinic_id === cid);
@@ -5070,7 +5064,6 @@ textarea.input { min-height: 84px; }
       });
     }
 
-    // --- /app/api/appointments ---
     if (path === "/app/api/appointments" && method === "GET") {
       const sDt = qs.get("start") ? new Date(qs.get("start")) : new Date(0);
       const eDt = qs.get("end") ? new Date(qs.get("end")) : new Date(Date.now() + 365 * 86400000);
@@ -5139,7 +5132,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true });
     }
 
-    // --- /app/api/calendar-links ---
     if (path === "/app/api/calendar-links") {
       const base = window.location.origin;
       const icsUrl = `${base}/calendar/klinik-${cid}-akisi.ics`;
@@ -5153,7 +5145,6 @@ textarea.input { min-height: 84px; }
       });
     }
 
-    // --- /app/api/patients ---
     if (path === "/app/api/patients" && method === "GET") {
       const s = (qs.get("search") || "").trim().toLowerCase();
       const out = DB.patients
@@ -5221,7 +5212,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ link: `${window.location.origin}/#anamnez-${pid}` });
     }
 
-    // --- /app/api/waitlist ---
     if (path === "/app/api/waitlist" && method === "GET") {
       const cPats = new Map(DB.patients.filter(p => p.clinic_id === cid).map(p => [p.id, p]));
       const out = DB.waitlist
@@ -5243,7 +5233,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true });
     }
 
-    // --- /app/api/alerts ---
     if (path === "/app/api/alerts" && method === "GET") {
       return jsonResp(DB.alerts.filter(a => a.clinic_id === cid && !a.acknowledged_at).sort((a, b) => b.id - a.id));
     }
@@ -5255,7 +5244,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true });
     }
 
-    // --- /app/api/inventory ---
     if (path === "/app/api/inventory" && method === "GET") {
       const out = DB.inventory_items.filter(i => i.clinic_id === cid && i.active).map(r => {
         const uc = tl(r.unit_cost_kurus);
@@ -5296,7 +5284,6 @@ textarea.input { min-height: 84px; }
       return jsonResp(moves);
     }
 
-    // --- /app/api/charges & payments & kasa ---
     if (path === "/app/api/charges" && method === "POST") {
       const cidId = nextId(DB.charges);
       DB.charges.unshift({
@@ -5350,7 +5337,6 @@ textarea.input { min-height: 84px; }
       });
     }
 
-    // --- /app/api/token-stats ---
     if (path === "/app/api/token-stats") {
       const msgs = DB.message_log.filter(m => m.direction === "out" && (m.clinic_id || 1) === cid);
       const byLayer = {};
@@ -5364,7 +5350,6 @@ textarea.input { min-height: 84px; }
       return jsonResp(Object.values(byLayer).sort((a, b) => b.replies - a.replies));
     }
 
-    // --- /app/api/staff ---
     if (path === "/app/api/staff" && method === "GET") {
       const rows = DB.staff_users.filter(s => s.clinic_id === cid).map(s => ({
         id: s.id, email: s.email, full_name: s.full_name, role: s.role,
@@ -5391,7 +5376,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true });
     }
 
-    // --- /app/api/audit & verify ---
     if (path === "/app/api/audit") {
       return jsonResp(DB.audit_log.filter(a => a.clinic_id === cid).slice().reverse());
     }
@@ -5399,7 +5383,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true, checked: DB.audit_log.length });
     }
 
-    // --- /app/api/conversations & simulate ---
     if (path === "/app/api/conversations" && method === "GET") {
       const rows = DB.patients.filter(p => p.clinic_id === cid).sort((a, b) => b.id - a.id).map(p => {
         const logs = DB.message_log.filter(m => m.patient_id === p.id).sort((a, b) => b.id - a.id);
@@ -5429,7 +5412,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true });
     }
 
-    // --- /app/api/templates ---
     if (path === "/app/api/templates" && method === "GET") {
       return jsonResp(DB.message_templates.filter(t => t.clinic_id === cid).sort((a, b) => b.id - a.id));
     }
@@ -5443,7 +5425,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ id: tid });
     }
 
-    // --- /app/api/analytics & campaigns ---
     if (path === "/app/api/analytics") {
       const appts = DB.appointments.filter(a => a.clinic_id === cid);
       const off = Math.max(1, appts.filter(a => {
@@ -5469,7 +5450,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ id: cidId });
     }
 
-    // --- /app/api/clinics ---
     if (path === "/app/api/clinics" && method === "GET") {
       const out = DB.clinics.map(c => {
         const ow = DB.staff_users.find(s => s.clinic_id === c.id && s.role === "owner");
@@ -5524,7 +5504,6 @@ textarea.input { min-height: 84px; }
       return jsonResp({ ok: true, clinic_id: targetCid, clinic: targetC.name });
     }
 
-    // --- /app/api/settings & ecosystem-status & assistant ---
     if (path === "/app/api/settings" && method === "GET") {
       return jsonResp(curClinic);
     }
@@ -5604,7 +5583,8 @@ textarea.input { min-height: 84px; }
   const $ = (id) => document.getElementById(id);
 
   // Service worker kaydı (yalnız statik varlıklar önbelleğe alınır)
-  ).catch(() => {});
+  if ("serviceWorker" in navigator) {
+    /* sw disabled in cloud bundle */
   }
 
   // Mobil menü aç/kapa
@@ -5856,7 +5836,8 @@ textarea.input { min-height: 84px; }
   const SVG = "http://www.w3.org/2000/svg";
 
   // Service worker kaydı (yalnız statik dosyalar)
-  ).catch(() => {});
+  if ("serviceWorker" in navigator) {
+    /* sw disabled in cloud bundle */
   }
 
   // ------------------------------------------------------------------ güvenli localStorage & pano
