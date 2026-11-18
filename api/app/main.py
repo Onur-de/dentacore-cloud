@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from . import ig, media, modules, panel, staff_bot, wa
 from .core import (S, add_alert, db_close, db_open, env, has_consent, log_msg, patient, phone_hmac, q, q1, run_migrations,
-                   upsert_identity, upsert_patient, verify_sig)
+                   tx, upsert_identity, upsert_patient, verify_sig)
 from .router import TokenRouter, normalize
 from .security import SecurityHeadersMiddleware
 
@@ -328,19 +328,27 @@ async def anamnez_view(aid: int, exp: str = "", sig: str = ""):
 
 @app.get("/form/geri-bildirim", response_class=HTMLResponse)
 async def feedback_form():
+    import html as _html
+    from .core import sign
+    qs = sign("/form/geri-bildirim", ttl=3600).split("?", 1)[1]
+    tok = _html.escape(qs, quote=True)
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Başhekimliğe ilet</title></head><body style="font-family:system-ui;background:#F8FAFC;color:#0A2540;padding:16px">
 <main style="max-width:520px;margin:auto;background:#fff;border-radius:12px;padding:18px;border:1px solid #e2e8f0">
-<h2 style="margin-top:0">{S.clinic} - Başhekimliğe doğrudan ilet</h2>
-<p>Görüşünüz doğrudan başhekime ulaşır. Google'da değerlendirme yapma hakkınız bundan bağımsızdır: <a href="{S.google_review_url}">Google'da değerlendir</a></p>
-<form method="post"><textarea name="mesaj" rows="5" required maxlength="1500" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #cbd5e1"></textarea>
+<h2 style="margin-top:0">{_html.escape(S.clinic)} - Başhekimliğe doğrudan ilet</h2>
+<p>Görüşünüz doğrudan başhekime ulaşır. Google'da değerlendirme yapma hakkınız bundan bağımsızdır: <a href="{_html.escape(S.google_review_url or '#', quote=True)}">Google'da değerlendir</a></p>
+<form method="post"><input type="hidden" name="csrf_token" value="{tok}"><textarea name="mesaj" rows="5" required maxlength="1500" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #cbd5e1"></textarea>
 <input name="iletisim" placeholder="Size dönmemizi isterseniz telefon (isteğe bağlı)" maxlength="40" style="width:100%;box-sizing:border-box;padding:10px;margin-top:8px;border-radius:8px;border:1px solid #cbd5e1">
 <button style="width:100%;margin-top:12px;background:#0F766E;color:#fff;border:0;border-radius:10px;padding:13px;font-weight:700">Gönder</button></form></main></body></html>"""
 
 
 @app.post("/form/geri-bildirim", response_class=HTMLResponse)
 async def feedback_submit(request: Request):
+    from urllib.parse import parse_qs
     f = await request.form()
+    tok_p = parse_qs(str(f.get("csrf_token", "")))
+    if not verify_sig("/form/geri-bildirim", (tok_p.get("exp") or [""])[0], (tok_p.get("sig") or [""])[0]):
+        raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş")
     msg = str(f.get("mesaj", ""))[:1500]
     if msg.strip():
         await modules.alert_doctor(S.doctor_owner, f"Başhekimliğe geri bildirim: {msg[:600]} | İletişim: {str(f.get('iletisim', ''))[:40] or 'yok'}", None, "geri_bildirim")
@@ -383,9 +391,20 @@ class PhoneIn(BaseModel):
 @app.post("/admin/appointments")
 async def admin_appt(a: ApptIn, x_admin_token: str | None = Header(default=None)):
     require_admin(x_admin_token)
+    starts = a.starts_at if a.starts_at.tzinfo else a.starts_at.replace(tzinfo=timezone.utc)
+    ends = starts + timedelta(minutes=a.duration_min)
     pid = await upsert_patient(a.phone, name=a.name)
-    r = await q1("INSERT INTO appointments (patient_id, starts_at, duration_min, treatment, chair) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                 pid, a.starts_at, a.duration_min, a.treatment, a.chair)
+    async with tx() as t:
+        await t.q("SELECT pg_advisory_xact_lock(hashtext(%s))", f"chair:1:{a.chair}")
+        clash = await t.q1(
+            """SELECT id FROM appointments WHERE clinic_id=1 AND chair=%s AND status IN ('booked','confirmed')
+               AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
+            a.chair, ends, starts,
+        )
+        if clash:
+            raise HTTPException(409, f"Koltuk {a.chair} bu saatte dolu (randevu #{clash['id']})")
+        r = await t.q1("INSERT INTO appointments (clinic_id, patient_id, starts_at, duration_min, treatment, chair) VALUES (1,%s,%s,%s,%s,%s) RETURNING id",
+                       pid, starts, a.duration_min, a.treatment, a.chair)
     return {"id": r["id"], "patient_id": pid}
 
 

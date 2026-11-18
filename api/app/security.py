@@ -72,6 +72,8 @@ SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 15, 8, 1
 def hash_password(pw: str) -> str:
     if len(pw) < 12:
         raise ValueError("Parola en az 12 karakter olmalı")
+    if len(set(pw)) < 4 or not any(c.isalpha() for c in pw) or not any(c.isdigit() for c in pw):
+        raise ValueError("Parola en az 1 harf, 1 rakam ve en az 4 farklı karakter içermelidir")
     salt = secrets.token_bytes(16)
     dk = hashlib.scrypt(pw.encode(), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, maxmem=2 ** 26, dklen=32)
     return f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
@@ -178,6 +180,8 @@ class RateLimiter:
                 await self.redis.expire(k, window)
             return n <= limit
         now = time.time()
+        if len(self.mem) > 2048:
+            self.mem = {k: v for k, v in self.mem.items() if v[1] > now}
         n, exp = self.mem.get(key, (0, now + window))
         if now > exp:
             n, exp = 0, now + window

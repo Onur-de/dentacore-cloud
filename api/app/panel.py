@@ -184,6 +184,13 @@ async def _reauth(u: dict, pw: str):
         raise HTTPException(400, "Parola hatalı")
 
 
+async def _hash_pw(pw: str) -> str:
+    try:
+        return await asyncio.to_thread(sec.hash_password, pw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.post("/auth/totp/setup")
 async def totp_setup(body: ReauthIn, u: dict = Depends(ANY)):
     await _reauth(u, body.password)
@@ -218,7 +225,7 @@ class PwIn(BaseModel):
 @router.post("/auth/password")
 async def change_password(body: PwIn, u: dict = Depends(ANY)):
     await _reauth(u, body.current)
-    h = await asyncio.to_thread(sec.hash_password, body.new)
+    h = await _hash_pw(body.new)
     await q("UPDATE staff_users SET pw_hash=%s WHERE id=%s", h, u["id"])
     await q("UPDATE sessions SET revoked=true WHERE user_id=%s AND id_hash<>%s", u["id"], u["id_hash"])
     await log(u, "auth.password_changed")
@@ -237,6 +244,7 @@ async def bootstrap_owner():
     """İlk açılışta hiç personel yoksa .env'deki OWNER_EMAIL / OWNER_PASSWORD ile yönetici hesabı açılır."""
     await q("""INSERT INTO clinics (id, name, slug) VALUES (1, %s, 'merkez-klinik')
                ON CONFLICT (id) DO NOTHING""", S.clinic)
+    await q("SELECT setval(pg_get_serial_sequence('clinics', 'id'), GREATEST((SELECT coalesce(max(id), 1) FROM clinics), 1))")
     if await q1("SELECT 1 FROM staff_users LIMIT 1"):
         return
     email, pw = env("OWNER_EMAIL").strip().lower(), env("OWNER_PASSWORD")
@@ -401,6 +409,12 @@ async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
         if not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
             raise HTTPException(404, "hekim yok")
     starts = b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)
+    if starts < datetime.now(timezone.utc) - timedelta(minutes=5):
+        raise HTTPException(400, "Geçmiş tarihe randevu oluşturulamaz")
+    cinfo = await q1("SELECT chairs FROM clinics WHERE id=%s", cid)
+    max_chairs = int((cinfo and cinfo["chairs"]) or S.chairs)
+    if not b.chair.isdigit() or not (1 <= int(b.chair) <= max_chairs):
+        raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
     ends = starts + timedelta(minutes=b.duration_min)
     async with tx() as t:
         # Aynı koltuğa eşzamanlı iki kayıt yarışını engelle
@@ -410,10 +424,69 @@ async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
                            cid, b.chair, ends, starts)
         if clash:
             raise HTTPException(409, f"Koltuk {b.chair} bu saatte dolu (randevu #{clash['id']})")
+        if b.doctor_id is not None:
+            doc_clash = await t.q1("""SELECT id FROM appointments WHERE clinic_id=%s AND doctor_id=%s AND status IN ('booked','confirmed')
+                                      AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
+                                   cid, b.doctor_id, ends, starts)
+            if doc_clash:
+                raise HTTPException(409, f"Seçilen hekim bu saatte başka koltukta dolu (randevu #{doc_clash['id']})")
         r = await t.q1("""INSERT INTO appointments (clinic_id, patient_id, starts_at, duration_min, treatment, chair, doctor_id, source)
                           VALUES (%s,%s,%s,%s,%s,%s,%s,'panel') RETURNING id""", cid, pid, starts, b.duration_min, b.treatment, b.chair, b.doctor_id)
     await log(u, "appointment.create", f"appointment:{r['id']}", {"chair": b.chair})
     return {"id": r["id"], "patient_id": pid}
+
+
+class ApptUpdate(BaseModel):
+    starts_at: datetime | None = None
+    duration_min: int | None = Field(default=None, ge=5, le=480)
+    treatment: str | None = Field(default=None, min_length=2, max_length=80)
+    chair: str | None = Field(default=None, max_length=10)
+    doctor_id: int | None = None
+
+
+@router.patch("/app/api/appointments/{aid}")
+async def update_appt(aid: int, b: ApptUpdate, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    cinfo = await q1("SELECT chairs FROM clinics WHERE id=%s", cid)
+    max_chairs = int((cinfo and cinfo["chairs"]) or S.chairs)
+    async with tx() as t:
+        cur_row = await t.q1("SELECT * FROM appointments WHERE id=%s AND clinic_id=%s", aid, cid)
+        if not cur_row:
+            raise HTTPException(404, "randevu yok")
+        starts = (b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)) if b.starts_at else cur_row["starts_at"]
+        if starts < datetime.now(timezone.utc) - timedelta(minutes=5):
+            raise HTTPException(400, "Geçmiş tarihe randevu taşınamaz")
+        dur = b.duration_min if b.duration_min is not None else cur_row["duration_min"]
+        chair = str(b.chair if b.chair is not None else cur_row["chair"])
+        if not chair.isdigit() or not (1 <= int(chair) <= max_chairs):
+            raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
+        doc_id = b.doctor_id if b.doctor_id is not None else cur_row["doctor_id"]
+        if doc_id is not None and not await t.q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", doc_id, cid):
+            raise HTTPException(404, "hekim yok")
+        treat = b.treatment if b.treatment is not None else cur_row["treatment"]
+        ends = starts + timedelta(minutes=dur)
+        await t.q("SELECT pg_advisory_xact_lock(hashtext(%s))", f"chair:{cid}:{chair}")
+        clash = await t.q1(
+            """SELECT id FROM appointments WHERE clinic_id=%s AND id<>%s AND chair=%s AND status IN ('booked','confirmed')
+               AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
+            cid, aid, chair, ends, starts,
+        )
+        if clash:
+            raise HTTPException(409, f"Koltuk {chair} bu saatte dolu (randevu #{clash['id']})")
+        if doc_id is not None:
+            doc_clash = await t.q1(
+                """SELECT id FROM appointments WHERE clinic_id=%s AND id<>%s AND doctor_id=%s AND status IN ('booked','confirmed')
+                   AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
+                cid, aid, doc_id, ends, starts,
+            )
+            if doc_clash:
+                raise HTTPException(409, f"Seçilen hekim bu saatte başka koltukta dolu (randevu #{doc_clash['id']})")
+        await t.q(
+            "UPDATE appointments SET starts_at=%s, duration_min=%s, treatment=%s, chair=%s, doctor_id=%s WHERE id=%s AND clinic_id=%s",
+            starts, dur, treat, chair, doc_id, aid, cid,
+        )
+    await log(u, "appointment.update", f"appointment:{aid}", {"chair": chair})
+    return {"ok": True, "id": aid}
 
 
 class StatusIn(BaseModel):
@@ -454,11 +527,11 @@ async def list_patients(search: str = "", u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     search = search.strip()[:60]
     if search and len(re.sub(r"\D", "", search)) >= 10:
-        where, args = "p.clinic_id=%s AND p.phone_hmac=%s", [cid, phone_hmac(search)]
+        where, args = "p.clinic_id=%s AND p.active AND p.phone_hmac=%s", [cid, phone_hmac(search)]
     elif search:
-        where, args = "p.clinic_id=%s AND p.display_name ILIKE %s", [cid, f"%{search}%"]
+        where, args = "p.clinic_id=%s AND p.active AND p.display_name ILIKE %s", [cid, f"%{search}%"]
     else:
-        where, args = "p.clinic_id=%s", [cid]
+        where, args = "p.clinic_id=%s AND p.active", [cid]
     rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.created_at, {BAL_SQL} AS balance,
                               EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
                               (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
@@ -506,6 +579,52 @@ async def send_anam(pid: int, u: dict = Depends(ANY)):
     return {"link": link}
 
 
+class PatientUpdateIn(BaseModel):
+    phone: str | None = Field(default=None, max_length=30)
+    name: str | None = Field(default=None, min_length=2, max_length=80)
+    lang: Literal["tr", "en", "de", "ar", "ru", "fr", "nl", "es", "it", "fa", "az", "uk", "bg", "ro", "el", "he"] | None = None
+
+
+@router.patch("/app/api/patients/{pid}")
+async def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    p = await q1("SELECT * FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    new_name = b.name if b.name is not None else p["display_name"]
+    new_lang = b.lang if b.lang is not None else p["lang"]
+    if b.phone is not None:
+        if len(norm_phone(b.phone)) < 10:
+            raise HTTPException(400, "Geçerli telefon girin")
+        ph = phone_hmac(b.phone)
+        pe = enc(norm_phone(b.phone))
+    else:
+        ph = p["phone_hmac"]
+        pe = p["phone_enc"]
+    await q("UPDATE patients SET display_name=%s, lang=%s, phone_hmac=%s, phone_enc=%s WHERE id=%s AND clinic_id=%s",
+            new_name, new_lang, ph, pe, pid, cid)
+    await log(u, "patient.update", f"patient:{pid}")
+    return {"ok": True, "id": pid}
+
+
+@router.post("/app/api/patients/{pid}/archive")
+async def archive_patient(pid: int, u: dict = Depends(CLINICAL)):
+    r = await q1("UPDATE patients SET active=false WHERE id=%s AND clinic_id=%s RETURNING id", pid, u["clinic_id"])
+    if not r:
+        raise HTTPException(404, "hasta yok")
+    await log(u, "patient.archive", f"patient:{pid}")
+    return {"ok": True}
+
+
+@router.post("/app/api/patients/{pid}/unarchive")
+async def unarchive_patient(pid: int, u: dict = Depends(CLINICAL)):
+    r = await q1("UPDATE patients SET active=true WHERE id=%s AND clinic_id=%s RETURNING id", pid, u["clinic_id"])
+    if not r:
+        raise HTTPException(404, "hasta yok")
+    await log(u, "patient.unarchive", f"patient:{pid}")
+    return {"ok": True}
+
+
 # ======================================================================== bekleme listesi & uyarılar
 class WaitIn(BaseModel):
     patient_id: int
@@ -535,6 +654,43 @@ async def rm_wait(wid: int, u: dict = Depends(ANY)):
     await q("UPDATE waitlist SET active=false WHERE id=%s", wid)
     await log(u, "waitlist.remove", f"waitlist:{wid}")
     return {"ok": True}
+
+
+class OfferRespondIn(BaseModel):
+    action: Literal["accept", "reject", "expire"] = "accept"
+
+
+@router.post("/app/api/waitlist/offers/{oid}/respond")
+async def respond_slot_offer(oid: int, b: OfferRespondIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    async with tx() as t:
+        off = await t.q1(
+            """SELECT o.*, w.patient_id, p.clinic_id FROM slot_offers o
+               JOIN waitlist w ON w.id=o.waitlist_id
+               JOIN patients p ON p.id=w.patient_id
+               WHERE o.id=%s AND p.clinic_id=%s FOR UPDATE""",
+            oid, cid,
+        )
+        if not off:
+            raise HTTPException(404, "teklif yok")
+        if b.action == "reject":
+            await t.q("UPDATE slot_offers SET status='lost' WHERE id=%s", oid)
+            return {"ok": True, "status": "rejected"}
+        if b.action == "expire":
+            await t.q("UPDATE slot_offers SET status='expired' WHERE id=%s", oid)
+            return {"ok": True, "status": "expired"}
+        won = await t.q1(
+            "UPDATE appointments SET status='booked', patient_id=%s WHERE id=%s AND clinic_id=%s AND status='cancelled' RETURNING id",
+            off["patient_id"], off["appointment_id"], cid,
+        )
+        if not won:
+            await t.q("UPDATE slot_offers SET status='lost' WHERE id=%s", oid)
+            raise HTTPException(409, "Bu koltuk az önce başka bir hasta tarafından alındı")
+        await t.q("UPDATE slot_offers SET status='won' WHERE id=%s", oid)
+        await t.q("UPDATE slot_offers SET status='lost' WHERE appointment_id=%s AND id<>%s AND status='sent'", off["appointment_id"], oid)
+        await t.q("UPDATE waitlist SET active=false WHERE id=%s", off["waitlist_id"])
+    await log(u, "waitlist.offer_respond", f"offer:{oid}", {"action": b.action})
+    return {"ok": True, "status": "won", "appointment_id": off["appointment_id"]}
 
 
 @router.get("/app/api/alerts")
@@ -615,6 +771,50 @@ async def move(iid: int, b: MoveIn, u: dict = Depends(ANY)):
     return {"ok": True, "qty": it["qty"]}
 
 
+class StockTransferIn(BaseModel):
+    target_clinic_id: int
+    qty: Decimal = Field(gt=0, le=1_000_000)
+    reason: str = Field("Şubeler arası transfer", min_length=2, max_length=120)
+
+
+@router.post("/app/api/inventory/{iid}/transfer")
+async def transfer_item(iid: int, b: StockTransferIn, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    if b.target_clinic_id == cid:
+        raise HTTPException(400, "Hedef şube kaynak şubeyle aynı olamaz")
+    async with tx() as t:
+        if not await t.q1("SELECT id FROM clinics WHERE id=%s AND active", b.target_clinic_id):
+            raise HTTPException(404, "hedef şube yok")
+        src = await t.q1("SELECT * FROM inventory_items WHERE id=%s AND clinic_id=%s AND active FOR UPDATE", iid, cid)
+        if not src:
+            raise HTTPException(404, "ürün yok")
+        upd = await t.q1(
+            "UPDATE inventory_items SET qty = qty - %s WHERE id=%s AND clinic_id=%s AND active AND qty - %s >= 0 RETURNING qty",
+            b.qty, iid, cid, b.qty,
+        )
+        if not upd:
+            raise HTTPException(409, "Transfer için stok yetersiz")
+        await t.q(
+            "INSERT INTO stock_moves (item_id, delta, qty_after, reason, actor_id) VALUES (%s,%s,%s,%s,%s)",
+            iid, -b.qty, upd["qty"], f"Transfer -> Şube #{b.target_clinic_id}: {b.reason}", u["id"],
+        )
+        dst = await t.q1("SELECT id FROM inventory_items WHERE clinic_id=%s AND name=%s AND active FOR UPDATE", b.target_clinic_id, src["name"])
+        if dst:
+            dst_upd = await t.q1("UPDATE inventory_items SET qty = qty + %s WHERE id=%s RETURNING id, qty", b.qty, dst["id"])
+        else:
+            dst_upd = await t.q1(
+                """INSERT INTO inventory_items (clinic_id, name, sku, unit, qty, min_qty, unit_cost_kurus)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id, qty""",
+                b.target_clinic_id, src["name"], src["sku"], src["unit"], b.qty, src["min_qty"], src["unit_cost_kurus"],
+            )
+        await t.q(
+            "INSERT INTO stock_moves (item_id, delta, qty_after, reason, actor_id) VALUES (%s,%s,%s,%s,%s)",
+            dst_upd["id"], b.qty, dst_upd["qty"], f"Transfer <- Şube #{cid}: {b.reason}", u["id"],
+        )
+    await log(u, "inventory.transfer", f"item:{iid}->clinic:{b.target_clinic_id}", {"qty": str(b.qty)})
+    return {"ok": True, "src_qty": float(upd["qty"]), "dst_item_id": dst_upd["id"], "dst_qty": float(dst_upd["qty"])}
+
+
 @router.get("/app/api/inventory/{iid}/moves")
 async def moves(iid: int, u: dict = Depends(ANY)):
     if not await q1("SELECT id FROM inventory_items WHERE id=%s AND clinic_id=%s", iid, u["clinic_id"]):
@@ -630,12 +830,14 @@ class ChargeIn(BaseModel):
     description: str = Field(min_length=2, max_length=120)
     amount: Decimal = Field(gt=0, le=10_000_000)
     doctor_id: int | None = None
+    discount: Decimal = Field(Decimal(0), ge=0, le=100)
 
 
 class PaymentIn(BaseModel):
     patient_id: int
     amount: Decimal = Field(gt=0, le=10_000_000)
     method: Literal["nakit", "kart", "havale", "diger"]
+    idempotency_key: str | None = Field(default=None, max_length=80)
 
 
 class VoidIn(BaseModel):
@@ -649,10 +851,14 @@ async def add_charge(b: ChargeIn, u: dict = Depends(ANY)):
         raise HTTPException(404, "hasta yok")
     if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
         raise HTTPException(404, "hekim yok")
-    r = await q1("""INSERT INTO charges (clinic_id, patient_id, description, amount_kurus, doctor_id, created_by)
-                    VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""", cid, b.patient_id, b.description, kurus(b.amount), b.doctor_id, u["id"])
-    await log(u, "kasa.charge", f"charge:{r['id']}", {"kurus": kurus(b.amount)})
-    return {"id": r["id"]}
+    net_k = kurus(b.amount * (Decimal(100) - b.discount) / Decimal(100))
+    if net_k <= 0:
+        raise HTTPException(400, "Net hizmet tutarı pozitif olmalıdır")
+    r = await q1("""INSERT INTO charges (clinic_id, patient_id, description, amount_kurus, discount, doctor_id, created_by)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                 cid, b.patient_id, b.description, net_k, b.discount, b.doctor_id, u["id"])
+    await log(u, "kasa.charge", f"charge:{r['id']}", {"kurus": net_k, "discount": str(b.discount)})
+    return {"id": r["id"], "amount_try": tl(net_k)}
 
 
 @router.post("/app/api/payments")
@@ -660,9 +866,24 @@ async def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", b.patient_id, cid):
         raise HTTPException(404, "hasta yok")
-    r = await q1("""INSERT INTO payments (clinic_id, patient_id, amount_kurus, method, created_by)
-                    VALUES (%s,%s,%s,%s,%s) RETURNING id""", cid, b.patient_id, kurus(b.amount), b.method, u["id"])
-    await log(u, "kasa.payment", f"payment:{r['id']}", {"kurus": kurus(b.amount), "method": b.method})
+    amt_k = kurus(b.amount)
+    try:
+        async with tx() as t:
+            if b.idempotency_key:
+                await t.q("SELECT pg_advisory_xact_lock(hashtext(%s))", f"pay:{cid}:{b.idempotency_key}")
+                dup = await t.q1("SELECT id FROM payments WHERE clinic_id=%s AND idempotency_key=%s", cid, b.idempotency_key)
+                if dup:
+                    raise HTTPException(409, f"Bu ödeme isteği daha önce işlendi (idempotency #{dup['id']})")
+            r = await t.q1(
+                """INSERT INTO payments (clinic_id, patient_id, amount_kurus, method, created_by, idempotency_key)
+                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+                cid, b.patient_id, amt_k, b.method, u["id"], b.idempotency_key,
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(409, "Bu ödeme isteği daha önce işlendi (Mükerrer işlem engellendi)")
+    await log(u, "kasa.payment", f"payment:{r['id']}", {"kurus": amt_k, "method": b.method})
     return {"id": r["id"]}
 
 
@@ -676,7 +897,7 @@ async def void(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dic
 
 
 @router.get("/app/api/kasa")
-async def kasa(start: datetime, end: datetime, u: dict = Depends(ANY)):
+async def kasa(start: datetime, end: datetime, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
     t = await q1("""SELECT (SELECT coalesce(sum(amount_kurus),0) FROM charges WHERE clinic_id=%s AND voided_at IS NULL AND created_at >= %s AND created_at < %s) AS billed,
                            (SELECT coalesce(sum(amount_kurus),0) FROM payments WHERE clinic_id=%s AND voided_at IS NULL AND created_at >= %s AND created_at < %s) AS paid,
@@ -729,7 +950,7 @@ async def add_staff(b: StaffIn, u: dict = Depends(OWNER)):
     email = b.email.strip().lower()
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(400, "Geçerli e-posta girin")
-    h = await asyncio.to_thread(sec.hash_password, b.password)
+    h = await _hash_pw(b.password)
     try:
         r = await q1("""INSERT INTO staff_users (clinic_id, email, full_name, role, pw_hash, phone_hmac, share_pct)
                         VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
@@ -797,7 +1018,7 @@ async def create_clinic(b: ClinicCreateIn, request: Request, u: dict = Depends(O
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(400, "Geçerli yönetici e-postası girin")
     slug = re.sub(r"[^a-z0-9]+", "-", b.clinic_name.lower()).strip("-")[:40] + f"-{int(datetime.now().timestamp()) % 10000}"
-    h = await asyncio.to_thread(sec.hash_password, b.owner_password)
+    h = await _hash_pw(b.owner_password)
     async with tx() as t:
         c = await t.q1("""INSERT INTO clinics (name, slug, city, address, phone, chairs)
                           VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
@@ -874,7 +1095,7 @@ async def list_templates(u: dict = Depends(ANY)):
 
 
 @router.post("/app/api/templates")
-async def create_template(b: TemplateIn, u: dict = Depends(ANY)):
+async def create_template(b: TemplateIn, u: dict = Depends(OWNER)):
     r = await q1("""INSERT INTO message_templates (clinic_id, name, channel, lang, category, body, status)
                     VALUES (%s,%s,%s,%s,%s,%s,'APPROVED') RETURNING id""",
                  u["clinic_id"], b.name, b.channel, b.lang, b.category, b.body)
@@ -906,7 +1127,7 @@ class CampaignIn(BaseModel):
 
 
 @router.post("/app/api/campaigns")
-async def add_campaign(b: CampaignIn, u: dict = Depends(ANY)):
+async def add_campaign(b: CampaignIn, u: dict = Depends(OWNER)):
     r = await q1("""INSERT INTO campaigns (clinic_id, name, source, clicks, conversations, appointments_booked, revenue_kurus)
                     VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                  u["clinic_id"], b.name, b.source, b.clicks, b.conversations, b.appointments_booked, kurus(b.revenue_try))

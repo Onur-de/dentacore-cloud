@@ -167,6 +167,31 @@ CREATE TABLE IF NOT EXISTS message_templates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS active    BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE charges      ADD COLUMN IF NOT EXISTS discount  NUMERIC(5,2) NOT NULL DEFAULT 0;
+ALTER TABLE charges      ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS charges_idem_uq ON charges (clinic_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+ALTER TABLE payments     ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS payments_idem_uq ON payments (clinic_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}';
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS buffer_min INT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS tooth_records (
+  id              BIGSERIAL PRIMARY KEY,
+  clinic_id       BIGINT NOT NULL DEFAULT 1,
+  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  tooth_fdi       INT NOT NULL CHECK ((tooth_fdi BETWEEN 11 AND 48) OR (tooth_fdi BETWEEN 51 AND 85)),
+  surface         TEXT NOT NULL DEFAULT 'FULL' CHECK (surface IN ('M','D','O','B','L','FULL')),
+  status          TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('healthy','caries','planned','treated','implant','crown','root_canal','missing','extraction')),
+  procedure_code  TEXT NOT NULL DEFAULT '',
+  procedure_name  TEXT NOT NULL DEFAULT '',
+  amount_kurus    BIGINT NOT NULL DEFAULT 0 CHECK (amount_kurus >= 0),
+  doctor_id       BIGINT REFERENCES staff_users(id),
+  note            TEXT NOT NULL DEFAULT '',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS tooth_records_patient_idx ON tooth_records (clinic_id, patient_id, tooth_fdi);
+
 CREATE TABLE IF NOT EXISTS campaigns (
   id                  BIGSERIAL PRIMARY KEY,
   clinic_id           BIGINT NOT NULL DEFAULT 1,

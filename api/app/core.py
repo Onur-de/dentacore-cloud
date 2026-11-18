@@ -8,8 +8,12 @@ import re
 import time
 
 from cryptography.fernet import Fernet
-from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
+try:
+    from psycopg.rows import dict_row
+    from psycopg_pool import AsyncConnectionPool
+except ImportError:
+    dict_row = None
+    AsyncConnectionPool = None
 
 
 def env(k: str, d: str = "") -> str:

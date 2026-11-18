@@ -129,3 +129,19 @@ CREATE TABLE alerts (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   acknowledged_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS tooth_records (
+  id              BIGSERIAL PRIMARY KEY,
+  clinic_id       BIGINT NOT NULL DEFAULT 1,
+  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  tooth_fdi       INT NOT NULL CHECK ((tooth_fdi BETWEEN 11 AND 48) OR (tooth_fdi BETWEEN 51 AND 85)),
+  surface         TEXT NOT NULL DEFAULT 'FULL' CHECK (surface IN ('M','D','O','B','L','FULL')),
+  status          TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('healthy','caries','planned','treated','implant','crown','root_canal','missing','extraction')),
+  procedure_code  TEXT NOT NULL DEFAULT '',
+  procedure_name  TEXT NOT NULL DEFAULT '',
+  amount_kurus    BIGINT NOT NULL DEFAULT 0 CHECK (amount_kurus >= 0),
+  doctor_id       BIGINT,
+  note            TEXT NOT NULL DEFAULT '',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS tooth_records_patient_idx ON tooth_records (clinic_id, patient_id, tooth_fdi);

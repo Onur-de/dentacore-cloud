@@ -133,6 +133,13 @@ def sync_once() -> None:
 
 
 def main() -> None:
+    universal = pathlib.Path(r"C:\Users\onura\.gemini\scripts\github_universal_autosync.py")
+    if universal.exists():
+        import runpy
+        sys.argv = [str(universal), "--daemon"]
+        runpy.run_path(str(universal), run_name="__main__")
+        return
+
     _mutex = _acquire_single_instance()
     if _mutex is None:
         _log("Duplicate watcher instance exited cleanly.")

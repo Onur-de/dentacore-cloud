@@ -213,10 +213,12 @@ async def submit_anamnesis(token: str, form: dict) -> tuple[bool, str]:
     await add_consent(pid, "saglik_verisi_acik_riza", KVKK_METIN_VER, riza, "web_form")
     await add_consent(pid, "yurt_disi_aktarim", KVKK_METIN_VER, riza, "web_form")
     if flags:
+        p_row = await q1("SELECT clinic_id FROM patients WHERE id=%s", pid)
+        cid_p = int(p_row["clinic_id"]) if p_row and p_row.get("clinic_id") else 1
         link = sign(f"/view/anamnez/{row['id']}", ttl=72 * 3600)
         await alert_doctor(S.doctor_on_call or S.doctor_owner,
                            f"KIRMIZI BAYRAK: Hasta #{pid} anamnezinde {len(flags)} risk işareti var. Detay (72 saat geçerli): {link}",
-                           pid, "anamnez_kirmizi")
+                           pid, "anamnez_kirmizi", clinic_id=cid_p)
     return True, "Formunuz alındı. Teşekkür ederiz."
 
 
@@ -268,10 +270,11 @@ async def handle_postop_reply(pid: int, text: str, emergency: bool) -> str | Non
     await q("UPDATE postop_checks SET pain_score=%s, answered_at=now(), alarm=%s WHERE id=%s", score, alarm, c["id"])
     if alarm:
         p = await patient(pid)
+        cid_p = int(p.get("clinic_id") or 1)
         await alert_doctor(S.doctor_on_call or S.doctor_owner,
                            f"İŞLEM SONRASI ALARM: {p.get('display_name') or 'Hasta'} (#{pid}), {c['procedure']}, {c['stage']} kontrolü, "
                            f"ağrı {score if score is not None else '?'}/10{', acil belirti bildirdi' if emergency else ''}. Geri arama: +{p['phone']}",
-                           pid, "postop_alarm")
+                           pid, "postop_alarm", clinic_id=cid_p)
         return "Bilginiz nöbetçi hekimimize iletildi, sizi en kısa sürede arayacak. Nefes alma güçlüğü, durmayan kanama veya hızla artan şişlik varsa lütfen 112'yi arayın."
     if score is not None and score >= 5:
         return "Teşekkürler. Bu düzeyde ağrı ilk günlerde görülebilir; hekiminizin verdiği talimatlara uyun. Ağrı artarsa veya 8 ve üzerine çıkarsa bize hemen yazın."

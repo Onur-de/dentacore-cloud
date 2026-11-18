@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from cryptography.fernet import Fernet
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 import uvicorn
@@ -66,8 +66,10 @@ os.environ.setdefault("LLM_MAIN_MODEL", "free-auto")
 os.environ.setdefault("CLINIC_NAME", "Özel DentaCore Merkez Polikliniği")
 
 sys.path.insert(0, str(API_DIR))
-from app import cal, security as sec  # noqa: E402
+from app import cal, media, security as sec  # noqa: E402
 from app.router import TokenRouter  # noqa: E402
+
+_SEEN_WEBHOOK_IDS: set[str] = set()
 
 _FERNET = Fernet(_SECRETS["DATA_ENCRYPTION_KEY"].encode())
 _HMAC_KEY = _SECRETS["PHONE_HMAC_KEY"].encode()
@@ -135,6 +137,13 @@ def verify_sig(path: str, exp: str, sig: str) -> bool:
     return hmac.compare_digest(good, sig or "")
 
 
+def _hash_pw(pw: str) -> str:
+    try:
+        return sec.hash_password(pw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 def kurus(v: Decimal) -> int:
     return int((v * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
@@ -165,8 +174,11 @@ def iso_now() -> str:
 def db() -> sqlite3.Connection:
     global _CONN
     if _CONN is None:
-        _CONN = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _CONN = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
         _CONN.row_factory = sqlite3.Row
+        _CONN.execute("PRAGMA journal_mode = WAL")
+        _CONN.execute("PRAGMA synchronous = NORMAL")
+        _CONN.execute("PRAGMA busy_timeout = 5000")
         _CONN.execute("PRAGMA foreign_keys = ON")
     return _CONN
 
@@ -207,20 +219,22 @@ def write_audit(actor_id: int | None, actor: str, action: str, target: str = "",
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS clinics (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  name              TEXT NOT NULL,
-  slug              TEXT UNIQUE NOT NULL,
-  city              TEXT NOT NULL DEFAULT 'İstanbul',
-  address           TEXT NOT NULL DEFAULT '',
-  phone             TEXT NOT NULL DEFAULT '',
-  chairs            INTEGER NOT NULL DEFAULT 2,
-  work_minutes      INTEGER NOT NULL DEFAULT 600,
-  google_review_url TEXT NOT NULL DEFAULT '',
-  autopilot_name    TEXT NOT NULL DEFAULT 'DentaCore Asistan',
-  default_lang      TEXT NOT NULL DEFAULT 'tr',
-  slot_step_min     INTEGER NOT NULL DEFAULT 15,
-  active            INTEGER NOT NULL DEFAULT 1,
-  created_at        TEXT NOT NULL
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  name               TEXT NOT NULL,
+  slug               TEXT UNIQUE NOT NULL,
+  city               TEXT NOT NULL DEFAULT 'İstanbul',
+  address            TEXT NOT NULL DEFAULT '',
+  phone              TEXT NOT NULL DEFAULT '',
+  chairs             INTEGER NOT NULL DEFAULT 2,
+  work_minutes       INTEGER NOT NULL DEFAULT 600,
+  google_review_url  TEXT NOT NULL DEFAULT '',
+  autopilot_name     TEXT NOT NULL DEFAULT 'DentaCore Asistan',
+  default_lang       TEXT NOT NULL DEFAULT 'tr',
+  slot_step_min      INTEGER NOT NULL DEFAULT 15,
+  working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}',
+  buffer_min         INTEGER NOT NULL DEFAULT 0,
+  active             INTEGER NOT NULL DEFAULT 1,
+  created_at         TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS staff_users (
@@ -375,29 +389,47 @@ CREATE TABLE IF NOT EXISTS stock_moves (
 );
 
 CREATE TABLE IF NOT EXISTS charges (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  clinic_id     INTEGER NOT NULL DEFAULT 1,
-  patient_id    INTEGER NOT NULL,
-  description   TEXT NOT NULL,
-  amount_kurus  INTEGER NOT NULL CHECK (amount_kurus > 0),
-  doctor_id     INTEGER,
-  created_by    INTEGER,
-  created_at    TEXT NOT NULL,
-  voided_at     TEXT,
-  void_reason   TEXT
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  clinic_id       INTEGER NOT NULL DEFAULT 1,
+  patient_id      INTEGER NOT NULL,
+  description     TEXT NOT NULL,
+  amount_kurus    INTEGER NOT NULL CHECK (amount_kurus > 0),
+  doctor_id       INTEGER,
+  created_by      INTEGER,
+  created_at      TEXT NOT NULL,
+  voided_at       TEXT,
+  void_reason     TEXT,
+  idempotency_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payments (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  clinic_id     INTEGER NOT NULL DEFAULT 1,
-  patient_id    INTEGER NOT NULL,
-  amount_kurus  INTEGER NOT NULL CHECK (amount_kurus > 0),
-  method        TEXT NOT NULL,
-  created_by    INTEGER,
-  created_at    TEXT NOT NULL,
-  voided_at     TEXT,
-  void_reason   TEXT
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  clinic_id       INTEGER NOT NULL DEFAULT 1,
+  patient_id      INTEGER NOT NULL,
+  amount_kurus    INTEGER NOT NULL CHECK (amount_kurus > 0),
+  method          TEXT NOT NULL,
+  created_by      INTEGER,
+  created_at      TEXT NOT NULL,
+  voided_at       TEXT,
+  void_reason     TEXT,
+  idempotency_key TEXT
 );
+
+CREATE TABLE IF NOT EXISTS tooth_records (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  clinic_id       INTEGER NOT NULL DEFAULT 1,
+  patient_id      INTEGER NOT NULL,
+  tooth_fdi       INTEGER NOT NULL CHECK ((tooth_fdi BETWEEN 11 AND 48) OR (tooth_fdi BETWEEN 51 AND 85)),
+  surface         TEXT NOT NULL DEFAULT 'FULL' CHECK (surface IN ('M','D','O','B','L','FULL')),
+  status          TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('healthy','caries','planned','treated','implant','crown','root_canal','missing','extraction')),
+  procedure_code  TEXT NOT NULL DEFAULT '',
+  procedure_name  TEXT NOT NULL DEFAULT '',
+  amount_kurus    INTEGER NOT NULL DEFAULT 0 CHECK (amount_kurus >= 0),
+  doctor_id       INTEGER,
+  note            TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tooth_records_patient_idx ON tooth_records(clinic_id, patient_id, tooth_fdi);
 
 CREATE TABLE IF NOT EXISTS message_log (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -453,6 +485,16 @@ CREATE TABLE IF NOT EXISTS leads (
   chairs      INTEGER,
   created_at  TEXT NOT NULL
 );
+
+CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log yalnizca eklemeye aciktir');
+END;
+
+CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log yalnizca eklemeye aciktir');
+END;
 """
 
 
@@ -496,6 +538,43 @@ def _migrate_sqlite():
                 ALTER TABLE patients_new RENAME TO patients;
             """)
             c.execute("PRAGMA foreign_keys = ON")
+        pat_cols = {r["name"] for r in c.execute("PRAGMA table_info(patients)").fetchall()}
+        if "active" not in pat_cols:
+            c.execute("ALTER TABLE patients ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        clinic_cols = {r["name"] for r in c.execute("PRAGMA table_info(clinics)").fetchall()}
+        if "working_hours_json" not in clinic_cols:
+            c.execute("""ALTER TABLE clinics ADD COLUMN working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}'""")
+        if "buffer_min" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN buffer_min INTEGER NOT NULL DEFAULT 0")
+        chg_cols = {r["name"] for r in c.execute("PRAGMA table_info(charges)").fetchall()}
+        if "idempotency_key" not in chg_cols:
+            c.execute("ALTER TABLE charges ADD COLUMN idempotency_key TEXT")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS charges_idem_uq ON charges(clinic_id, idempotency_key) WHERE idempotency_key IS NOT NULL")
+        pay_cols = {r["name"] for r in c.execute("PRAGMA table_info(payments)").fetchall()}
+        if "idempotency_key" not in pay_cols:
+            c.execute("ALTER TABLE payments ADD COLUMN idempotency_key TEXT")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS payments_idem_uq ON payments(clinic_id, idempotency_key) WHERE idempotency_key IS NOT NULL")
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS tooth_records (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              clinic_id       INTEGER NOT NULL DEFAULT 1,
+              patient_id      INTEGER NOT NULL,
+              tooth_fdi       INTEGER NOT NULL CHECK ((tooth_fdi BETWEEN 11 AND 48) OR (tooth_fdi BETWEEN 51 AND 85)),
+              surface         TEXT NOT NULL DEFAULT 'FULL' CHECK (surface IN ('M','D','O','B','L','FULL')),
+              status          TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('healthy','caries','planned','treated','implant','crown','root_canal','missing','extraction')),
+              procedure_code  TEXT NOT NULL DEFAULT '',
+              procedure_name  TEXT NOT NULL DEFAULT '',
+              amount_kurus    INTEGER NOT NULL DEFAULT 0 CHECK (amount_kurus >= 0),
+              doctor_id       INTEGER,
+              note            TEXT NOT NULL DEFAULT '',
+              created_at      TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS tooth_records_patient_idx ON tooth_records(clinic_id, patient_id, tooth_fdi);
+            CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'audit_log yalnizca eklemeye aciktir'); END;
+            CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'audit_log yalnizca eklemeye aciktir'); END;
+        """)
         c.commit()
 
 
@@ -564,6 +643,43 @@ def init_and_seed():
     with _DB_LOCK:
         c = db()
         c.executescript(SCHEMA_SQL)
+        pat_cols = {r["name"] for r in c.execute("PRAGMA table_info(patients)").fetchall()}
+        if "active" not in pat_cols:
+            c.execute("ALTER TABLE patients ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        clinic_cols = {r["name"] for r in c.execute("PRAGMA table_info(clinics)").fetchall()}
+        if "working_hours_json" not in clinic_cols:
+            c.execute("""ALTER TABLE clinics ADD COLUMN working_hours_json TEXT NOT NULL DEFAULT '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}'""")
+        if "buffer_min" not in clinic_cols:
+            c.execute("ALTER TABLE clinics ADD COLUMN buffer_min INTEGER NOT NULL DEFAULT 0")
+        chg_cols = {r["name"] for r in c.execute("PRAGMA table_info(charges)").fetchall()}
+        if "idempotency_key" not in chg_cols:
+            c.execute("ALTER TABLE charges ADD COLUMN idempotency_key TEXT")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS charges_idem_uq ON charges(clinic_id, idempotency_key) WHERE idempotency_key IS NOT NULL")
+        pay_cols = {r["name"] for r in c.execute("PRAGMA table_info(payments)").fetchall()}
+        if "idempotency_key" not in pay_cols:
+            c.execute("ALTER TABLE payments ADD COLUMN idempotency_key TEXT")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS payments_idem_uq ON payments(clinic_id, idempotency_key) WHERE idempotency_key IS NOT NULL")
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS tooth_records (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              clinic_id       INTEGER NOT NULL DEFAULT 1,
+              patient_id      INTEGER NOT NULL,
+              tooth_fdi       INTEGER NOT NULL CHECK ((tooth_fdi BETWEEN 11 AND 48) OR (tooth_fdi BETWEEN 51 AND 85)),
+              surface         TEXT NOT NULL DEFAULT 'FULL' CHECK (surface IN ('M','D','O','B','L','FULL')),
+              status          TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('healthy','caries','planned','treated','implant','crown','root_canal','missing','extraction')),
+              procedure_code  TEXT NOT NULL DEFAULT '',
+              procedure_name  TEXT NOT NULL DEFAULT '',
+              amount_kurus    INTEGER NOT NULL DEFAULT 0 CHECK (amount_kurus >= 0),
+              doctor_id       INTEGER,
+              note            TEXT NOT NULL DEFAULT '',
+              created_at      TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS tooth_records_patient_idx ON tooth_records(clinic_id, patient_id, tooth_fdi);
+            CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'audit_log yalnizca eklemeye aciktir'); END;
+            CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'audit_log yalnizca eklemeye aciktir'); END;
+        """)
         c.commit()
     _migrate_sqlite()
     if q1("SELECT 1 FROM clinics LIMIT 1"):
@@ -835,7 +951,7 @@ async def login(body: LoginIn, request: Request, response: Response):
     if not await _LIMITER.hit(f"ip:{ip}", 50, 900) or not await _LIMITER.hit(f"em:{email}", 15, 900):
         raise HTTPException(429, "Çok fazla deneme. Daha sonra tekrar deneyin.")
     u = q1("SELECT * FROM staff_users WHERE email=? AND active=1", email)
-    ok = sec.verify_password(body.password, u["pw_hash"] if u else sec.dummy_hash())
+    ok = await asyncio.to_thread(sec.verify_password, body.password, u["pw_hash"] if u else sec.dummy_hash())
     now = now_utc()
     expired_lock = False
     if u and u.get("locked_until"):
@@ -954,7 +1070,7 @@ def change_password(body: PwIn, u: dict = Depends(ANY)):
     row = q1("SELECT pw_hash FROM staff_users WHERE id=?", u["id"])
     if not sec.verify_password(body.current, row["pw_hash"]):
         raise HTTPException(400, "Parola hatalı")
-    ex("UPDATE staff_users SET pw_hash=? WHERE id=?", sec.hash_password(body.new), u["id"])
+    ex("UPDATE staff_users SET pw_hash=? WHERE id=?", _hash_pw(body.new), u["id"])
     ex("UPDATE sessions SET revoked=1 WHERE user_id=? AND id_hash<>?", u["id"], u["id_hash"])
     write_audit(u["id"], u["email"], "auth.password_changed", "", u["ip_h"], clinic_id=u["clinic_id"])
     return {"ok": True}
@@ -1036,6 +1152,63 @@ def list_appts(start: datetime, end: datetime, u: dict = Depends(ANY)):
     return out
 
 
+DEFAULT_WORKING_HOURS_JSON = '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}'
+VALID_FDI_TEETH = {
+    *{n for qd in (10, 20, 30, 40) for n in range(qd + 1, qd + 9)},
+    *{n for qd in (50, 60, 70, 80) for n in range(qd + 1, qd + 6)},
+}
+
+
+def _parse_hhmm(val: str) -> int:
+    parts = str(val or "00:00").strip().split(":")
+    return int(parts[0]) * 60 + (int(parts[1]) if len(parts) > 1 else 0)
+
+
+def validate_working_hours(starts: datetime, duration_min: int, working_hours_json: str | None = None):
+    s_loc = (starts if starts.tzinfo else starts.replace(tzinfo=TZ)).astimezone(TZ)
+    e_loc = (s_loc + timedelta(minutes=duration_min)).astimezone(TZ)
+    if s_loc.date() != e_loc.date():
+        raise HTTPException(422, "Randevu aynı gün içinde başlamalı ve bitmelidir")
+    try:
+        wh = json.loads(working_hours_json or DEFAULT_WORKING_HOURS_JSON)
+        if not isinstance(wh, dict):
+            wh = json.loads(DEFAULT_WORKING_HOURS_JSON)
+    except Exception:
+        wh = json.loads(DEFAULT_WORKING_HOURS_JSON)
+
+    wd = s_loc.weekday()
+    day_keys = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    dkey = day_keys[wd]
+    if dkey in wh:
+        hrs = wh[dkey]
+    elif wd < 5:
+        hrs = wh.get("mon_fri", ["09:00", "19:00"])
+    elif wd == 5:
+        hrs = wh.get("sat", ["09:00", "15:00"])
+    else:
+        hrs = wh.get("sun", None)
+
+    if not hrs or not isinstance(hrs, (list, tuple)) or len(hrs) < 2 or not hrs[0] or not hrs[1]:
+        raise HTTPException(422, "Seçilen gün klinik kapalıdır (kapalı güne randevu oluşturulamaz)")
+
+    open_m = _parse_hhmm(hrs[0])
+    close_m = _parse_hhmm(hrs[1])
+    s_m = s_loc.hour * 60 + s_loc.minute
+    e_m = e_loc.hour * 60 + e_loc.minute
+    if s_m < open_m or e_m > close_m:
+        raise HTTPException(422, f"Randevu saati klinik çalışma saatleri ({hrs[0]}-{hrs[1]}) dışındadır")
+
+
+def _require_active_patient_row(c: sqlite3.Connection, pid: int, cid: int) -> sqlite3.Row:
+    row = c.execute("SELECT * FROM patients WHERE id=? AND clinic_id=?", (pid, cid)).fetchone()
+    if not row:
+        raise HTTPException(404, "hasta yok")
+    act = row["active"] if "active" in row.keys() else 1
+    if not int(act if act is not None else 1):
+        raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
+    return row
+
+
 class ApptCreate(BaseModel):
     patient_id: int | None = None
     phone: str | None = None
@@ -1050,36 +1223,123 @@ class ApptCreate(BaseModel):
 @app.post("/app/api/appointments")
 def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    pid = b.patient_id
-    if pid is not None:
-        if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
-            raise HTTPException(404, "hasta yok")
-    else:
-        if not b.phone or len(norm_phone(b.phone)) < 10:
-            raise HTTPException(400, "Hasta seçin veya geçerli telefon girin")
-        ph = phone_hmac(b.phone)
-        row = q1("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", cid, ph)
-        if row:
-            pid = row["id"]
-        else:
-            pid = ex("INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,created_at) VALUES (?,?,?,?,?,?,?)",
-                     cid, ph, enc(norm_phone(b.phone)), b.name, "tr", "wa", iso_now())
-    if b.doctor_id is not None:
-        if not q1("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", b.doctor_id, cid):
-            raise HTTPException(404, "hekim yok")
     starts = b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)
-    ends = starts + timedelta(minutes=b.duration_min)
-    for ex_a in q("SELECT id, starts_at, duration_min FROM appointments WHERE clinic_id=? AND chair=? AND status IN ('booked','confirmed')", cid, b.chair):
-        s2 = datetime.fromisoformat(ex_a["starts_at"])
-        if s2.tzinfo is None:
-            s2 = s2.replace(tzinfo=TZ)
-        e2 = s2 + timedelta(minutes=ex_a["duration_min"])
-        if s2 < ends and e2 > starts:
-            raise HTTPException(409, f"Koltuk {b.chair} bu saatte dolu (randevu #{ex_a['id']})")
-    aid = ex("INSERT INTO appointments (clinic_id,patient_id,starts_at,duration_min,treatment,chair,doctor_id,source,created_at) VALUES (?,?,?,?,?,?,?,'panel',?)",
-             cid, pid, starts.isoformat(), b.duration_min, b.treatment, b.chair, b.doctor_id, iso_now())
+    cinfo = q1("SELECT chairs, working_hours_json, buffer_min FROM clinics WHERE id=?", cid) or {
+        "chairs": 2,
+        "working_hours_json": DEFAULT_WORKING_HOURS_JSON,
+        "buffer_min": 0,
+    }
+    max_chairs = int(cinfo.get("chairs") or 2)
+    if not str(b.chair).isdigit() or not (1 <= int(b.chair) <= max_chairs):
+        raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
+
+    with _DB_LOCK:
+        c = db()
+        pid = b.patient_id
+        if pid is not None:
+            _require_active_patient_row(c, pid, cid)
+        else:
+            if not b.phone or len(norm_phone(b.phone)) < 10:
+                raise HTTPException(400, "Hasta seçin veya geçerli telefon girin")
+            ph = phone_hmac(b.phone)
+            row = c.execute("SELECT id, active FROM patients WHERE clinic_id=? AND phone_hmac=?", (cid, ph)).fetchone()
+            if row:
+                if not int(row["active"] if row["active"] is not None else 1):
+                    raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
+                pid = row["id"]
+            else:
+                cur_p = c.execute(
+                    "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
+                    (cid, ph, enc(norm_phone(b.phone)), b.name, "tr", "wa", iso_now()),
+                )
+                pid = cur_p.lastrowid
+        if b.doctor_id is not None:
+            if not c.execute("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", (b.doctor_id, cid)).fetchone():
+                raise HTTPException(404, "hekim yok")
+        if starts < now_utc() - timedelta(minutes=5):
+            raise HTTPException(400, "Geçmiş tarihe randevu oluşturulamaz")
+        validate_working_hours(starts, b.duration_min, cinfo.get("working_hours_json"))
+        buf_min = max(0, int(cinfo.get("buffer_min") or 0))
+        ends = starts + timedelta(minutes=b.duration_min + buf_min)
+        active_rows = c.execute(
+            "SELECT id, starts_at, duration_min, chair, doctor_id FROM appointments WHERE clinic_id=? AND status IN ('booked','confirmed')",
+            (cid,),
+        ).fetchall()
+        for ex_a in active_rows:
+            s2 = datetime.fromisoformat(ex_a["starts_at"])
+            if s2.tzinfo is None:
+                s2 = s2.replace(tzinfo=TZ)
+            e2 = s2 + timedelta(minutes=ex_a["duration_min"] + buf_min)
+            if s2 < ends and e2 > starts:
+                if str(ex_a["chair"]) == str(b.chair):
+                    raise HTTPException(409, f"Koltuk {b.chair} bu saatte dolu (randevu #{ex_a['id']})")
+                if b.doctor_id is not None and ex_a["doctor_id"] == b.doctor_id:
+                    raise HTTPException(409, f"Seçilen hekim bu saatte başka koltukta dolu (randevu #{ex_a['id']})")
+        cur_a = c.execute(
+            "INSERT INTO appointments (clinic_id,patient_id,starts_at,duration_min,treatment,chair,doctor_id,source,created_at) VALUES (?,?,?,?,?,?,?,'panel',?)",
+            (cid, pid, starts.isoformat(), b.duration_min, b.treatment, b.chair, b.doctor_id, iso_now()),
+        )
+        aid = cur_a.lastrowid
+        c.commit()
     write_audit(u["id"], u["email"], "appointment.create", f"appointment:{aid}", u["ip_h"], {"chair": b.chair}, clinic_id=cid)
     return {"id": aid, "patient_id": pid}
+
+
+class ApptUpdate(BaseModel):
+    starts_at: datetime | None = None
+    duration_min: int | None = Field(default=None, ge=5, le=480)
+    treatment: str | None = Field(default=None, min_length=2, max_length=80)
+    chair: str | None = None
+    doctor_id: int | None = None
+
+
+@app.patch("/app/api/appointments/{aid}")
+def update_appt(aid: int, b: ApptUpdate, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    with _DB_LOCK:
+        c = db()
+        cur_row = c.execute("SELECT * FROM appointments WHERE id=? AND clinic_id=?", (aid, cid)).fetchone()
+        if not cur_row:
+            raise HTTPException(404, "randevu yok")
+        cinfo = c.execute("SELECT chairs, working_hours_json, buffer_min FROM clinics WHERE id=?", (cid,)).fetchone()
+        max_chairs = int((cinfo and cinfo["chairs"]) or 2)
+        chair = str(b.chair if b.chair is not None else cur_row["chair"])
+        if not chair.isdigit() or not (1 <= int(chair) <= max_chairs):
+            raise HTTPException(400, "Geçersiz koltuk numarası")
+        doc_id = b.doctor_id if b.doctor_id is not None else cur_row["doctor_id"]
+        if doc_id is not None and not c.execute("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", (doc_id, cid)).fetchone():
+            raise HTTPException(404, "hekim yok")
+        starts = (b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)) if b.starts_at else datetime.fromisoformat(cur_row["starts_at"])
+        if starts.tzinfo is None:
+            starts = starts.replace(tzinfo=TZ)
+        if starts < now_utc() - timedelta(minutes=5):
+            raise HTTPException(400, "Geçmiş tarihe randevu taşınamaz")
+        dur = b.duration_min if b.duration_min is not None else cur_row["duration_min"]
+        validate_working_hours(starts, dur, (cinfo and cinfo["working_hours_json"]) or DEFAULT_WORKING_HOURS_JSON)
+        treat = b.treatment if b.treatment is not None else cur_row["treatment"]
+        buf_min = max(0, int((cinfo and cinfo["buffer_min"]) or 0))
+        ends = starts + timedelta(minutes=dur + buf_min)
+        others = c.execute(
+            "SELECT id, starts_at, duration_min, chair, doctor_id FROM appointments WHERE clinic_id=? AND id<>? AND status IN ('booked','confirmed')",
+            (cid, aid),
+        ).fetchall()
+        for ex_a in others:
+            s2 = datetime.fromisoformat(ex_a["starts_at"])
+            if s2.tzinfo is None:
+                s2 = s2.replace(tzinfo=TZ)
+            e2 = s2 + timedelta(minutes=ex_a["duration_min"] + buf_min)
+            if s2 < ends and e2 > starts:
+                if str(ex_a["chair"]) == chair:
+                    raise HTTPException(409, f"Koltuk {chair} bu saatte dolu")
+                if doc_id is not None and ex_a["doctor_id"] == doc_id:
+                    raise HTTPException(409, "Seçilen hekim bu saatte dolu")
+        c.execute(
+            "UPDATE appointments SET starts_at=?, duration_min=?, treatment=?, chair=?, doctor_id=? WHERE id=? AND clinic_id=?",
+            (starts.isoformat(), dur, treat, chair, doc_id, aid, cid),
+        )
+        c.commit()
+    write_audit(u["id"], u["email"], "appointment.update", f"appointment:{aid}", u["ip_h"], {"chair": chair}, clinic_id=cid)
+    return {"ok": True, "id": aid}
 
 
 class StatusIn(BaseModel):
@@ -1167,11 +1427,14 @@ def calendar_feed(token: str):
     return PlainTextResponse(cal.feed_ics(rows, c["name"], c["address"]), media_type="text/calendar; charset=utf-8")
 
 
-# ---------------- Hastalar, Bekleme Listesi, Uyarılar, Envanter, Kasa ----------------
+# ---------------- Hastalar, Odontogram, Bekleme Listesi, Uyarılar, Envanter, Kasa ----------------
 @app.get("/app/api/patients")
-def list_patients(search: str = "", u: dict = Depends(ANY)):
+def list_patients(search: str = "", include_archived: bool = False, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    rows = q("SELECT * FROM patients WHERE clinic_id=? ORDER BY id DESC", cid)
+    if include_archived:
+        rows = q("SELECT * FROM patients WHERE clinic_id=? ORDER BY id DESC", cid)
+    else:
+        rows = q("SELECT * FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", cid)
     s = search.strip().lower()
     out = []
     for p in rows:
@@ -1182,7 +1445,7 @@ def list_patients(search: str = "", u: dict = Depends(ANY)):
         rf = q1("SELECT 1 FROM anamnesis WHERE patient_id=? AND red_flags_json <> '[]'", p["id"])
         la = q1("SELECT max(starts_at) AS d FROM appointments WHERE patient_id=?", p["id"])
         out.append({"id": p["id"], "display_name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
-                    "balance": tl(billed - paid), "red_flag": bool(rf), "last_appt": la["d"] if la else None})
+                    "active": bool(p.get("active", 1)), "balance": tl(billed - paid), "red_flag": bool(rf), "last_appt": la["d"] if la else None})
     return out
 
 
@@ -1200,11 +1463,97 @@ def create_patient(b: PatientIn, u: dict = Depends(ANY)):
     ph = phone_hmac(b.phone)
     ex_p = q1("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", cid, ph)
     if ex_p:
-        return {"id": ex_p["id"]}
+        return {"id": ex_p["id"], "duplicate": True}
     pid = ex("INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,created_at) VALUES (?,?,?,?,?,?,?)",
              cid, ph, enc(norm_phone(b.phone)), b.name, b.lang, "wa", iso_now())
     write_audit(u["id"], u["email"], "patient.create", f"patient:{pid}", u["ip_h"], clinic_id=cid)
-    return {"id": pid}
+    return {"id": pid, "duplicate": False}
+
+
+class PatientUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=80)
+    phone: str | None = Field(default=None, max_length=30)
+    lang: Literal["tr", "en", "de", "ar", "ru", "fr", "nl", "es", "it", "fa", "az", "uk", "bg", "ro", "el", "he"] | None = None
+
+
+@app.patch("/app/api/patients/{pid}")
+def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    p = q1("SELECT * FROM patients WHERE id=? AND clinic_id=?", pid, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    new_name = b.name if b.name is not None else p["display_name"]
+    new_lang = b.lang if b.lang is not None else p["lang"]
+    if b.phone is not None:
+        if len(norm_phone(b.phone)) < 10:
+            raise HTTPException(400, "Geçerli telefon girin")
+        ph = phone_hmac(b.phone)
+        pe = enc(norm_phone(b.phone))
+    else:
+        ph = p["phone_hmac"]
+        pe = p["phone_enc"]
+    ex("UPDATE patients SET display_name=?, lang=?, phone_hmac=?, phone_enc=? WHERE id=? AND clinic_id=?",
+       new_name, new_lang, ph, pe, pid, cid)
+    write_audit(u["id"], u["email"], "patient.update", f"patient:{pid}", u["ip_h"], clinic_id=cid)
+    return {"ok": True, "id": pid}
+
+
+@app.post("/app/api/patients/{pid}/archive")
+def archive_patient(pid: int, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
+        raise HTTPException(404, "hasta yok")
+    ex("UPDATE patients SET active=0 WHERE id=? AND clinic_id=?", pid, cid)
+    write_audit(u["id"], u["email"], "patient.archive", f"patient:{pid}", u["ip_h"], clinic_id=cid)
+    return {"ok": True}
+
+
+@app.post("/app/api/patients/{pid}/unarchive")
+def unarchive_patient(pid: int, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
+        raise HTTPException(404, "hasta yok")
+    ex("UPDATE patients SET active=1 WHERE id=? AND clinic_id=?", pid, cid)
+    write_audit(u["id"], u["email"], "patient.unarchive", f"patient:{pid}", u["ip_h"], clinic_id=cid)
+    return {"ok": True}
+
+
+@app.post("/app/api/patients/{pid}/media")
+async def upload_patient_media(pid: int, request: Request, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
+        raise HTTPException(404, "hasta yok")
+    data = b""
+    ctype = request.headers.get("content-type", "")
+    if "multipart/form-data" in ctype:
+        try:
+            form = await request.form()
+            up = form.get("file")
+            if up and hasattr(up, "read"):
+                data = await up.read()
+        except Exception:
+            raw_body = await request.body()
+            idx = raw_body.find(b"\xff\xd8\xff")
+            if idx != -1:
+                end_idx = raw_body.rfind(b"\xff\xd9")
+                data = raw_body[idx:end_idx + 2] if end_idx != -1 else raw_body[idx:]
+    else:
+        data = await request.body()
+    if not data or len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "Geçersiz dosya boyutu")
+    try:
+        qc = media.assess_image(data)
+    except Exception:
+        raise HTTPException(400, "Geçersiz görsel formatı")
+    img_dir = ROOT / "encrypted_media"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    enc_path = img_dir / f"p{pid}_{secrets.token_hex(6)}.jpg.enc"
+    enc_path.write_bytes(_FERNET.encrypt(data))
+    if qc["verdict"] == "ok":
+        ex("INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'gorsel_alindi',?,?)",
+           cid, pid, f"Hasta #{pid} değerlendirmeye uygun görsel yükledi ({qc['w']}x{qc['h']}).", iso_now())
+    write_audit(u["id"], u["email"], "patient.media_upload", f"patient:{pid}", u["ip_h"], {"verdict": qc["verdict"]}, clinic_id=cid)
+    return {**qc, "encrypted_file": enc_path.name}
 
 
 @app.get("/app/api/patients/{pid}")
@@ -1226,6 +1575,7 @@ def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
         a["red_flags"] = json.loads(a.pop("red_flags_json") or "[]")
     return {
         "id": p["id"], "name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
+        "active": bool(p.get("active", 1)),
         "phone": phone if reveal else mask_phone(phone), "balance": tl(billed - paid),
         "appointments": q("SELECT id, starts_at, treatment, status, chair FROM appointments WHERE patient_id=? ORDER BY starts_at DESC", pid),
         "charges": charges, "payments": pays, "anamnesis": anam,
@@ -1234,11 +1584,135 @@ def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
     }
 
 
+class OdontogramIn(BaseModel):
+    tooth_fdi: int
+    surface: Literal["M", "D", "O", "B", "L", "FULL"] = "FULL"
+    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
+    procedure_code: str = Field("", max_length=40)
+    procedure_name: str = Field(min_length=2, max_length=120)
+    amount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)
+    doctor_id: int | None = None
+    note: str = Field("", max_length=300)
+    auto_charge: bool = False
+    idempotency_key: str | None = Field(default=None, max_length=80)
+
+    @field_validator("tooth_fdi")
+    @classmethod
+    def check_fdi(cls, v: int) -> int:
+        if v not in VALID_FDI_TEETH:
+            raise ValueError("Geçersiz FDI diş numarası (11-48 daimi veya 51-85 süt dişi olmalı)")
+        return v
+
+
+class OdontogramUpdateIn(BaseModel):
+    surface: Literal["M", "D", "O", "B", "L", "FULL"] | None = None
+    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] | None = None
+    procedure_code: str | None = Field(default=None, max_length=40)
+    procedure_name: str | None = Field(default=None, min_length=2, max_length=120)
+    amount: Decimal | None = Field(default=None, ge=0, le=10_000_000)
+    doctor_id: int | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
+@app.get("/app/api/patients/{pid}/odontogram")
+def get_odontogram(pid: int, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    p = q1("SELECT id, display_name FROM patients WHERE id=? AND clinic_id=?", pid, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    rows = q(
+        """SELECT t.*, s.full_name AS doctor_name
+           FROM tooth_records t LEFT JOIN staff_users s ON s.id=t.doctor_id
+           WHERE t.clinic_id=? AND t.patient_id=? ORDER BY t.tooth_fdi, t.id DESC""",
+        cid, pid,
+    )
+    for r in rows:
+        r["amount_try"] = tl(r["amount_kurus"])
+    return {
+        "patient_id": pid,
+        "clinic_id": cid,
+        "records": rows,
+        "summary": {
+            "total_records": len(rows),
+            "treated_count": sum(1 for r in rows if r["status"] in ("treated", "implant", "crown", "root_canal")),
+            "planned_count": sum(1 for r in rows if r["status"] in ("planned", "caries", "extraction")),
+        },
+    }
+
+
+@app.post("/app/api/patients/{pid}/odontogram")
+def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    amt_k = kurus(b.amount)
+    charge_id = None
+    with _DB_LOCK:
+        c = db()
+        _require_active_patient_row(c, pid, cid)
+        if b.doctor_id is not None and not c.execute("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", (b.doctor_id, cid)).fetchone():
+            raise HTTPException(404, "hekim yok")
+        t_now = iso_now()
+        cur_t = c.execute(
+            """INSERT INTO tooth_records
+               (clinic_id,patient_id,tooth_fdi,surface,status,procedure_code,procedure_name,amount_kurus,doctor_id,note,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (cid, pid, b.tooth_fdi, b.surface, b.status, b.procedure_code, b.procedure_name, amt_k, b.doctor_id or u["id"], b.note, t_now),
+        )
+        rid = cur_t.lastrowid
+        if b.auto_charge and amt_k > 0:
+            if b.idempotency_key:
+                dup = c.execute("SELECT id FROM charges WHERE clinic_id=? AND idempotency_key=?", (cid, b.idempotency_key)).fetchone()
+                if dup:
+                    raise HTTPException(409, "Bu odontogram hizmet borçlandırması zaten işlendi")
+            desc = f"Diş #{b.tooth_fdi} ({b.surface}) - {b.procedure_name}"[:120]
+            cur_ch = c.execute(
+                "INSERT INTO charges (clinic_id,patient_id,description,amount_kurus,doctor_id,created_by,created_at,idempotency_key) VALUES (?,?,?,?,?,?,?,?)",
+                (cid, pid, desc, amt_k, b.doctor_id or u["id"], u["id"], t_now, b.idempotency_key),
+            )
+            charge_id = cur_ch.lastrowid
+        c.commit()
+    write_audit(u["id"], u["email"], "odontogram.create", f"patient:{pid}:tooth:{b.tooth_fdi}", u["ip_h"],
+                {"surface": b.surface, "status": b.status, "charge_id": charge_id}, clinic_id=cid)
+    return {"id": rid, "tooth_fdi": b.tooth_fdi, "surface": b.surface, "status": b.status, "charge_id": charge_id}
+
+
+@app.patch("/app/api/patients/{pid}/odontogram/{rid}")
+def update_odontogram_record(pid: int, rid: int, b: OdontogramUpdateIn, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    rec = q1("SELECT * FROM tooth_records WHERE id=? AND patient_id=? AND clinic_id=?", rid, pid, cid)
+    if not rec:
+        raise HTTPException(404, "diş kaydı yok")
+    new_surface = b.surface if b.surface is not None else rec["surface"]
+    new_status = b.status if b.status is not None else rec["status"]
+    new_code = b.procedure_code if b.procedure_code is not None else rec["procedure_code"]
+    new_name = b.procedure_name if b.procedure_name is not None else rec["procedure_name"]
+    new_amt = kurus(b.amount) if b.amount is not None else rec["amount_kurus"]
+    new_doc = b.doctor_id if b.doctor_id is not None else rec["doctor_id"]
+    new_note = b.note if b.note is not None else rec["note"]
+    ex(
+        """UPDATE tooth_records SET surface=?, status=?, procedure_code=?, procedure_name=?, amount_kurus=?, doctor_id=?, note=?
+           WHERE id=? AND patient_id=? AND clinic_id=?""",
+        new_surface, new_status, new_code, new_name, new_amt, new_doc, new_note, rid, pid, cid,
+    )
+    write_audit(u["id"], u["email"], "odontogram.update", f"tooth_record:{rid}", u["ip_h"], {"status": new_status}, clinic_id=cid)
+    return {"ok": True, "id": rid}
+
+
+@app.delete("/app/api/patients/{pid}/odontogram/{rid}")
+def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    rec = q1("SELECT id FROM tooth_records WHERE id=? AND patient_id=? AND clinic_id=?", rid, pid, cid)
+    if not rec:
+        raise HTTPException(404, "diş kaydı yok")
+    ex("DELETE FROM tooth_records WHERE id=? AND patient_id=? AND clinic_id=?", rid, pid, cid)
+    write_audit(u["id"], u["email"], "odontogram.delete", f"tooth_record:{rid}", u["ip_h"], clinic_id=cid)
+    return {"ok": True}
+
+
 @app.post("/app/api/patients/{pid}/anamnesis")
 def send_anam(pid: int, request: Request, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
-        raise HTTPException(404, "hasta yok")
+    with _DB_LOCK:
+        _require_active_patient_row(db(), pid, cid)
     tok = secrets.token_urlsafe(24)
     ex("INSERT INTO anamnesis_tokens (token,patient_id,expires_at) VALUES (?,?,?)",
        tok, pid, (now_utc() + timedelta(hours=48)).isoformat())
@@ -1333,11 +1807,57 @@ async def anamnez_submit(token: str, request: Request):
     flags = [k for k, _, red in ANAMNEZ_SORULAR if red and ans.get(k) == "evet"]
     imza = str(form.get("imza", "Hasta")).strip()[:80] or "Hasta"
     sig = hashlib.sha256(f"{t['patient_id']}|{imza}".encode()).hexdigest()
+    now_s = iso_now()
     ex("INSERT INTO anamnesis (patient_id,answers_enc,red_flags_json,signer_name,signature_sha256,signed_at) VALUES (?,?,?,?,?,?)",
-       t["patient_id"], enc(json.dumps(ans)), json.dumps(flags), imza, sig, iso_now())
-    ex("UPDATE anamnesis_tokens SET used_at=? WHERE token=?", iso_now(), token)
+       t["patient_id"], enc(json.dumps(ans)), json.dumps(flags), imza, sig, now_s)
+    ex("UPDATE anamnesis_tokens SET used_at=? WHERE token=?", now_s, token)
+    kvkk_hash = hashlib.sha256(f"kvkk-2026-11|{clinic}".encode()).hexdigest()
+    for c_kind in ("kvkk_aydinlatma", "saglik_verisi_acik_riza"):
+        ex("INSERT INTO consents (patient_id,kind,text_version,text_sha256,channel,granted_at) VALUES (?,?,?,?,?,?)",
+           t["patient_id"], c_kind, "2026-11", kvkk_hash, "web_form", now_s)
+    if flags:
+        p_row = q1("SELECT clinic_id, display_name FROM patients WHERE id=?", t["patient_id"])
+        cid_p = int(p_row["clinic_id"]) if p_row and p_row.get("clinic_id") else 1
+        pname = (p_row and p_row.get("display_name")) or f"Hasta #{t['patient_id']}"
+        ex("INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'anamnez_kirmizi',?,?)",
+           cid_p, t["patient_id"], f"KIRMIZI BAYRAK: {pname} (#{t['patient_id']}) anamnezinde {', '.join(flags)} bildirdi.", now_s)
     return _patient_page("Teşekkürler", clinic, "<h1>Formunuz hekiminize ulaştı</h1><p class=lead>Cevaplarınız şifrelenerek kaydedildi. "
                          "Randevunuzda görüşmek üzere. Bu sayfayı kapatabilirsiniz.</p>")
+
+
+@app.get("/form/geri-bildirim", response_class=HTMLResponse)
+def feedback_form():
+    import html as _html
+    clinic = os.environ.get("CLINIC_NAME", "Özel DentaCore Merkez Polikliniği")
+    qs = sign_path("/form/geri-bildirim", 3600).split("?", 1)[1]
+    tok = _html.escape(qs, quote=True)
+    inner = (
+        "<h1>Başhekimliğe Doğrudan İlet</h1>"
+        "<p class=lead>Görüşünüz doğrudan başhekime ulaşır.</p>"
+        "<form method=post>"
+        f"<input type=hidden name=csrf_token value=\"{tok}\">"
+        "<label class=f for=mesaj>Mesajınız</label>"
+        "<input type=text id=mesaj name=mesaj required maxlength=1500>"
+        "<label class=f for=iletisim>Telefon (isteğe bağlı)</label>"
+        "<input type=text id=iletisim name=iletisim maxlength=40>"
+        "<button type=submit>Gönder</button></form>"
+    )
+    return _patient_page("Başhekimliğe İlet", clinic, inner)
+
+
+@app.post("/form/geri-bildirim", response_class=HTMLResponse)
+async def feedback_submit(request: Request):
+    clinic = os.environ.get("CLINIC_NAME", "Özel DentaCore Merkez Polikliniği")
+    f = dict(await request.form())
+    from urllib.parse import parse_qs
+    tok_p = parse_qs(str(f.get("csrf_token", "")))
+    if not verify_sig("/form/geri-bildirim", (tok_p.get("exp") or [""])[0], (tok_p.get("sig") or [""])[0]):
+        raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş")
+    msg = str(f.get("mesaj", "")).strip()[:1500]
+    if msg:
+        ex("INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (1,NULL,'geri_bildirim',?,?)",
+           f"Başhekimliğe geri bildirim: {msg[:500]}", iso_now())
+    return _patient_page("Teşekkürler", clinic, "<h1>Teşekkür ederiz, mesajınız başhekimliğe iletildi.</h1>")
 
 
 @app.get("/view/anamnez/{aid}", response_class=HTMLResponse)
@@ -1376,8 +1896,8 @@ class WaitIn(BaseModel):
 @app.post("/app/api/waitlist")
 def add_wait(b: WaitIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
-        raise HTTPException(404, "hasta yok")
+    with _DB_LOCK:
+        _require_active_patient_row(db(), b.patient_id, cid)
     wid = ex("INSERT INTO waitlist (patient_id,treatment,earliest,active,created_at) VALUES (?,?,?,1,?)", b.patient_id, b.treatment, iso_now(), iso_now())
     write_audit(u["id"], u["email"], "waitlist.add", f"patient:{b.patient_id}", u["ip_h"], clinic_id=cid)
     return {"id": wid}
@@ -1392,6 +1912,235 @@ def rm_wait(wid: int, u: dict = Depends(ANY)):
     ex("UPDATE waitlist SET active=0 WHERE id=?", wid)
     write_audit(u["id"], u["email"], "waitlist.remove", f"waitlist:{wid}", u["ip_h"], clinic_id=cid)
     return {"ok": True}
+
+
+class OfferRespondIn(BaseModel):
+    action: Literal["accept", "reject", "expire"] = "accept"
+
+
+@app.post("/app/api/waitlist/offers/{oid}/respond")
+def respond_slot_offer(oid: int, b: OfferRespondIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    with _DB_LOCK:
+        c = db()
+        off = c.execute(
+            """SELECT o.*, w.patient_id, p.clinic_id FROM slot_offers o
+               JOIN waitlist w ON w.id=o.waitlist_id
+               JOIN patients p ON p.id=w.patient_id
+               WHERE o.id=? AND p.clinic_id=?""",
+            (oid, cid),
+        ).fetchone()
+        if not off:
+            raise HTTPException(404, "teklif yok")
+        if b.action == "reject":
+            c.execute("UPDATE slot_offers SET status='lost' WHERE id=?", (oid,))
+            c.commit()
+            return {"ok": True, "status": "rejected"}
+        if b.action == "expire":
+            c.execute("UPDATE slot_offers SET status='expired' WHERE id=?", (oid,))
+            c.commit()
+            return {"ok": True, "status": "expired"}
+        # Atomik slot kapma: yalnızca randevu hâlâ 'cancelled' ise kazanır!
+        cur_upd = c.execute(
+            "UPDATE appointments SET status='booked', patient_id=? WHERE id=? AND clinic_id=? AND status='cancelled'",
+            (off["patient_id"], off["appointment_id"], cid),
+        )
+        if cur_upd.rowcount == 0:
+            c.execute("UPDATE slot_offers SET status='lost' WHERE id=?", (oid,))
+            c.commit()
+            raise HTTPException(409, "Bu koltuk az önce başka bir hasta tarafından alındı")
+        c.execute("UPDATE slot_offers SET status='won' WHERE id=?", (oid,))
+        c.execute("UPDATE slot_offers SET status='lost' WHERE appointment_id=? AND id<>? AND status='sent'", (off["appointment_id"], oid))
+        c.execute("UPDATE waitlist SET active=0 WHERE id=?", (off["waitlist_id"],))
+        c.execute(
+            "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'koltuk_dolduruldu',?,?)",
+            (cid, off["patient_id"], f"İptal edilen randevu #{off['appointment_id']} bekleme listesinden dolduruldu.", iso_now()),
+        )
+        c.commit()
+    write_audit(u["id"], u["email"], "waitlist.claim_won", f"appointment:{off['appointment_id']}", u["ip_h"], clinic_id=cid)
+    return {"ok": True, "status": "won", "appointment_id": off["appointment_id"]}
+
+
+class PostopSchedIn(BaseModel):
+    patient_id: int
+    procedure: str = Field(min_length=2, max_length=120)
+
+
+@app.post("/app/api/postop/schedule")
+def schedule_postop_local(b: PostopSchedIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
+        raise HTTPException(404, "hasta yok")
+    t_now = now_utc()
+    ids = []
+    for stage, hours in (("2s", 2), ("24s", 24), ("72s", 72)):
+        due = (t_now + timedelta(hours=hours)).isoformat()
+        cid_row = ex("INSERT INTO postop_checks (patient_id,procedure,due_at,stage,sent_at,alarm) VALUES (?,?,?,?,?,0)",
+                     b.patient_id, b.procedure, due, stage, t_now.isoformat())
+        ids.append(cid_row)
+    write_audit(u["id"], u["email"], "postop.schedule", f"patient:{b.patient_id}", u["ip_h"], clinic_id=cid)
+    return {"ok": True, "stages": ["2s", "24s", "72s"], "ids": ids}
+
+
+class PostopReplyIn(BaseModel):
+    patient_id: int
+    stage: Literal["2s", "24s", "72s"] = "2s"
+    pain_score: int = Field(ge=1, le=10)
+    emergency: bool = False
+
+
+@app.post("/app/api/postop/reply")
+def reply_postop_local(b: PostopReplyIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    p = q1("SELECT id, display_name FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    chk = q1("SELECT * FROM postop_checks WHERE patient_id=? AND stage=? ORDER BY id DESC LIMIT 1", b.patient_id, b.stage)
+    alarm = bool(b.emergency or b.pain_score >= 8)
+    if chk:
+        ex("UPDATE postop_checks SET pain_score=?, answered_at=?, alarm=? WHERE id=?",
+           b.pain_score, iso_now(), 1 if alarm else 0, chk["id"])
+    if alarm:
+        ex("INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'postop_alarm',?,?)",
+           cid, b.patient_id, f"İŞLEM SONRASI ALARM: {p['display_name']} (#{b.patient_id}), {b.stage} kontrolü, ağrı {b.pain_score}/10", iso_now())
+    write_audit(u["id"], u["email"], "postop.reply", f"patient:{b.patient_id}", u["ip_h"], {"score": b.pain_score, "alarm": alarm}, clinic_id=cid)
+    return {"ok": True, "alarm": alarm, "pain_score": b.pain_score}
+
+
+async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mtype: str, text: str, channel: str = "wa", clinic_id: int = 1):
+    from app.router import detect_lang
+    if channel == "wa" and text:
+        st_row = q1("SELECT id, clinic_id, role, full_name FROM staff_users WHERE phone_hmac=? AND active=1", phone_hmac(sender))
+        if st_row:
+            write_audit(st_row["id"], st_row["full_name"], "staff_bot.command", f"wa:{sender[-4:]}", clinic_id=int(st_row["clinic_id"] or 1))
+            return
+
+    lang = detect_lang(text) if text else "tr"
+    raw_id = f"ig:{sender}" if channel == "ig" else norm_phone(sender)
+    ph = hmac.new(_HMAC_KEY, raw_id.encode(), hashlib.sha256).hexdigest() if channel == "ig" else phone_hmac(sender)
+    t_now = iso_now()
+
+    with _DB_LOCK:
+        c = db()
+        row = c.execute("SELECT id, display_name FROM patients WHERE clinic_id=? AND phone_hmac=?", (clinic_id, ph)).fetchone()
+        if row:
+            pid = row["id"]
+            if profile_name and not row["display_name"]:
+                c.execute("UPDATE patients SET display_name=?, lang=? WHERE id=?", (profile_name, lang, pid))
+        else:
+            cur_p = c.execute(
+                "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
+                (clinic_id, ph, enc(raw_id), profile_name or f"Misafir ({sender[-4:]})", lang, channel, t_now),
+            )
+            pid = cur_p.lastrowid
+        c.execute(
+            "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,?,'in',NULL,?,0,0,?)",
+            (clinic_id, pid, f"{channel}:{mtype}", t_now),
+        )
+        c.commit()
+
+    if not text:
+        return
+
+    c_row = q1("SELECT name, address, phone FROM clinics WHERE id=?", clinic_id)
+    all_branches = q("SELECT id, name, city, address, phone FROM clinics WHERE active=1")
+    facts: dict = {
+        "clinic": (c_row and c_row["name"]) or os.environ.get("CLINIC_NAME", "Özel DentaCore Merkez Polikliniği"),
+        "branches": all_branches,
+    }
+    if c_row and c_row.get("address"):
+        facts["adres"] = c_row["address"]
+    if c_row and c_row.get("phone"):
+        facts["telefon"] = c_row["phone"]
+
+    try:
+        res = await asyncio.wait_for(_ROUTER.route(text, lang=lang, clinic_facts=facts, allow_llm=True, patient_id=pid), timeout=10.0)
+    except Exception:
+        res = await _ROUTER.route(text, lang=lang, clinic_facts=facts, allow_llm=False, patient_id=pid)
+
+    ex(
+        "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,?,'out',?,?,?,?,?)",
+        clinic_id, pid, res.layer, res.intent, res.tokens_in, res.tokens_out, iso_now(),
+    )
+    if res.alert == "acil":
+        ex(
+            "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'acil',?,?)",
+            clinic_id, pid, f"ACİL MESAJ: {profile_name or 'Hasta'} (#{pid}) acil belirti bildirdi: {text[:160]}", iso_now(),
+        )
+    elif res.alert == "sikayet":
+        ex(
+            "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'sikayet',?,?)",
+            clinic_id, pid, f"ŞİKAYET: {profile_name or 'Hasta'} (#{pid}) memnuniyetsizlik bildirdi: {text[:160]}", iso_now(),
+        )
+    write_audit(None, f"{channel}_webhook", f"webhook.{channel}", f"patient:{pid}", meta={"intent": res.intent, "layer": res.layer}, clinic_id=clinic_id)
+
+
+@app.post("/webhook/whatsapp")
+async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = Header(default=None)):
+    raw = await request.body()
+    secret = os.environ.get("WA_APP_SECRET", "")
+    if not secret or not x_hub_signature_256 or not x_hub_signature_256.startswith("sha256="):
+        raise HTTPException(401, "imza geçersiz")
+    good = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(good, x_hub_signature_256[7:]):
+        raise HTTPException(401, "imza geçersiz")
+    body = json.loads(raw)
+    processed = 0
+    dedup = 0
+    for entry in body.get("entry", []):
+        for ch in entry.get("changes", []):
+            v = ch.get("value", {})
+            names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in v.get("contacts", []) if isinstance(c, dict)}
+            for m in v.get("messages", []):
+                mid = str(m.get("id") or "")
+                if mid in _SEEN_WEBHOOK_IDS:
+                    dedup += 1
+                    continue
+                if mid:
+                    _SEEN_WEBHOOK_IDS.add(mid)
+                sender = str(m.get("from") or "")
+                mtype = str(m.get("type") or "text")
+                text = ""
+                if mtype == "text":
+                    text = str((m.get("text") or {}).get("body") or "")
+                elif mtype == "button":
+                    text = str((m.get("button") or {}).get("text") or "")
+                elif mtype == "interactive":
+                    it = m.get("interactive") or {}
+                    rep = it.get("button_reply") or it.get("list_reply") or {}
+                    text = str(rep.get("title") or "")
+                if sender:
+                    await _process_inbound_webhook_msg(sender, names.get(sender), mtype, text, channel="wa", clinic_id=1)
+                processed += 1
+    return {"ok": True, "processed": processed, "dedup": dedup}
+
+
+@app.post("/webhook/instagram")
+async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = Header(default=None)):
+    raw = await request.body()
+    secret = os.environ.get("IG_APP_SECRET") or os.environ.get("WA_APP_SECRET", "")
+    if not secret or not x_hub_signature_256 or not x_hub_signature_256.startswith("sha256="):
+        raise HTTPException(401, "imza geçersiz")
+    good = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(good, x_hub_signature_256[7:]):
+        raise HTTPException(401, "imza geçersiz")
+    body = json.loads(raw)
+    processed = 0
+    for entry in body.get("entry", []):
+        for ev in entry.get("messaging", []):
+            msg = ev.get("message") or {}
+            if msg.get("is_echo") or not msg.get("text"):
+                continue
+            mid = str(msg.get("mid") or "")
+            if mid and mid in _SEEN_WEBHOOK_IDS:
+                continue
+            if mid:
+                _SEEN_WEBHOOK_IDS.add(mid)
+            sender = str((ev.get("sender") or {}).get("id") or "")
+            if sender:
+                await _process_inbound_webhook_msg(sender, None, "text", str(msg["text"]), channel="ig", clinic_id=1)
+                processed += 1
+    return {"ok": True, "processed": processed}
 
 
 @app.get("/app/api/alerts")
@@ -1452,19 +2201,78 @@ class MoveIn(BaseModel):
 @app.post("/app/api/inventory/{iid}/move")
 def move_item(iid: int, b: MoveIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    it = q1("SELECT * FROM inventory_items WHERE id=? AND clinic_id=? AND active=1", iid, cid)
-    if not it:
-        raise HTTPException(404, "ürün yok")
-    if it["qty"] + float(b.delta) < 0:
-        raise HTTPException(409, "Stok yetersiz")
-    new_qty = it["qty"] + float(b.delta)
-    ex("UPDATE inventory_items SET qty=? WHERE id=? AND clinic_id=?", new_qty, iid, cid)
-    ex("INSERT INTO stock_moves (item_id,delta,qty_after,reason,actor_id,created_at) VALUES (?,?,?,?,?,?)", iid, float(b.delta), new_qty, b.reason, u["id"], iso_now())
-    if new_qty <= it["min_qty"] and it["min_qty"] > 0:
-        ex("INSERT INTO alerts (clinic_id,kind,detail,created_at) VALUES (?,'stok_kritik',?,?)",
-           cid, f"Stok kritik: {it['name']} ({new_qty} {it['unit']})", iso_now())
+    delta_f = float(b.delta)
+    with _DB_LOCK:
+        c = db()
+        it = c.execute("SELECT * FROM inventory_items WHERE id=? AND clinic_id=? AND active=1", (iid, cid)).fetchone()
+        if not it:
+            raise HTTPException(404, "ürün yok")
+        if float(it["qty"]) + delta_f < 0:
+            raise HTTPException(409, "Stok yetersiz")
+        new_qty = round(float(it["qty"]) + delta_f, 4)
+        cur_u = c.execute(
+            "UPDATE inventory_items SET qty=? WHERE id=? AND clinic_id=? AND active=1 AND qty + ? >= 0",
+            (new_qty, iid, cid, delta_f),
+        )
+        if cur_u.rowcount == 0:
+            raise HTTPException(409, "Stok yetersiz")
+        c.execute(
+            "INSERT INTO stock_moves (item_id,delta,qty_after,reason,actor_id,created_at) VALUES (?,?,?,?,?,?)",
+            (iid, delta_f, new_qty, b.reason, u["id"], iso_now()),
+        )
+        if new_qty <= float(it["min_qty"]) and float(it["min_qty"]) > 0:
+            c.execute(
+                "INSERT INTO alerts (clinic_id,kind,detail,created_at) VALUES (?,'stok_kritik',?,?)",
+                (cid, f"Stok kritik: {it['name']} ({new_qty} {it['unit']})", iso_now()),
+            )
+        c.commit()
     write_audit(u["id"], u["email"], "inventory.move", f"item:{iid}", u["ip_h"], {"delta": str(b.delta)}, clinic_id=cid)
     return {"ok": True, "qty": new_qty}
+
+
+class StockTransferIn(BaseModel):
+    target_clinic_id: int
+    qty: Decimal = Field(gt=0, le=1_000_000)
+    reason: str = Field("Şubeler arası transfer", min_length=2, max_length=120)
+
+
+@app.post("/app/api/inventory/{iid}/transfer")
+def transfer_item(iid: int, b: StockTransferIn, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    if b.target_clinic_id == cid:
+        raise HTTPException(400, "Hedef şube kaynak şubeyle aynı olamaz")
+    qty_f = float(b.qty)
+    t_now = iso_now()
+    with _DB_LOCK:
+        c = db()
+        if not c.execute("SELECT id FROM clinics WHERE id=? AND active=1", (b.target_clinic_id,)).fetchone():
+            raise HTTPException(404, "hedef şube yok")
+        src = c.execute("SELECT * FROM inventory_items WHERE id=? AND clinic_id=? AND active=1", (iid, cid)).fetchone()
+        if not src:
+            raise HTTPException(404, "ürün yok")
+        if float(src["qty"]) < qty_f:
+            raise HTTPException(409, "Transfer için stok yetersiz")
+        new_src_qty = round(float(src["qty"]) - qty_f, 4)
+        c.execute("UPDATE inventory_items SET qty=? WHERE id=? AND clinic_id=?", (new_src_qty, iid, cid))
+        c.execute("INSERT INTO stock_moves (item_id,delta,qty_after,reason,actor_id,created_at) VALUES (?,?,?,?,?,?)",
+                  (iid, -qty_f, new_src_qty, f"Transfer -> Şube #{b.target_clinic_id}: {b.reason}", u["id"], t_now))
+        dst = c.execute("SELECT * FROM inventory_items WHERE clinic_id=? AND name=? AND active=1", (b.target_clinic_id, src["name"])).fetchone()
+        if dst:
+            new_dst_qty = round(float(dst["qty"]) + qty_f, 4)
+            c.execute("UPDATE inventory_items SET qty=? WHERE id=?", (new_dst_qty, dst["id"]))
+            dst_id = dst["id"]
+        else:
+            cur_d = c.execute(
+                "INSERT INTO inventory_items (clinic_id,name,sku,unit,qty,min_qty,unit_cost_kurus,active,created_at) VALUES (?,?,?,?,?,?,?,1,?)",
+                (b.target_clinic_id, src["name"], src["sku"], src["unit"], qty_f, src["min_qty"], src["unit_cost_kurus"], t_now),
+            )
+            dst_id = cur_d.lastrowid
+            new_dst_qty = qty_f
+        c.execute("INSERT INTO stock_moves (item_id,delta,qty_after,reason,actor_id,created_at) VALUES (?,?,?,?,?,?)",
+                  (dst_id, qty_f, new_dst_qty, f"Transfer <- Şube #{cid}: {b.reason}", u["id"], t_now))
+        c.commit()
+    write_audit(u["id"], u["email"], "inventory.transfer", f"item:{iid}->clinic:{b.target_clinic_id}", u["ip_h"], {"qty": qty_f}, clinic_id=cid)
+    return {"ok": True, "src_qty": new_src_qty, "dst_item_id": dst_id, "dst_qty": new_dst_qty}
 
 
 @app.get("/app/api/inventory/{iid}/moves")
@@ -1478,36 +2286,92 @@ class ChargeIn(BaseModel):
     patient_id: int
     description: str = Field(min_length=2, max_length=120)
     amount: Decimal = Field(gt=0, le=10_000_000)
+    discount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)
     doctor_id: int | None = None
+    idempotency_key: str | None = Field(default=None, max_length=80)
+    allow_duplicate: bool = False
 
 
 @app.post("/app/api/charges")
-def add_charge(b: ChargeIn, u: dict = Depends(ANY)):
+async def add_charge(b: ChargeIn, u: dict = Depends(ANY)):
+    if not await _LIMITER.hit(f"chg:{u['id']}", 60, 60):
+        raise HTTPException(429, "Çok fazla hizmet ekleme isteği")
     cid = u["clinic_id"]
-    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
-        raise HTTPException(404, "hasta yok")
-    if b.doctor_id is not None and not q1("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", b.doctor_id, cid):
-        raise HTTPException(404, "hekim yok")
-    cid_id = ex("INSERT INTO charges (clinic_id,patient_id,description,amount_kurus,doctor_id,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
-                cid, b.patient_id, b.description, kurus(b.amount), b.doctor_id, u["id"], iso_now())
-    write_audit(u["id"], u["email"], "kasa.charge", f"charge:{cid_id}", u["ip_h"], {"kurus": kurus(b.amount)}, clinic_id=cid)
-    return {"id": cid_id}
+    net_amount = b.amount - b.discount
+    with _DB_LOCK:
+        c = db()
+        _require_active_patient_row(c, b.patient_id, cid)
+        if b.doctor_id is not None and not c.execute("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", (b.doctor_id, cid)).fetchone():
+            raise HTTPException(404, "hekim yok")
+        if net_amount <= 0:
+            raise HTTPException(400, "İndirim sonrası tutar sıfırdan büyük olmalıdır")
+        net_k = kurus(net_amount)
+        desc = (f"{b.description} (İndirim: {b.discount} TL)" if b.discount > 0 else b.description)[:120]
+        if b.idempotency_key:
+            dup = c.execute("SELECT id FROM charges WHERE clinic_id=? AND idempotency_key=?", (cid, b.idempotency_key)).fetchone()
+            if dup:
+                raise HTTPException(409, "Bu hizmet borçlandırması zaten işlendi (mükerrer işlem engellendi)")
+        elif not b.allow_duplicate:
+            cutoff_iso = (now_utc() - timedelta(seconds=15)).isoformat()
+            recent_dup = c.execute(
+                """SELECT id FROM charges WHERE clinic_id=? AND patient_id=? AND description=? AND amount_kurus=?
+                   AND COALESCE(doctor_id,0)=COALESCE(?,0) AND voided_at IS NULL AND created_at >= ? LIMIT 1""",
+                (cid, b.patient_id, desc, net_k, b.doctor_id, cutoff_iso),
+            ).fetchone()
+            if recent_dup:
+                raise HTTPException(409, "Aynı hizmet borcu az önce eklendi (çift tıklama / mükerrer borç engellendi)")
+        try:
+            cur_ch = c.execute(
+                "INSERT INTO charges (clinic_id,patient_id,description,amount_kurus,doctor_id,created_by,created_at,idempotency_key) VALUES (?,?,?,?,?,?,?,?)",
+                (cid, b.patient_id, desc, net_k, b.doctor_id, u["id"], iso_now(), b.idempotency_key),
+            )
+            cid_id = cur_ch.lastrowid
+            c.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Mükerrer hizmet borçlandırması engellendi")
+    write_audit(u["id"], u["email"], "kasa.charge", f"charge:{cid_id}", u["ip_h"], {"kurus": net_k}, clinic_id=cid)
+    return {"id": cid_id, "net_kurus": net_k}
 
 
 class PaymentIn(BaseModel):
     patient_id: int
     amount: Decimal = Field(gt=0, le=10_000_000)
     method: Literal["nakit", "kart", "havale", "diger"]
+    idempotency_key: str | None = Field(default=None, max_length=80)
+    allow_advance: bool = False
 
 
 @app.post("/app/api/payments")
-def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
+async def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
+    if not await _LIMITER.hit(f"pay:{u['id']}", 60, 60):
+        raise HTTPException(429, "Çok fazla tahsilat isteği")
     cid = u["clinic_id"]
-    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
-        raise HTTPException(404, "hasta yok")
-    pid_id = ex("INSERT INTO payments (clinic_id,patient_id,amount_kurus,method,created_by,created_at) VALUES (?,?,?,?,?,?)",
-                cid, b.patient_id, kurus(b.amount), b.method, u["id"], iso_now())
-    write_audit(u["id"], u["email"], "kasa.payment", f"payment:{pid_id}", u["ip_h"], {"kurus": kurus(b.amount)}, clinic_id=cid)
+    amt_k = kurus(b.amount)
+    with _DB_LOCK:
+        c = db()
+        _require_active_patient_row(c, b.patient_id, cid)
+        if b.idempotency_key:
+            dup = c.execute("SELECT id FROM payments WHERE clinic_id=? AND idempotency_key=?", (cid, b.idempotency_key)).fetchone()
+            if dup:
+                raise HTTPException(409, "Bu ödeme zaten işlendi (mükerrer işlem engellendi)")
+        billed_k = (c.execute("SELECT coalesce(sum(amount_kurus),0) AS s FROM charges WHERE clinic_id=? AND patient_id=? AND voided_at IS NULL", (cid, b.patient_id)).fetchone() or {"s": 0})["s"]
+        paid_k = (c.execute("SELECT coalesce(sum(amount_kurus),0) AS s FROM payments WHERE clinic_id=? AND patient_id=? AND voided_at IS NULL", (cid, b.patient_id)).fetchone() or {"s": 0})["s"]
+        balance_k = int(billed_k or 0) - int(paid_k or 0)
+        if amt_k > max(0, balance_k) and not b.allow_advance:
+            raise HTTPException(
+                422,
+                f"Hastanın açık bakiyesi {tl(max(0, balance_k)):.2f} TL; bakiye üstü tahsilat için avans onayı (allow_advance=true) gereklidir",
+            )
+        try:
+            cur_p = c.execute(
+                "INSERT INTO payments (clinic_id,patient_id,amount_kurus,method,created_by,created_at,idempotency_key) VALUES (?,?,?,?,?,?,?)",
+                (cid, b.patient_id, amt_k, b.method, u["id"], iso_now(), b.idempotency_key),
+            )
+            pid_id = cur_p.lastrowid
+            c.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Mükerrer ödeme engellendi")
+    write_audit(u["id"], u["email"], "kasa.payment", f"payment:{pid_id}", u["ip_h"], {"kurus": amt_k}, clinic_id=cid)
     return {"id": pid_id}
 
 
@@ -1526,7 +2390,7 @@ def void_entry(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dic
 
 
 @app.get("/app/api/kasa")
-def kasa(start: datetime, end: datetime, u: dict = Depends(ANY)):
+def kasa(start: datetime, end: datetime, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
     s_dt = start if start.tzinfo else start.replace(tzinfo=TZ)
     e_dt = end if end.tzinfo else end.replace(tzinfo=TZ)
@@ -1588,7 +2452,7 @@ def add_staff(b: StaffIn, u: dict = Depends(OWNER)):
         raise HTTPException(400, "Geçerli e-posta girin")
     try:
         sid = ex("INSERT INTO staff_users (clinic_id,email,full_name,role,pw_hash,phone_hmac,share_pct,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                 u["clinic_id"], email, b.full_name, b.role, sec.hash_password(b.password),
+                 u["clinic_id"], email, b.full_name, b.role, _hash_pw(b.password),
                  phone_hmac(b.phone) if b.phone else None, float(b.share_pct), iso_now())
     except sqlite3.IntegrityError:
         raise HTTPException(409, "Bu e-posta veya telefon zaten kayıtlı")
@@ -1660,7 +2524,7 @@ def create_clinic(b: ClinicCreateIn, request: Request, u: dict = Depends(OWNER))
     cid = ex("INSERT INTO clinics (name,slug,city,address,phone,chairs,created_at) VALUES (?,?,?,?,?,?,?)",
              b.clinic_name, slug, b.city, b.address, b.phone, b.chairs, iso_now())
     uid = ex("INSERT INTO staff_users (clinic_id,email,full_name,role,pw_hash,share_pct,created_at) VALUES (?,?,?,?,?,50,?)",
-             cid, email, b.owner_name, "owner", sec.hash_password(b.owner_password), iso_now())
+             cid, email, b.owner_name, "owner", _hash_pw(b.owner_password), iso_now())
     ex("INSERT INTO message_templates (clinic_id,name,channel,lang,category,body,status,created_at) VALUES (?,?,?,?,?,?,?,?)",
        cid, "randevu_hatirlatma", "whatsapp", "tr", "UTILITY", "Sayın {{1}}, yarın {{2}} randevunuzu hatırlatırız.", "APPROVED", iso_now())
     write_audit(u["id"], u["email"], "clinic.create", f"clinic:{cid}", u["ip_h"], {"email": email}, clinic_id=u["clinic_id"])
@@ -1689,7 +2553,7 @@ def switch_clinic(cid: int, u: dict = Depends(OWNER)):
 
 @app.get("/app/api/conversations")
 def list_conversations(u: dict = Depends(ANY)):
-    rows = q("SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? ORDER BY id DESC", u["clinic_id"])
+    rows = q("SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", u["clinic_id"])
     for r in rows:
         logs = q("SELECT layer, intent, direction, created_at FROM message_log WHERE patient_id=? ORDER BY id DESC", r["id"])
         out_logs = [l for l in logs if l["direction"] == "out"]
@@ -1707,8 +2571,8 @@ class ReplyIn(BaseModel):
 @app.post("/app/api/conversations/{pid}/send")
 def send_conv(pid: int, b: ReplyIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
-        raise HTTPException(404, "hasta yok")
+    with _DB_LOCK:
+        _require_active_patient_row(db(), pid, cid)
     ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,?,'out','panel-manuel','personel',0,0,?)",
        cid, pid, iso_now())
     write_audit(u["id"], u["email"], "conversation.send", f"patient:{pid}", u["ip_h"], clinic_id=cid)
@@ -1718,21 +2582,50 @@ def send_conv(pid: int, b: ReplyIn, u: dict = Depends(ANY)):
 class SimIn(BaseModel):
     text: str = Field(min_length=1, max_length=1200)
     lang: str | None = Field(default=None, max_length=10)
+    session_id: str | None = Field(default=None, max_length=80)
+    patient_id: int | None = None
+    context_previous_turn: str | None = Field(default=None, max_length=1200)
 
 
 @app.post("/app/api/conversations/simulate")
 async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
+    sim_limit = 20 if u["role"] == "secretary" else (40 if u["role"] == "doctor" else 60)
+    if not await _LIMITER.hit(f"sim:{u['id']}", sim_limit, 60):
+        raise HTTPException(429, "Çok fazla simülasyon isteği gönderildi; lütfen 1 dakika bekleyin")
     cid = u["clinic_id"]
     c = q1("SELECT name, address, phone FROM clinics WHERE id=?", cid)
-    facts: dict[str, str] = {"clinic": (c and c["name"]) or u["clinic_name"]}
+    all_branches = q("SELECT id, name, city, address, phone FROM clinics WHERE active=1")
+    facts: dict = {
+        "clinic": (c and c["name"]) or u["clinic_name"],
+        "branches": all_branches,
+    }
     if c and c.get("address"):
         facts["adres"] = c["address"]
     if c and c.get("phone"):
         facts["telefon"] = c["phone"]
     try:
-        res = await asyncio.wait_for(_ROUTER.route(b.text, lang=b.lang, clinic_facts=facts, allow_llm=True), timeout=16.0)
+        res = await asyncio.wait_for(
+            _ROUTER.route(
+                b.text,
+                lang=b.lang,
+                clinic_facts=facts,
+                allow_llm=True,
+                session_id=b.session_id,
+                patient_id=b.patient_id,
+                context_previous_turn=b.context_previous_turn,
+            ),
+            timeout=16.0,
+        )
     except Exception:
-        res = await _ROUTER.route(b.text, lang=b.lang, clinic_facts=facts, allow_llm=False)
+        res = await _ROUTER.route(
+            b.text,
+            lang=b.lang,
+            clinic_facts=facts,
+            allow_llm=False,
+            session_id=b.session_id,
+            patient_id=b.patient_id,
+            context_previous_turn=b.context_previous_turn,
+        )
     ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,NULL,'in',NULL,'simulator',0,0,?)",
        cid, iso_now())
     ex("INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,created_at) VALUES (?,NULL,'out',?,?,?, ?,?)",
@@ -1748,6 +2641,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
         "tokens_out": res.tokens_out,
         "alert": res.alert,
         "handoff": res.handoff,
+        "meta": res.meta,
     }
 
 
@@ -1812,7 +2706,7 @@ class TemplateIn(BaseModel):
 
 
 @app.post("/app/api/templates")
-def create_template(b: TemplateIn, u: dict = Depends(ANY)):
+def create_template(b: TemplateIn, u: dict = Depends(OWNER)):
     tid = ex("INSERT INTO message_templates (clinic_id,name,channel,lang,category,body,status,created_at) VALUES (?,?,?,?,?,?,'APPROVED',?)",
              u["clinic_id"], b.name, b.channel, b.lang, b.category, b.body, iso_now())
     return {"id": tid}
@@ -1844,7 +2738,7 @@ class CampaignIn(BaseModel):
 
 
 @app.post("/app/api/campaigns")
-def add_campaign(b: CampaignIn, u: dict = Depends(ANY)):
+def add_campaign(b: CampaignIn, u: dict = Depends(OWNER)):
     cid_id = ex("INSERT INTO campaigns (clinic_id,name,source,clicks,conversations,appointments_booked,revenue_kurus,created_at) VALUES (?,?,?,?,?,?,?,?)",
                 u["clinic_id"], b.name, b.source, b.clicks, b.conversations, b.appointments_booked, kurus(b.revenue_try), iso_now())
     return {"id": cid_id}
@@ -1864,12 +2758,23 @@ class SettingsIn(BaseModel):
     default_lang: str = "tr"
     slot_step_min: int = 15
     google_review_url: str = ""
+    working_hours_json: str | None = None
+    buffer_min: int = Field(0, ge=0, le=120)
 
 
 @app.post("/app/api/settings")
 def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
-    ex("UPDATE clinics SET name=?,city=?,address=?,phone=?,autopilot_name=?,default_lang=?,slot_step_min=?,google_review_url=? WHERE id=?",
-       b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, u["clinic_id"])
+    wh_str = b.working_hours_json or DEFAULT_WORKING_HOURS_JSON
+    try:
+        parsed_wh = json.loads(wh_str)
+        if not isinstance(parsed_wh, dict):
+            raise ValueError("dict değil")
+    except Exception:
+        raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı")
+    ex(
+        "UPDATE clinics SET name=?,city=?,address=?,phone=?,autopilot_name=?,default_lang=?,slot_step_min=?,google_review_url=?,working_hours_json=?,buffer_min=? WHERE id=?",
+        b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, wh_str, b.buffer_min, u["clinic_id"],
+    )
     write_audit(u["id"], u["email"], "settings.update", f"clinic:{u['clinic_id']}", u["ip_h"], clinic_id=u["clinic_id"])
     return {"ok": True}
 
@@ -1879,10 +2784,14 @@ class AskIn(BaseModel):
 
 
 @app.post("/app/api/assistant")
-def assistant(b: AskIn, u: dict = Depends(ANY)):
+async def assistant(b: AskIn, u: dict = Depends(ANY)):
+    if not await _LIMITER.hit(f"asst:{u['id']}", 30, 60):
+        raise HTTPException(429, "Çok fazla asistan sorgusu")
     cid = u["clinic_id"]
     txt = b.question.lower()
     if any(k in txt for k in ("kasa", "tahsilat", "ciro")):
+        if u["role"] == "secretary":
+            return {"answer": "Kasa özeti yalnızca hekim ve yöneticiye açık.", "tokens": 0}
         p = q1("SELECT coalesce(sum(amount_kurus),0) AS s FROM payments WHERE clinic_id=? AND voided_at IS NULL", cid)["s"]
         return {"answer": f"Toplam tahsilat: {tl(p):,.2f} TL (0 LLM tokenı harcandı).", "tokens": 0}
     if any(k in txt for k in ("stok", "envanter")):
@@ -1895,6 +2804,79 @@ def assistant(b: AskIn, u: dict = Depends(ANY)):
     appts = q("SELECT a.starts_at, a.treatment, a.chair, p.display_name FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id WHERE a.clinic_id=? AND a.status IN ('booked','confirmed') ORDER BY a.starts_at LIMIT 10", cid)
     ans = "\n".join(f"- {a['starts_at'][:16].replace('T',' ')} K{a['chair']} {a['display_name']} ({a['treatment']})" for a in appts) or "Aktif randevu yok."
     return {"answer": f"Yaklaşan Randevular:\n{ans}", "tokens": 0}
+
+
+@app.post("/app/api/backup/create")
+async def create_encrypted_backup(u: dict = Depends(OWNER)):
+    if not await _LIMITER.hit(f"bak_c:{u['id']}", 10, 60):
+        raise HTTPException(429, "Çok fazla yedekleme isteği")
+    import gzip
+    import tempfile
+    bak_dir = ROOT / "backups"
+    bak_dir.mkdir(parents=True, exist_ok=True)
+    ts_str = datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
+    bak_file = bak_dir / f"dentacore-{ts_str}.db.gz.fernet"
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        with _DB_LOCK:
+            dst_conn = sqlite3.connect(tmp_path)
+            db().backup(dst_conn)
+            dst_conn.close()
+        raw_bytes = tmp_path.read_bytes()
+        compressed = gzip.compress(raw_bytes, compresslevel=9)
+        encrypted = _FERNET.encrypt(compressed)
+        bak_file.write_bytes(encrypted)
+        sha = hashlib.sha256(encrypted).hexdigest()
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    write_audit(u["id"], u["email"], "backup.create", bak_file.name, u["ip_h"], {"sha256": sha[:16]}, clinic_id=u["clinic_id"])
+    return {"ok": True, "backup_path": str(bak_file), "size_bytes": len(encrypted), "sha256": sha}
+
+
+class RestoreTestIn(BaseModel):
+    backup_path: str
+    target_db_path: str
+
+
+@app.post("/app/api/backup/restore-test")
+async def restore_encrypted_backup_test(b: RestoreTestIn, u: dict = Depends(OWNER)):
+    if not await _LIMITER.hit(f"bak_r:{u['id']}", 10, 60):
+        raise HTTPException(429, "Çok fazla geri yükleme testi isteği")
+    import gzip
+    backups_dir = (ROOT / "backups").resolve()
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    src_file = Path(b.backup_path).resolve()
+    dst_file = Path(b.target_db_path).resolve()
+    if (
+        not src_file.is_relative_to(backups_dir)
+        or not dst_file.is_relative_to(backups_dir)
+        or dst_file.parent != backups_dir
+        or not src_file.name.endswith(".db.gz.fernet")
+        or not dst_file.name.endswith(".db")
+        or dst_file == DB_PATH.resolve()
+    ):
+        write_audit(u["id"], u["email"], "backup.restore_blocked", str(b.target_db_path)[:120], u["ip_h"], clinic_id=u["clinic_id"])
+        raise HTTPException(400, "Güvenlik engeli: Yedek ve hedef veritabanı yalnızca backups/ dizini içinde (.db) olabilir")
+    if not src_file.is_file():
+        raise HTTPException(404, "Yedek dosyası bulunamadı")
+    try:
+        decrypted = _FERNET.decrypt(src_file.read_bytes())
+        raw_db = gzip.decompress(decrypted)
+    except Exception:
+        raise HTTPException(400, "Yedek şifresi çözülemedi veya dosya bozuk")
+    dst_file.write_bytes(raw_db)
+    rconn = sqlite3.connect(dst_file)
+    rconn.row_factory = sqlite3.Row
+    try:
+        p_cnt = rconn.execute("SELECT count(*) AS n FROM patients").fetchone()["n"]
+        a_cnt = rconn.execute("SELECT count(*) AS n FROM appointments").fetchone()["n"]
+        aud_rows = [dict(r) for r in rconn.execute("SELECT id, ts, actor, action, target, meta, prev_hash, hash FROM audit_log ORDER BY id").fetchall()]
+        chain_res = sec.verify_chain(aud_rows)
+    finally:
+        rconn.close()
+    write_audit(u["id"], u["email"], "backup.restore_test", dst_file.name, u["ip_h"], {"patients": p_cnt}, clinic_id=u["clinic_id"])
+    return {"ok": True, "restored_patients": p_cnt, "restored_appointments": a_cnt, "audit_chain_ok": chain_res["ok"]}
 
 
 @app.get("/app/api/token-stats")
