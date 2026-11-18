@@ -1,0 +1,9 @@
+{
+  "github_repo": "https://github.com/Onur-de/dentacore-cloud",
+  "kalici_tam_sistem_url": "https://onur-de.github.io/dentacore-cloud/",
+  "kalici_tanitim_url": "https://onur-de.github.io/dentacore-cloud/tanitim.html",
+  "kalici_panel_url": "https://onur-de.github.io/dentacore-cloud/panel.html",
+  "render_tek_tik_kurulum": "https://dashboard.render.com/select-repo?type=blueprint",
+  "railway_tek_tik_kurulum": "https://railway.app/new/github",
+  "vercel_tek_tik_kurulum": "https://vercel.com/new/clone?repository-url=https://github.com/Onur-de/dentacore-cloud"
+}
