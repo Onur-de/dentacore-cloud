@@ -2544,7 +2544,7 @@ def delete_patient(pid: int, u: dict = Depends(OWNER)):
 class OdontogramIn(BaseModel):
     tooth_fdi: int
     surface: Literal["M", "D", "O", "B", "L", "FULL"] = "FULL"
-    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
+    status: Literal["healthy", "caries", "planned", "treated", "completed", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
     procedure_code: str = Field("", max_length=40)
     procedure_name: str = Field(min_length=2, max_length=120)
     amount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)
@@ -2559,6 +2559,11 @@ class OdontogramIn(BaseModel):
         if v not in VALID_FDI_TEETH:
             raise ValueError("Geçersiz FDI diş numarası (11-48 daimi veya 51-85 süt dişi olmalı)")
         return v
+
+    @field_validator("status")
+    @classmethod
+    def norm_status(cls, v: str) -> str:
+        return "treated" if v == "completed" else v
 
 
 class OdontogramUpdateIn(BaseModel):
@@ -2598,7 +2603,7 @@ def get_odontogram(pid: int, u: dict = Depends(ANY)):
 
 
 @app.post("/app/api/patients/{pid}/odontogram")
-def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY)):
+def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
     amt_k = kurus(b.amount)
     charge_id = None
@@ -3184,11 +3189,14 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
 
 
 def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
-    if channel_id:
-        col = "wa_phone_id" if channel == "wa" else "ig_handle"
-        row = q1(f"SELECT id FROM clinics WHERE {col}=? AND active=1 LIMIT 1", channel_id)
-        if row:
-            return int(row["id"])
+    if not channel_id:
+        return 1
+    if channel == "wa":
+        row = q1("SELECT id FROM clinics WHERE wa_phone_id=? AND active=1 LIMIT 1", channel_id)
+    else:
+        row = q1("SELECT id FROM clinics WHERE ig_handle=? AND active=1 LIMIT 1", channel_id)
+    if row:
+        return int(row["id"])
     log.error("Eşleşmeyen webhook kanalı: channel=%s id=%s", channel, channel_id or "<boş>")
     write_audit(
         None,
