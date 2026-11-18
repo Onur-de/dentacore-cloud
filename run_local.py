@@ -1617,6 +1617,11 @@ class OdontogramIn(BaseModel):
             raise ValueError("Geçersiz FDI diş numarası (11-48 daimi veya 51-85 süt dişi olmalı)")
         return v
 
+    @field_validator("status")
+    @classmethod
+    def norm_status(cls, v: str) -> str:
+        return "treated" if v == "completed" else v
+
 
 class OdontogramUpdateIn(BaseModel):
     surface: Literal["M", "D", "O", "B", "L", "FULL"] | None = None
@@ -1655,7 +1660,7 @@ def get_odontogram(pid: int, u: dict = Depends(ANY)):
 
 
 @app.post("/app/api/patients/{pid}/odontogram")
-def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY)):
+def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
     amt_k = kurus(b.amount)
     charge_id = None

@@ -666,6 +666,11 @@ class OdontogramIn(BaseModel):
             raise ValueError("Geçersiz FDI diş numarası (11-48 daimi veya 51-85 süt dişi olmalı)")
         return v
 
+    @field_validator("status")
+    @classmethod
+    def norm_status(cls, v: str) -> str:
+        return "treated" if v == "completed" else v
+
 
 class OdontogramUpdateIn(BaseModel):
     surface: Literal["M", "D", "O", "B", "L", "FULL"] | None = None
@@ -704,7 +709,7 @@ async def get_odontogram(pid: int, u: dict = Depends(ANY)):
 
 
 @router.post("/app/api/patients/{pid}/odontogram")
-async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY)):
+async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
     await _require_active_patient(pid, cid)
     if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
