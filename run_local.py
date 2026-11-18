@@ -1601,7 +1601,7 @@ def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
 class OdontogramIn(BaseModel):
     tooth_fdi: int
     surface: Literal["M", "D", "O", "B", "L", "FULL"] = "FULL"
-    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
+    status: Literal["healthy", "caries", "planned", "treated", "completed", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
     procedure_code: str = Field("", max_length=40)
     procedure_name: str = Field(min_length=2, max_length=120)
     amount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)

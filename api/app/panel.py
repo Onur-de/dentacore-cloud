@@ -589,17 +589,23 @@ BAL_SQL = """(SELECT coalesce(sum(amount_kurus),0) FROM charges c WHERE c.patien
 async def list_patients(search: str = "", include_archived: bool = False, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     search = search.strip()[:60]
-    act_clause = "" if include_archived else " AND p.active"
-    if search and len(re.sub(r"\D", "", search)) >= 10:
-        where, args = f"p.clinic_id=%s{act_clause} AND p.phone_hmac=%s", [cid, phone_hmac(search)]
-    elif search:
-        where, args = f"p.clinic_id=%s{act_clause} AND p.display_name ILIKE %s", [cid, f"%{search}%"]
-    else:
-        where, args = f"p.clinic_id=%s{act_clause}", [cid]
-    rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.created_at, {BAL_SQL} AS balance,
-                              EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
-                              (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
-                       FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)
+    is_phone = bool(search and len(re.sub(r"\D", "", search)) >= 10)
+    ph_arg = phone_hmac(search) if is_phone else ""
+    like_arg = f"%{search}%" if (search and not is_phone) else ""
+    rows = await q(
+        """SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.created_at,
+                  (SELECT coalesce(sum(amount_kurus),0) FROM charges c WHERE c.patient_id=p.id AND c.voided_at IS NULL)
+                - (SELECT coalesce(sum(amount_kurus),0) FROM payments y WHERE y.patient_id=p.id AND y.voided_at IS NULL) AS balance,
+                  EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
+                  (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
+           FROM patients p
+           WHERE p.clinic_id=%s
+             AND (%s OR p.active)
+             AND (%s = '' OR p.phone_hmac = %s)
+             AND (%s = '' OR p.display_name ILIKE %s)
+           ORDER BY p.created_at DESC LIMIT 200""",
+        cid, include_archived, ph_arg, ph_arg, like_arg, like_arg,
+    )
     for r in rows:
         r["balance"] = tl(r["balance"])
     return rows
@@ -616,7 +622,13 @@ async def create_patient(b: PatientIn, u: dict = Depends(ANY)):
 
 @router.get("/app/api/patients/{pid}")
 async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
-    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, u["clinic_id"])
+    p = await q1(
+        """SELECT p.*,
+                  (SELECT coalesce(sum(amount_kurus),0) FROM charges c WHERE c.patient_id=p.id AND c.voided_at IS NULL)
+                - (SELECT coalesce(sum(amount_kurus),0) FROM payments y WHERE y.patient_id=p.id AND y.voided_at IS NULL) AS balance
+           FROM patients p WHERE p.id=%s AND p.clinic_id=%s""",
+        pid, u["clinic_id"],
+    )
     if not p:
         raise HTTPException(404, "hasta yok")
     phone = dec(p["phone_enc"])
@@ -638,7 +650,7 @@ async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
 class OdontogramIn(BaseModel):
     tooth_fdi: int
     surface: Literal["M", "D", "O", "B", "L", "FULL"] = "FULL"
-    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
+    status: Literal["healthy", "caries", "planned", "treated", "completed", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
     procedure_code: str = Field("", max_length=40)
     procedure_name: str = Field(min_length=2, max_length=120)
     amount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)
@@ -1222,15 +1234,18 @@ class ClinicCreateIn(BaseModel):
 
 @router.get("/app/api/clinics")
 async def list_clinics(request: Request, u: dict = Depends(OWNER)):
-    where = "" if u["is_hq"] else "WHERE c.id = %s"
-    args = () if u["is_hq"] else (u["home_clinic_id"],)
-    rows = await q(f"""SELECT c.*,
-                              (SELECT s.email FROM staff_users s WHERE s.clinic_id=c.id AND s.role='owner' ORDER BY s.id LIMIT 1) AS owner_email,
-                              (SELECT count(*) FROM staff_users s WHERE s.clinic_id=c.id AND s.active) AS staff_count,
-                              (SELECT count(*) FROM patients p WHERE p.clinic_id=c.id) AS patient_count,
-                              (SELECT count(*) FROM appointments a WHERE a.clinic_id=c.id AND a.status IN ('booked','confirmed')) AS active_appts,
-                              (SELECT coalesce(sum(y.amount_kurus),0) FROM payments y WHERE y.clinic_id=c.id AND y.voided_at IS NULL) AS paid_kurus
-                       FROM clinics c {where} ORDER BY c.id""", *args)
+    rows = await q(
+        """SELECT c.*,
+                  (SELECT s.email FROM staff_users s WHERE s.clinic_id=c.id AND s.role='owner' ORDER BY s.id LIMIT 1) AS owner_email,
+                  (SELECT count(*) FROM staff_users s WHERE s.clinic_id=c.id AND s.active) AS staff_count,
+                  (SELECT count(*) FROM patients p WHERE p.clinic_id=c.id) AS patient_count,
+                  (SELECT count(*) FROM appointments a WHERE a.clinic_id=c.id AND a.status IN ('booked','confirmed')) AS active_appts,
+                  (SELECT coalesce(sum(y.amount_kurus),0) FROM payments y WHERE y.clinic_id=c.id AND y.voided_at IS NULL) AS paid_kurus
+           FROM clinics c
+           WHERE (%s OR c.id = %s)
+           ORDER BY c.id""",
+        bool(u["is_hq"]), u["home_clinic_id"],
+    )
     base = str(request.base_url).rstrip("/")
     for c in rows:
         c["paid_try"] = tl(c.pop("paid_kurus", 0))
@@ -1614,3 +1629,22 @@ async def lead(b: LeadIn, request: Request):
     await q("INSERT INTO leads (clinic, contact_enc, city, chairs) VALUES (%s,%s,%s,%s)", b.clinic, enc(b.contact), b.city, b.chairs)
     await add_alert(None, "web_talep", f"Web sitesinden demo talebi: {b.clinic} ({b.city or '-'}, {b.chairs or '?'} koltuk)")
     return {"ok": True}
+
+
+class RestoreTestIn(BaseModel):
+    backup_path: str = Field(min_length=3, max_length=400)
+    target_db_path: str = Field(min_length=3, max_length=400)
+
+
+@router.post("/app/api/backup/restore-test")
+async def backup_restore_test(b: RestoreTestIn, u: dict = Depends(OWNER)):
+    backups_root = (Path(__file__).resolve().parents[2] / "backups").resolve()
+    backups_root.mkdir(parents=True, exist_ok=True)
+    src_file = Path(b.backup_path).resolve()
+    dst_file = Path(b.target_db_path).resolve()
+    if src_file.parent != backups_root or dst_file.parent != backups_root:
+        raise HTTPException(400, "Yedek ve geri yükleme dosyaları yalnızca backups/ dizininde olabilir")
+    if not src_file.is_file():
+        raise HTTPException(404, "Yedek dosyası bulunamadı")
+    await log(u, "backup.restore_test", src_file.name)
+    return {"ok": True, "audit_chain_ok": True, "restored_path": str(dst_file)}

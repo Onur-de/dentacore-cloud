@@ -279,7 +279,11 @@ def detect_lang(text: str, default: str = "tr") -> str:
     if re.search(r"[\u0590-\u05FF]", raw):
         return "he"
     if re.search(r"[\u0600-\u06FF]", raw):
-        if re.search(r"[پچژگک]", raw) or any(w in raw for w in ("سلام", "نوبت", "قیمت", "دندان", "چند", "آدرس", "خونریزی", "صورتم", "ورم", "نفس")):
+        if re.search(r"[پچژگک]", raw) or any(w in raw for w in ("نوبت", "قیمت", "دندان", "چند", "آدرس", "خونریزی", "صورتم")):
+            return "fa"
+        if re.search(r"[ةأإؤئ]", raw) or any(w in raw for w in ("مرحبا", "الأسنان", "العيادة", "النزيف", "خلع", "الضرس", "وجهي", "متورم", "البلع", "أين", "سعر")):
+            return "ar"
+        if any(w in raw for w in ("سلام", "ورم", "نفس")):
             return "fa"
         return "ar"
     if re.search(r"[\u0370-\u03FF]", raw):
@@ -606,17 +610,21 @@ class TokenRouter:
 
                 if it_name == "fiyat":
                     t_phrase = f"Sorduğunuz {treatment_lbl} için " if treatment_lbl else "Kliniğimizde "
-                    exam_note = rules.get("exam_policy") or DEFAULT_AI_CUSTOM_RULES["exam_policy"]
+                    exam_note = (rules.get("exam_policy") or DEFAULT_AI_CUSTOM_RULES["exam_policy"]).strip()
                     base_fiyat = (
                         f"Merhabalar, kliniğimize hoş geldiniz. {t_phrase}tedavi planı ve net ücreti, "
                         f"uzman hekimimizin yapacağı muayene ve panoramik röntgen kontrolünüzden sonra size özel yazılı olarak paylaşıyoruz."
                     )
+                    if exam_note != DEFAULT_AI_CUSTOM_RULES["exam_policy"]:
+                        base_fiyat += f" {exam_note}"
                     if any(w in n for w in ("nakit", "pesin", "indirim")):
                         cash_note = rules.get("cash_discount_note") or DEFAULT_AI_CUSTOM_RULES["cash_discount_note"]
                         base_fiyat += f" {cash_note}"
                         handled.add("odeme")
                     if rules.get("price_policy") == "starting_range" and rules.get("starting_price_note"):
                         base_fiyat += f" {rules['starting_price_note']}"
+                    if rules.get("custom_extra_note"):
+                        base_fiyat += f" {rules['custom_extra_note']}"
                     base_fiyat += " Ön değerlendirme ve size özel planlama için hangi gün ve saat aralığı size uyar?"
                     clauses.append(base_fiyat)
 
