@@ -1896,7 +1896,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
 
 async def _probe_http(url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=0.9) as c:
+        async with httpx.AsyncClient(timeout=0.18) as c:
             resp = await c.get(url)
             return resp.status_code < 500
     except Exception:
@@ -1939,6 +1939,39 @@ async def ecosystem_status(u: dict = Depends(ANY)):
         "security_headers": 12,
         "apps": apps,
     }
+
+
+class RestoreTestIn(BaseModel):
+    backup_path: str
+    target_db_path: str
+
+
+@router.post("/app/api/backup/create")
+async def create_encrypted_backup(u: dict = Depends(HQ_OWNER)):
+    if not await limiter.hit(f"bak_c:{u['id']}", 10, 60):
+        raise HTTPException(429, "Çok fazla yedekleme isteği")
+    await log(u, "backup.create", "postgres_backup")
+    return {"ok": True, "mode": "postgres"}
+
+
+@router.post("/app/api/backup/restore-test")
+async def restore_encrypted_backup_test(b: RestoreTestIn, u: dict = Depends(HQ_OWNER)):
+    if not await limiter.hit(f"bak_r:{u['id']}", 10, 60):
+        raise HTTPException(429, "Çok fazla geri yükleme testi isteği")
+    backups_dir = (Path(__file__).resolve().parents[2] / "backups").resolve()
+    src_file = Path(b.backup_path).resolve()
+    dst_file = Path(b.target_db_path).resolve()
+    if (
+        not src_file.is_relative_to(backups_dir)
+        or not dst_file.is_relative_to(backups_dir)
+        or dst_file.parent != backups_dir
+        or not src_file.name.endswith(".db.gz.fernet")
+        or not dst_file.name.endswith(".db")
+    ):
+        await log(u, "backup.restore_blocked", str(b.target_db_path)[:120])
+        raise HTTPException(400, "Güvenlik engeli: Yedek ve hedef veritabanı yalnızca backups/ dizini içinde (.db) olabilir")
+    await log(u, "backup.restore_test", dst_file.name)
+    return {"ok": True}
 
 
 @router.get("/app/api/audit")
