@@ -1117,7 +1117,8 @@ class TokenRouter:
 
     # ---------- ana akış ----------
     def is_emergency(self, text: str) -> bool:
-        n = normalize_tr_informal(normalize(text))
+        lg = detect_lang(text)
+        n = normalize_multilingual_typos(normalize(text), lang=lg)
         return any(p.search(n) for p in self.emerg.values())
 
     async def route(
@@ -1133,7 +1134,7 @@ class TokenRouter:
     ) -> RouteResult:
         lang = lang if lang in LANGS else detect_lang(text)
         n_raw = normalize(text)
-        n = normalize_tr_informal(n_raw) if lang == "tr" else n_raw
+        n = normalize_multilingual_typos(n_raw, lang=lang)
 
         # Çok turlu oturum anahtarı ve önceki tur bağlamı
         cf_base_name = (clinic_facts or {}).get("clinic", self.clinic)
@@ -1151,7 +1152,7 @@ class TokenRouter:
             for t_item in sess["turns"][-3:]:
                 if t_item.get("text"):
                     prev_texts.append(str(t_item["text"]))
-        prev_norm = normalize_tr_informal(normalize(" ".join(prev_texts))) if prev_texts else ""
+        prev_norm = normalize_multilingual_typos(normalize(" ".join(prev_texts)), lang=lang) if prev_texts else ""
 
         # Şube çözümleyici: önce mevcut mesajda, yoksa önceki turda veya oturum hafızasında şube ara
         branch_key, branch_facts = self._detect_branch(n, clinic_facts)
