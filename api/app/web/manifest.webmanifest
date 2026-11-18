@@ -1,0 +1,31 @@
+{
+  "name": "DentaCore Klinik İşletim Sistemi",
+  "short_name": "DentaCore",
+  "description": "Diş klinikleri için 16 dilde hasta iletişimi, takvim senkronizasyonu, dijital anamnez, kasa ve envanter yönetimi.",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F4F7FA",
+  "theme_color": "#0A2540",
+  "lang": "tr",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

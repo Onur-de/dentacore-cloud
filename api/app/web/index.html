@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DentaCore: Diş klinikleri için 16 dilde hasta iletişimi ve klinik yönetimi</title>
+<meta name="description" content="WhatsApp ve Instagram'da 16 dilde 7/24 hasta karşılama, boş koltuğu bekleme listesinden dolduran sistem, kırmızı bayraklı dijital anamnez, iPhone/Android takvim, çok şubeli zincir yönetimi, kasa ve envanter.">
+<link rel="canonical" href="/">
+<link rel="alternate" hreflang="x-default" href="/">
+<link rel="alternate" hreflang="tr" href="/">
+<link rel="alternate" hreflang="en" href="/?lang=en">
+<link rel="alternate" hreflang="de" href="/?lang=de">
+<link rel="alternate" hreflang="ar" href="/?lang=ar">
+<link rel="alternate" hreflang="ru" href="/?lang=ru">
+<link rel="alternate" hreflang="fr" href="/?lang=fr">
+<link rel="alternate" hreflang="nl" href="/?lang=nl">
+<link rel="alternate" hreflang="es" href="/?lang=es">
+<link rel="alternate" hreflang="it" href="/?lang=it">
+<link rel="alternate" hreflang="fa" href="/?lang=fa">
+<link rel="alternate" hreflang="az" href="/?lang=az">
+<link rel="alternate" hreflang="uk" href="/?lang=uk">
+<link rel="alternate" hreflang="bg" href="/?lang=bg">
+<link rel="alternate" hreflang="ro" href="/?lang=ro">
+<link rel="alternate" hreflang="el" href="/?lang=el">
+<link rel="alternate" hreflang="he" href="/?lang=he">
+<meta property="og:type" content="website">
+<meta property="og:title" content="DentaCore: Kaçan mesaj ve boş koltuk kalmasın">
+<meta property="og:description" content="Diş klinikleri için 16 dilde 7/24 hasta iletişimi, boş koltuk doldurma, dijital anamnez, iPhone/Android takvim ve çok şubeli klinik işletim sistemi.">
+<meta property="og:locale" content="tr_TR">
+<meta property="og:image" content="/static/og-dentacore.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DentaCore: Diş klinikleri için klinik işletim sistemi">
+<meta name="twitter:description" content="16 dilde WhatsApp ve Instagram triyajı, 12 güvenlik başlığı, iPhone/Android takvim ve zincir klinik yönetimi.">
+<meta name="twitter:image" content="/static/og-dentacore.png">
+<meta name="theme-color" content="#0A2540">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/landing.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "/#organization",
+      "name": "DentaCore",
+      "url": "/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "/static/icon-512.png"
+      },
+      "description": "Diş klinikleri için kendi sunucularında çalışabilen çok dilli hasta iletişimi ve klinik yönetim yazılımı."
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "/#software",
+      "name": "DentaCore",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Dental Clinic Management",
+      "operatingSystem": "Web, Linux (Docker)",
+      "inLanguage": ["tr","en","de","ar","ru","fr","nl","es","it","fa","az","uk","bg","ro","el","he"],
+      "publisher": { "@id": "/#organization" },
+      "description": "16 dilde WhatsApp ve Instagram hasta karşılama, bekleme listesi koltuk doldurma, kırmızı bayraklı dijital anamnez, iPhone/Android takvim, çok şubeli zincir yönetimi, kasa ve envanter platformu.",
+      "offers": {
+        "@type": "AggregateOffer",
+        "priceCurrency": "TRY",
+        "lowPrice": "3900",
+        "highPrice": "8900",
+        "offerCount": "3"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Mevcut WhatsApp klinik numaramız değişir mi?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Hayır. Mevcut klinik hattınız resmi Meta WhatsApp Cloud API üzerinden bağlanır; hastalar aynı numaraya yazmaya devam eder."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Yapay zeka hastaya teşhis koyar veya fiyat verir mi?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Koymaz ve vermez. Sistem tıbbi teşhis, ilaç önerisi ve hekim onaysız fiyat cümlelerini çıkış filtresiyle engeller; soruyu muayene randevusuna veya ekibe yönlendirir."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Hasta verileri nerede saklanır ve kimler görebilir?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "DentaCore kendi sunucunuzda veya Türkiye lokasyonlu size özel sunucuda çalışır. Telefon numaraları ve anamnez yanıtları uygulama katmanında şifreli tutulur; her görüntüleme hash zincirli denetim kaydına işlenir."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "iPhone ve Android telefon takvimleriyle nasıl eşitlenir?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Her şubeye özel imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olduğunda yeni randevular ve 60 ile 15 dakikalık uyarılar telefona otomatik düşer."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Birden fazla şubesi olan zincir klinikler tek yerden yönetilir mi?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Evet. Her şubenin hasta, kasa, envanter ve randevu verisi clinic_id ile ayrılır. Merkez yönetici tek tıkla şubeler arasında geçiş yapar; yeni şube açıldığında giriş ve takvim teslim kartı hazır oluşur."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Kurulum ne kadar sürer ve eğitim gerekir mi?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar alındıktan sonra aynı hafta içinde devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsizdir."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#icerik">Ana içeriğe geç</a>
+
+<header class="site-nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="/">
+      <img src="/static/favicon.svg" alt="" width="32" height="32">
+      <span>DentaCore</span>
+    </a>
+    <nav class="nav-links" aria-label="Ana menü">
+      <a href="#moduller">Modüller</a>
+      <a href="#takvim">Takvim</a>
+      <a href="#guvenlik">Güvenlik</a>
+      <a href="#zincir">Çok Şube</a>
+      <a href="#hesap">Kayıp hesabı</a>
+      <a href="#fiyat">Fiyat</a>
+      <a href="#sss">SSS</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="btn btn-ghost" href="/app">Panele giriş</a>
+      <a class="btn btn-cta" href="#demo">Demo iste</a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Menüyü aç">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="mobile-menu hidden" id="mobile-menu">
+    <div class="wrap mobile-menu-in">
+      <a href="#moduller">Modüller</a>
+      <a href="#takvim">Takvim eşitleme</a>
+      <a href="#guvenlik">12 Güvenlik başlığı</a>
+      <a href="#zincir">Çok şube ve 16 dil</a>
+      <a href="#karsilastirma">Karşılaştırma</a>
+      <a href="#hesap">Kayıp hesabı</a>
+      <a href="#fiyat">Fiyat</a>
+      <a href="#sss">Sık sorulanlar</a>
+      <div class="mobile-menu-cta">
+        <a class="btn btn-ghost" href="/app">Panele giriş</a>
+        <a class="btn btn-cta" href="#demo">Demo iste</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="icerik">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <h1>Gece gelen mesaj cevapsız, iptal edilen koltuk boş kalmasın.</h1>
+        <p class="lead">DentaCore WhatsApp ve Instagram mesajlarını 16 dilde saniyeler içinde yanıtlar, iptal edilen koltuğu bekleme listesinden doldurur, kan sulandırıcı kullanan hastayı işlemden önce hekime bildirir. Hasta verisi kendi sunucunuzda şifreli kalır.</p>
+        <div class="hero-cta">
+          <a class="btn btn-cta btn-lg" href="#demo">15 dakikalık canlı demo iste</a>
+          <a class="btn btn-ghost btn-lg" href="#hesap">Kliniğimin kaybını hesapla</a>
+        </div>
+        <ul class="truth-list">
+          <li>
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            <span>Mevcut numara değişmez</span>
+          </li>
+          <li>
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            <span>Resmi Meta WhatsApp API</span>
+          </li>
+          <li>
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            <span>İlk ay ve kurulum ücretsiz</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="preview-shell" aria-label="Canlı ürün önizlemesi">
+        <div class="preview-tabs" role="tablist" aria-label="Önizleme görünümleri">
+          <button class="preview-tab active" role="tab" aria-selected="true" aria-controls="panel-chat" id="tab-chat" type="button">Canlı Hasta Akışı</button>
+          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-schedule" id="tab-schedule" type="button">Koltuk ve Anamnez</button>
+        </div>
+
+        <div id="panel-chat" role="tabpanel" aria-labelledby="tab-chat" class="preview-body">
+          <div class="scenario-bar" role="group" aria-label="Senaryo seçimi">
+            <button class="sc-btn active" type="button" data-sc="tr">TR Bekleme Listesi</button>
+            <button class="sc-btn" type="button" data-sc="en">EN Londra Zirkonyum</button>
+            <button class="sc-btn" type="button" data-sc="ar">AR Acil (RTL)</button>
+            <button class="sc-btn" type="button" data-sc="de">DE İmplant</button>
+          </div>
+          <div class="chat-feed" id="hero-chat-feed" dir="ltr" lang="tr">
+            <div class="msg msg-in"><span class="msg-meta">23:41 WhatsApp</span>Yarın 14:30 randevuma yetişemeyeceğim, iptal edebilir misiniz?</div>
+            <div class="msg msg-out"><span class="msg-meta">23:41 Otopilot</span>Randevunuz iptal edildi. Uygun yeni gün yazarsanız hemen planlayalım.</div>
+            <div class="msg msg-sys">Bekleme listesi dalga 1: 3 hastaya 14:30 teklifi gitti, Selin Arslan “EVET” dedi, koltuk 2 doldu.</div>
+          </div>
+          <div class="router-readout" id="hero-router-readout">
+            <span><strong>Katman:</strong> L1 Kural + Bekleme Listesi</span>
+            <span><strong>Ek maliyet:</strong> yok</span>
+            <span><strong>Durum:</strong> Koltuk 2 yeniden doldu</span>
+          </div>
+        </div>
+
+        <div id="panel-schedule" role="tabpanel" aria-labelledby="tab-schedule" class="preview-body hidden">
+          <div class="mini-cal">
+            <div class="mini-slot">
+              <div class="mini-time">10:00<span>Koltuk 1</span></div>
+              <div class="mini-info"><strong>Ahmet Yılmaz</strong><span>İmplant Kontrol (teyitli)</span></div>
+              <span class="mini-badge ok">Temiz</span>
+            </div>
+            <div class="mini-slot">
+              <div class="mini-time">11:30<span>Koltuk 1</span></div>
+              <div class="mini-info"><strong>Ayşe Kaya</strong><span>Yirmi Yaş Cerrahi Çekim</span></div>
+              <span class="mini-badge warn">Kan sulandırıcı</span>
+            </div>
+            <div class="mini-slot">
+              <div class="mini-time">14:30<span>Koltuk 2</span></div>
+              <div class="mini-info"><strong>Selin Arslan</strong><span>Zirkonyum Prova (bekleme listesi)</span></div>
+              <span class="mini-badge info">3 dk doldu</span>
+            </div>
+          </div>
+          <div class="router-readout">
+            <span><strong>Koltuk Çakışma Kilidi:</strong> Aktif</span>
+            <span><strong>iPhone / Android:</strong> Anlık webcal</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="metrics-band" aria-label="Temel operasyon ölçüleri">
+    <div class="wrap metrics-grid">
+      <div><b>&lt; 10 sn</b><span>ilk yanıt süresi hedefi</span></div>
+      <div><b>16 dil</b><span>otomatik algılama, 3 RTL dahil</span></div>
+      <div><b>3 dk</b><span>iptal sonrası bekleme listesi dalgası</span></div>
+      <div><b>11 soru</b><span>işlem öncesi kırmızı bayraklı anamnez</span></div>
+    </div>
+  </section>
+
+  <section class="trust-strip" aria-label="Doğrulanabilir teknik güvenlik kanıtları">
+    <div class="wrap trust-grid">
+      <div class="trust-card">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"/></svg>
+        <span>12/12 HTTP Güvenlik Başlığı</span>
+      </div>
+      <div class="trust-card">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        <span>Fernet AES-128 Şifreli Hasta Verisi</span>
+      </div>
+      <div class="trust-card">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>RFC 6238 TOTP 2FA + 10 Deneme Kilidi</span>
+      </div>
+      <div class="trust-card">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <span>SHA-256 Değiştirilemez Denetim Zinciri</span>
+      </div>
+      <div class="trust-card">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <span>6698 Sayılı KVKK Açık Rıza Sürümleme</span>
+      </div>
+      <div class="trust-card">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>
+        <span>Kendi Sunucunuzda Tam Veri Egemenliği</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="moduller">
+    <div class="wrap">
+      <h2>Sekreterin yetişemediği her iş, tek klinik panelde</h2>
+      <p class="sec-sub">Mesaj yanıtlamak ilk adım. Gelir kaybını durduran ve klinik ekibini koruyan dokuz modül birlikte çalışır.</p>
+
+      <div class="pillars">
+        <article class="pillar-card">
+          <div class="mod-head">
+            <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <h3>7/24 Çok Dilli Karşılama</h3>
+          </div>
+          <p>WhatsApp ve Instagram mesajlarını 16 dilde karşılar. Konum, otopark, saat ve teyit sorularını ek yapay zekâ maliyeti olmadan yanıtlar; tıbbi teşhis ve ilaç önerisini çıkış filtresiyle keser.</p>
+        </article>
+        <article class="pillar-card">
+          <div class="mod-head">
+            <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg>
+            <h3>Boş Koltuk Doldurucu</h3>
+          </div>
+          <p>İptal geldiği anda bekleme listesindeki uygun hastalara sırayla teklif mesajı çıkar. İlk onay veren hastaya randevu yazılır; çift rezervasyon veritabanı kilidiyle engellenir.</p>
+        </article>
+        <article class="pillar-card">
+          <div class="mod-head">
+            <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"/></svg>
+            <h3>Kırmızı Bayraklı Anamnez</h3>
+          </div>
+          <p>İşlemden önce hastaya 11 soruluk form gider: kan sulandırıcı, penisilin alerjisi, bifosfonat, diyabet, kalp, hamilelik. Riskli yanıt hekime anında uyarı düşer, KVKK onamı sürümle saklanır.</p>
+        </article>
+      </div>
+
+      <div class="mod-list">
+        <article class="mod-item">
+          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 14l3-3 3 3 2-2 4 4"/></svg>
+          <div>
+            <h3>Röntgen ve Fotoğraf Kalite Denetimi</h3>
+            <p>Bulanık, karanlık veya düşük çözünürlüklü görseli tespit edip hastadan yenisini ister. Teşhis koymaz; hekimin ekranına yalnız net kare gelir.</p>
+          </div>
+        </article>
+        <article class="mod-item">
+          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0"/></svg>
+          <div>
+            <h3>İşlem Sonrası 2-24-72 Saat Takibi</h3>
+            <p>Cerrahi çekim veya implant sonrası 2, 24 ve 72. saatte ağrı skoru sorulur. 8 ve üzeri ağrı ya da durmayan kanamada nöbetçi hekime alarm gönderilir.</p>
+          </div>
+        </article>
+        <article class="mod-item">
+          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M22 19v-1a4 4 0 0 0-3-3.9"/></svg>
+          <div>
+            <h3>Uyuyan Hasta Geri Kazanımı</h3>
+            <p>Tedavi planı alıp 3 ila 6 aydır dönmeyen hastaya iletişim izni varsa nazik bir hatırlatma gider. Bekleyen planlı ciro görünür olur.</p>
+          </div>
+        </article>
+        <article class="mod-item">
+          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6"/></svg>
+          <div>
+            <h3>Kasa ve Hekim Hak Edişi</h3>
+            <p>Hizmet, tahsilat, kalan alacak ve hekim payı kuruş hassasiyetinde hesaplanır. Finansal kayıt silinmez; yalnız gerekçeli iptal edilir.</p>
+          </div>
+        </article>
+        <article class="mod-item">
+          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/></svg>
+          <div>
+            <h3>Envanter ve Kritik Stok</h3>
+            <p>İmplant, kompozit ve anestezik stokları alt sınıra düştüğünde uyarı oluşur; her giriş çıkış personel imzasıyla kaydedilir.</p>
+          </div>
+        </article>
+        <article class="mod-item">
+          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7zM9 3v4M15 3v4M9 17v4M15 17v4"/></svg>
+          <div>
+            <h3>Hekim WhatsApp Asistanı</h3>
+            <p>Hekim WhatsApp’tan “yarın”, “kasa” veya “stok” yazdığında ek maliyet olmadan anında yanıt alır; her sabah 08:30’da günün özeti gelir.</p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec surface-alt" id="takvim">
+    <div class="wrap">
+      <h2>iPhone, Android ve Google Takvim ile çift yönlü düzen</h2>
+      <p class="sec-sub">Koltuk çakışması veritabanı kilidiyle sunucuda engellenir. Her şubenin imzalı takvim akışı hekimin telefonuna dakikalar içinde bağlanır.</p>
+
+      <div class="cal-grid">
+        <article class="cal-card">
+          <h3>iPhone (Apple Takvim)</h3>
+          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. Takvim her 15 dakikada bir yenilenir; hasta adı, işlem, koltuk numarası ve varsa kırmızı bayrak uyarısı etkinlik notunda görünür.</p>
+          <ul>
+            <li>60 dk ve 15 dk öncesinde çift <code>VALARM</code> bildirimi</li>
+            <li>İptal edilen randevu takvimden otomatik düşer</li>
+          </ul>
+        </article>
+        <article class="cal-card">
+          <h3>Android (Google Takvim)</h3>
+          <p>Hem tüm klinik takvimine <code>google_subscribe_url</code> ile abone olunabilir hem de paneldeki her randevu satırından tek tıkla Google Takvim etkinliği açılabilir.</p>
+          <ul>
+            <li>Özel HMAC imzalı URL, parola gerektirmez</li>
+            <li>Klinik adresi etkinlik konumuna otomatik işlenir</li>
+          </ul>
+        </article>
+        <article class="cal-card">
+          <h3>Toplu ve Tekil <code>.ics</code> İndirme</h3>
+          <p>Outlook, macOS Takvim veya arşiv için tek randevuyu ya da tüm şube programını (<code>all.ics</code>) standart RFC 5545 biçiminde dışa aktarabilirsiniz.</p>
+          <ul>
+            <li>Aylık ve haftalık görünüm arasında anlık geçiş</li>
+            <li>Yeni klinik açılışında teslim kartıyla hazır link</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec dark-band" id="guvenlik">
+    <div class="wrap">
+      <h2>Hasta verisi kendi sunucunuzda. Şifreli ve denetlenebilir.</h2>
+      <p class="sec-sub">Sağlık verisi 6698 sayılı KVKK’ya göre özel nitelikli kişisel veridir. Güvenliği soyut vaatlerle değil, test edilen teknik kontrollerle kurduk.</p>
+
+      <div class="sec-cards">
+        <article class="sec-card">
+          <h3>Fernet AES-128 Şifreli Hasta Verisi</h3>
+          <p>Hasta telefonu, anamnez yanıtları, görseller ve TOTP anahtarları veritabanına şifreli yazılır; arama için ayrı HMAC özetleri tutulur.</p>
+        </article>
+        <article class="sec-card">
+          <h3>SHA-256 Değiştirilemez Denetim Zinciri</h3>
+          <p>Kim, hangi hastanın telefonunu veya kaydını ne zaman açtı? Her satır bir önceki satırın SHA-256 özetini taşır; tek kayıt değişirse zincir kırılır.</p>
+        </article>
+        <article class="sec-card">
+          <h3>RFC 6238 TOTP 2FA + 10 Deneme Kilidi</h3>
+          <p>Parolalar bellek-yoğun scrypt ile özetlenir. TOTP tekrar oynatma korumalıdır; 10 hatalı girişte hesap 15 dakika kilitlenir, 15 dakika hareketsizlikte oturum düşer.</p>
+        </article>
+        <article class="sec-card">
+          <h3>6698 Sayılı KVKK Açık Rıza Sürümleme</h3>
+          <p>Aydınlatma, sağlık verisi açık rıza, iletişim izni ve yurt dışı aktarım onayları metin özeti ve sürüm numarasıyla ayrı saklanır.</p>
+        </article>
+        <article class="sec-card">
+          <h3>Kendi Sunucunuzda Tam Veri Egemenliği</h3>
+          <p>Docker Compose ile kliniğin kendi sunucusuna veya Türkiye lokasyonlu özel sunucuya kurulur. Dış CDN veya üçüncü parti font betiği yüklenmez.</p>
+        </article>
+        <article class="sec-card">
+          <h3>12/12 HTTP Güvenlik Başlığı + Gece Yedeği</h3>
+          <p>Sunucunun verdiği her yanıtta 12 güvenlik başlığı zorunlu tutulur (BT ekibiniz için ayrıntı aşağıda). Veritabanı yedeği her gece açık anahtarla şifrelenir; çözme anahtarı sunucuda tutulmaz.</p>
+        </article>
+      </div>
+
+      <details class="tech-details">
+      <summary>Teknik ayrıntı: BT ekibiniz için 12 güvenlik başlığı</summary>
+      <div class="table-wrap dark-table-wrap">
+        <table class="sec-table">
+          <thead>
+            <tr>
+              <th>Güvenlik Başlığı</th>
+              <th>Uygulanan Değer</th>
+              <th>Koruduğu Risk</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>Strict-Transport-Security</code></td><td><code>max-age=63072000; includeSubDomains; preload</code></td><td>HTTPS zorunlu tutar, downgrade saldırısını kapatır</td></tr>
+            <tr><td><code>Content-Security-Policy</code></td><td><code>default-src 'self'; script-src 'self'; frame-ancestors 'none'</code></td><td>Satır içi ve dış kaynaklı XSS betiklerini durdurur</td></tr>
+            <tr><td><code>X-Content-Type-Options</code></td><td><code>nosniff</code></td><td>Tarayıcının dosya türünü tahmin edip çalıştırmasını önler</td></tr>
+            <tr><td><code>X-Frame-Options</code></td><td><code>DENY</code></td><td>Panelin başka sitede iframe içine alınmasını (clickjacking) engeller</td></tr>
+            <tr><td><code>X-XSS-Protection</code></td><td><code>0</code></td><td>OWASP önerisine uygun, hatalı eski XSS filtresini kapatır</td></tr>
+            <tr><td><code>Referrer-Policy</code></td><td><code>no-referrer</code></td><td>Hasta bağlantı ve token bilgisinin dış URL’ye sızmasını önler</td></tr>
+            <tr><td><code>Permissions-Policy</code></td><td><code>camera=(), microphone=(), geolocation=(), payment=()</code></td><td>Kamera, mikrofon ve konum donanım izinlerini kilitler</td></tr>
+            <tr><td><code>Cross-Origin-Opener-Policy</code></td><td><code>same-origin</code></td><td>Açılan sekmelerle bellek/pencere paylaşımını keser</td></tr>
+            <tr><td><code>Cross-Origin-Resource-Policy</code></td><td><code>same-origin</code></td><td>Panel kaynaklarının başka kökenlerden yüklenmesini engeller</td></tr>
+            <tr><td><code>Cross-Origin-Embedder-Policy</code></td><td><code>require-corp</code></td><td>Yan kanal (Spectre) bellek sızıntısı riskini azaltır</td></tr>
+            <tr><td><code>X-Permitted-Cross-Domain-Policies</code></td><td><code>none</code></td><td>Harici Flash/PDF çapraz alan politikalarını yasaklar</td></tr>
+            <tr><td><code>Cache-Control</code> + Kimlik Gizleme</td><td><code>no-store</code> (/app/api, /auth), Server gizli</td><td>Hasta verisinin önbellekte kalmasını ve sunucu sürüm ifşasını önler</td></tr>
+          </tbody>
+        </table>
+      </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="sec" id="zincir">
+    <div class="wrap chain-grid">
+      <div class="chain-block">
+        <h2>Çok şubeli zincir klinikler, tam veri izolasyonuyla</h2>
+        <p>Her şubenin hasta kartları, randevu koltukları, kasa hareketleri ve envanteri veritabanı düzeyinde <code>clinic_id</code> ile ayrılır. Bursa şubesi İstanbul veya Ankara şubesinin tek kaydını göremez.</p>
+        <ul class="check-list">
+          <li>Merkez (HQ) yöneticisi tek tıkla herhangi bir şubeye geçip yönetebilir ve merkeze dönebilir.</li>
+          <li>Yeni şube açıldığında giriş e-postası, iPhone <code>webcal://</code> linki ve Google Takvim linki tek WhatsApp teslim kartında hazırlanır.</li>
+          <li>Şube bazlı aktif randevu, hasta sayısı ve tahsilat cirosu merkez tabloda karşılaştırılır.</li>
+        </ul>
+      </div>
+
+      <div class="lang-block" id="diller">
+        <h2>16 dilde anında algılama ve RTL desteği</h2>
+        <p>Hasta hangi dilde yazarsa ilk mesajdan itibaren o dilde karşılanır. Arapça, Farsça ve İbranice sağdan sola (RTL) yazım yönüyle doğal görünür.</p>
+        <div class="lang-chips" id="lang-chips" role="group" aria-label="16 desteklenen dil örneği">
+          <button type="button" class="lang-chip active" data-lang="tr">Türkçe (tr)</button>
+          <button type="button" class="lang-chip" data-lang="en">English (en)</button>
+          <button type="button" class="lang-chip" data-lang="de">Deutsch (de)</button>
+          <button type="button" class="lang-chip" data-lang="ar">العربية (ar RTL)</button>
+          <button type="button" class="lang-chip" data-lang="ru">Русский (ru)</button>
+          <button type="button" class="lang-chip" data-lang="fr">Français (fr)</button>
+          <button type="button" class="lang-chip" data-lang="nl">Nederlands (nl)</button>
+          <button type="button" class="lang-chip" data-lang="es">Español (es)</button>
+          <button type="button" class="lang-chip" data-lang="it">Italiano (it)</button>
+          <button type="button" class="lang-chip" data-lang="fa">فارسی (fa RTL)</button>
+          <button type="button" class="lang-chip" data-lang="az">Azərbaycanca (az)</button>
+          <button type="button" class="lang-chip" data-lang="uk">Українська (uk)</button>
+          <button type="button" class="lang-chip" data-lang="bg">Български (bg)</button>
+          <button type="button" class="lang-chip" data-lang="ro">Romana (ro)</button>
+          <button type="button" class="lang-chip" data-lang="el">Ελληνικά (el)</button>
+          <button type="button" class="lang-chip" data-lang="he">עברית (he RTL)</button>
+        </div>
+        <div class="lang-preview" id="lang-preview" dir="ltr" lang="tr" role="region" aria-live="polite">
+          <div class="lp-meta">Seçilen dil: <strong id="lp-code">TR</strong> (hazır yanıt, ek maliyet yok)</div>
+          <p id="lp-text">Merhaba, Özel DentaCore Merkez Polikliniği hasta iletişim hattına hoş geldiniz. Randevu, adres veya çalışma saatleri için yazabilirsiniz.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec surface-alt" id="karsilastirma">
+    <div class="wrap">
+      <h2>Tipik mesaj botu ile DentaCore arasındaki fark</h2>
+      <p class="sec-sub">Piyasadaki sıradan SaaS mesaj botlarının bıraktığı güvenlik, klinik takip ve maliyet açıklarını tek mimaride kapatır.</p>
+      <div class="table-wrap">
+        <table class="cmp">
+          <thead>
+            <tr>
+              <th>Kriter</th>
+              <th>Tipik mesaj botu</th>
+              <th>DentaCore</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>7/24 hasta karşılama ve dil</td><td>Genelde 1-5 dil, bulut SaaS</td><td>WhatsApp + Instagram, 16 dil (AR/FA/HE RTL dahil)</td></tr>
+            <tr><td>İptal edilen koltuğu doldurma</td><td>Çoğunlukla yok</td><td>3 dakikalık bekleme listesi dalgası + çakışma kilidi</td></tr>
+            <tr><td>Dijital anamnez ve KVKK onam</td><td>Yok veya düz metin form</td><td>11 sorulu kırmızı bayrak uyarılı, Fernet şifreli, sürümlü</td></tr>
+            <tr><td>Röntgen ve fotoğraf kontrolü</td><td>Görsel analiz yapılmaz</td><td>Bulanık/karanlık görseli teşhissiz geri ister</td></tr>
+            <tr><td>İşlem sonrası takip</td><td>Tek seferlik memnuniyet anketi</td><td>2 / 24 / 72 saat ağrı skoru + nöbetçi hekim alarmı</td></tr>
+            <tr><td>Telefon takvim senkronizasyonu</td><td>Yalnız Google linki</td><td>iPhone webcal:// (VALARM) + Google Takvim + toplu .ics</td></tr>
+            <tr><td>Çok şubeli zincir yönetimi</td><td>Şubeler arası geçiş kısıtlı</td><td>clinic_id izolasyonu, HQ tek tık geçiş, teslim kartı</td></tr>
+            <tr><td>HTTP güvenlik başlıkları</td><td>0/10 başlık eksik kalabiliyor</td><td>12/12 zorunlu güvenlik başlığı, CSP script-src 'self'</td></tr>
+            <tr><td>Denetim kaydı bütünlüğü</td><td>Standart log veya belirsiz</td><td>SHA-256 hash zincirli, değiştirilemez denetim kaydı</td></tr>
+            <tr><td>Veri egemenliği</td><td>Sağlayıcının ortak bulutu</td><td>Kendi sunucunuz veya size özel Türkiye sunucusu</td></tr>
+            <tr><td>Yapay zekâ maliyeti</td><td>Her mesajda ücretli model çağrısı</td><td>Sık sorulan sorular hazır yanıtla, ek maliyet olmadan cevaplanır</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="hesap">
+    <div class="wrap">
+      <h2>Kliniğiniz ayda ne kadar kaybediyor?</h2>
+      <p class="sec-sub">Kendi rakamlarınızı girin. Hesaplama tamamen tarayıcınızda yapılır, sunucuya veri gitmez.</p>
+      <div class="calc">
+        <div class="calc-in">
+          <div class="range-row">
+            <label for="i-msg">Günlük gelen yeni mesaj</label>
+            <output id="o-msg" for="i-msg">25</output>
+            <input type="range" id="i-msg" min="5" max="150" value="25">
+          </div>
+          <div class="range-row">
+            <label for="i-off">Mesai dışında gelenlerin oranı (%)</label>
+            <output id="o-off" for="i-off">45</output>
+            <input type="range" id="i-off" min="10" max="80" value="45">
+          </div>
+          <div class="range-row">
+            <label for="i-conv">Cevapsız kalanların randevuya dönme ihtimali (%)</label>
+            <output id="o-conv" for="i-conv">8</output>
+            <input type="range" id="i-conv" min="2" max="25" value="8">
+          </div>
+          <div class="range-row">
+            <label for="i-appt">Aylık randevu sayısı</label>
+            <output id="o-appt" for="i-appt">220</output>
+            <input type="range" id="i-appt" min="40" max="900" step="10" value="220">
+          </div>
+          <div class="range-row">
+            <label for="i-ns">Gelmeme (no-show) oranı (%)</label>
+            <output id="o-ns" for="i-ns">18</output>
+            <input type="range" id="i-ns" min="3" max="45" value="18">
+          </div>
+          <div class="range-row">
+            <label for="i-tic">Ortalama işlem bedeli (TL)</label>
+            <output id="o-tic" for="i-tic">4.500</output>
+            <input type="range" id="i-tic" min="500" max="40000" step="250" value="4500">
+          </div>
+        </div>
+        <div class="calc-out">
+          <div>
+            <div class="calc-kicker">Tahmini aylık kayıp</div>
+            <b class="calc-total" id="r-loss">-</b>
+            <ul>
+              <li>Mesai dışı cevapsız mesajlardan: <strong id="r-off">-</strong></li>
+              <li>Gelmeyen hastalardan: <strong id="r-ns">-</strong></li>
+            </ul>
+            <p>Bu hesaplama kliniğinizdeki kaybı görünür kılar. İlk ayın sonunda gerçek kaybı panelin ana ekranında kendi randevularınızla izlersiniz.</p>
+          </div>
+          <a class="btn btn-cta btn-lg" href="#demo">Bu kaybı durdurmak istiyorum</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec surface-alt" id="fiyat">
+    <div class="wrap">
+      <h2>Sade fiyat, sürpriz yok</h2>
+      <p class="sec-sub">Tüm paketlerde ilk ay ve kurulum ücretsiz, kullanıcı ve hekim sayısı sınırsız, aylık planda istediğiniz an iptal.</p>
+      <div class="prices">
+        <article class="price">
+          <h3>Temel</h3>
+          <div class="price-val"><b>3.900 TL</b><span>+ KDV / ay</span></div>
+          <ul>
+            <li>Takvim (iPhone + Android), hasta kartı, kasa, envanter</li>
+            <li>Otomatik hatırlatma ve randevu teyidi</li>
+            <li>Kırmızı bayraklı dijital anamnez ve KVKK onam</li>
+            <li>Personel WhatsApp asistanı</li>
+          </ul>
+          <a class="btn btn-ghost" href="#demo">Temel ile başlayın</a>
+        </article>
+        <article class="price best">
+          <span class="flag">En çok tercih edilen</span>
+          <h3>Klinik</h3>
+          <div class="price-val"><b>5.900 TL</b><span>+ KDV / ay</span></div>
+          <ul>
+            <li>Temel paketin tamamı</li>
+            <li>7/24 yapay zeka karşılama (WhatsApp + Instagram, 16 dil)</li>
+            <li>Bekleme listesi boş koltuk doldurucu</li>
+            <li>İşlem sonrası takip ve uyuyan hasta geri kazanımı</li>
+            <li>Aylık 3.000 yapay zeka yanıtı dahil (SSS’ler sınırsız)</li>
+          </ul>
+          <a class="btn btn-cta" href="#demo">Ücretsiz deneyin</a>
+        </article>
+        <article class="price">
+          <h3>Grup / Zincir</h3>
+          <div class="price-val"><b>8.900 TL</b><span>+ KDV / ay</span></div>
+          <ul>
+            <li>Klinik paketinin tamamı</li>
+            <li>Çok şubeli merkez yönetim ve tam veri izolasyonu</li>
+            <li>Kendi sunucunuza kurulum ve şifreli yedekleme</li>
+            <li>Hekim sesiyle karşılama (yazılı onayla) ve görsel QC</li>
+            <li>Adil kullanım sınırında sınırsız yapay zeka yanıtı</li>
+          </ul>
+          <a class="btn btn-ghost" href="#demo">Kurumsal görüşelim</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="sss">
+    <div class="wrap faq-wrap">
+      <h2>Sık sorulan sorular</h2>
+      <div class="faq-list">
+        <details open>
+          <summary>Mevcut WhatsApp klinik numaramız değişir mi?</summary>
+          <p>Hayır. Mevcut klinik hattınız resmi Meta WhatsApp Cloud API üzerinden bağlanır; hastalar aynı numaraya yazmaya devam eder.</p>
+        </details>
+        <details>
+          <summary>Yapay zeka hastaya teşhis koyar veya fiyat verir mi?</summary>
+          <p>Koymaz ve vermez. Sistem tıbbi teşhis, ilaç önerisi ve hekim onaysız fiyat cümlelerini çıkış filtresiyle engeller; soruyu muayene randevusuna veya ekibe yönlendirir.</p>
+        </details>
+        <details>
+          <summary>Hasta verileri nerede saklanır ve kimler görebilir?</summary>
+          <p>DentaCore kendi sunucunuzda veya Türkiye lokasyonlu size özel sunucuda çalışır. Telefon numaraları ve anamnez yanıtları uygulama katmanında şifreli tutulur; her görüntüleme hash zincirli denetim kaydına işlenir.</p>
+        </details>
+        <details>
+          <summary>iPhone ve Android telefon takvimleriyle nasıl eşitlenir?</summary>
+          <p>Her şubeye özel imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olduğunda yeni randevular ve 60 ile 15 dakikalık uyarılar telefona otomatik düşer.</p>
+        </details>
+        <details>
+          <summary>Birden fazla şubesi olan zincir klinikler tek yerden yönetilir mi?</summary>
+          <p>Evet. Her şubenin hasta, kasa, envanter ve randevu verisi clinic_id ile ayrılır. Merkez yönetici tek tıkla şubeler arasında geçiş yapar; yeni şube açıldığında giriş ve takvim teslim kartı hazır oluşur.</p>
+        </details>
+        <details>
+          <summary>Kurulum ne kadar sürer ve eğitim gerekir mi?</summary>
+          <p>Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar alındıktan sonra aynı hafta içinde devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsizdir.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec surface-alt" id="demo">
+    <div class="wrap">
+      <div class="demo-box">
+        <div>
+          <h2>15 dakikada kliniğinize nasıl uyacağını görün</h2>
+          <p class="demo-copy">Kliniğinizin tedavilerini, çalışma saatlerini ve sık gelen soruları dinliyoruz; sistemi mevcut numaranızın üzerine bir hafta içinde kuruyoruz.</p>
+          <ul class="check-list">
+            <li>Bağlayıcı sözleşme yok, ilk ay ve kurulum ücretsiz</li>
+            <li>Teknik kurulum ve numara bağlantısı ekibimizden</li>
+            <li>Önce yalnızca izleme modunda başlatabilirsiniz</li>
+          </ul>
+          <p class="demo-panel-link">Sistemi hemen test etmek isterseniz <a href="/app">3 demo şube ile yönetim paneline</a> geçebilirsiniz.</p>
+        </div>
+        <form id="lead" class="lead-form" novalidate>
+          <label for="f-clinic">Klinik adı
+            <input id="f-clinic" name="clinic" required minlength="2" maxlength="120" autocomplete="organization" placeholder="Özel Örnek Diş Polikliniği">
+          </label>
+          <label for="f-contact">Telefon veya e-posta
+            <input id="f-contact" name="contact" required minlength="5" maxlength="120" placeholder="05xx xxx xx xx veya e-posta">
+          </label>
+          <div class="two-col">
+            <label for="f-city">Şehir
+              <input id="f-city" name="city" maxlength="40" placeholder="İstanbul">
+            </label>
+            <label for="f-chairs">Koltuk sayısı
+              <input id="f-chairs" name="chairs" type="number" min="1" max="200" placeholder="3">
+            </label>
+          </div>
+          <label class="hp" aria-hidden="true">Web sitesi<input name="website" tabindex="-1" autocomplete="off"></label>
+          <button class="btn btn-cta btn-lg" id="lead-submit" type="submit">Tanıtım talep et</button>
+          <p class="form-msg" id="lead-msg" role="status" aria-live="polite"></p>
+          <small>İletişim bilginiz yalnızca dönüş yapmak için şifreli kaydedilir.</small>
+        </form>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="foot-brand">
+      <strong>DentaCore</strong>
+      <span>Yapay zeka tıbbi teşhis koymaz, tedavi önermez; hekimin yerini almaz.</span>
+    </div>
+    <div class="foot-links">
+      <a href="#moduller">Modüller</a>
+      <a href="#guvenlik">Güvenlik</a>
+      <a href="#fiyat">Fiyat</a>
+      <a href="/app">Panele giriş</a>
+    </div>
+  </div>
+</footer>
+
+<script src="/static/landing.js"></script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+"""Ayarlar, şifreleme, veritabanı ve ortak yardımcılar."""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+import re
+import time
+
+from cryptography.fernet import Fernet
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
+
+
+def env(k: str, d: str = "") -> str:
+    return os.environ.get(k, d)
+
+
+class S:
+    clinic = env("CLINIC_NAME", "Klinik")
+    public_url = env("PUBLIC_URL", "http://localhost:8000").rstrip("/")
+    admin_token = env("ADMIN_TOKEN")
+    phone_hmac_key = env("PHONE_HMAC_KEY").encode()
+    data_key = env("DATA_ENCRYPTION_KEY")
+    database_url = env("DATABASE_URL")
+    redis_url = env("REDIS_URL")
+    doctor_on_call = env("DOCTOR_ON_CALL_PHONE")
+    doctor_owner = env("DOCTOR_OWNER_PHONE")
+    google_review_url = env("GOOGLE_REVIEW_URL")
+    chairs = int(env("CHAIRS", "2"))
+    work_minutes = int(env("WORK_MINUTES", "600"))
+
+
+_fernet: Fernet | None = None
+
+
+def fernet() -> Fernet:
+    global _fernet
+    if _fernet is None:
+        if not S.data_key:
+            raise RuntimeError("DATA_ENCRYPTION_KEY tanımlı değil")
+        _fernet = Fernet(S.data_key.encode())
+    return _fernet
+
+
+def enc(s: str) -> str:
+    return fernet().encrypt(s.encode()).decode()
+
+
+def dec(s: str) -> str:
+    return fernet().decrypt(s.encode()).decode()
+
+
+def norm_phone(p: str) -> str:
+    d = re.sub(r"\D", "", p or "")
+    if d.startswith("00"):
+        d = d[2:]
+    if d.startswith("0") and len(d) == 11:
+        d = "90" + d[1:]
+    if len(d) == 10 and d.startswith("5"):
+        d = "90" + d
+    return d
+
+
+def phone_hmac(p: str) -> str:
+    return hmac.new(S.phone_hmac_key, norm_phone(p).encode(), hashlib.sha256).hexdigest()
+
+
+def sign(path: str, ttl: int = 86400) -> str:
+    exp = int(time.time()) + ttl
+    sig = hmac.new(S.admin_token.encode(), f"{path}|{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{S.public_url}{path}?exp={exp}&sig={sig}"
+
+
+def verify_sig(path: str, exp: str, sig: str) -> bool:
+    try:
+        if int(exp) < time.time():
+            return False
+    except ValueError:
+        return False
+    good = hmac.new(S.admin_token.encode(), f"{path}|{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+    return hmac.compare_digest(good, sig or "")
+
+
+# ---------------- veritabanı ----------------
+pool: AsyncConnectionPool | None = None
+
+
+async def db_open():
+    global pool
+    pool = AsyncConnectionPool(S.database_url, min_size=1, max_size=10, open=False, kwargs={"row_factory": dict_row})
+    await pool.open()
+
+
+async def db_close():
+    if pool:
+        await pool.close()
+
+
+async def q(sql: str, *args) -> list[dict]:
+    async with pool.connection() as c:
+        cur = await c.execute(sql, args)
+        return await cur.fetchall() if cur.description else []
+
+
+async def q1(sql: str, *args) -> dict | None:
+    rows = await q(sql, *args)
+    return rows[0] if rows else None
+
+
+async def upsert_patient(phone: str, lang: str | None = None, name: str | None = None, clinic_id: int = 1) -> int:
+    p = norm_phone(phone)
+    row = await q1(
+        """INSERT INTO patients (clinic_id, phone_hmac, phone_enc, display_name, lang)
+           VALUES (%s, %s, %s, %s, COALESCE(%s, 'tr'))
+           ON CONFLICT (clinic_id, phone_hmac) DO UPDATE
+             SET display_name = COALESCE(patients.display_name, EXCLUDED.display_name)
+           RETURNING id""",
+        clinic_id, phone_hmac(p), enc(p), name, lang)
+    return row["id"]
+
+
+async def upsert_identity(key: str, channel: str, lang: str | None = None, name: str | None = None, clinic_id: int = 1) -> int:
+    """Telefon dışı kanallar (ör. Instagram 'ig:<id>') için hasta kimliği. Telefon normalizasyonu uygulanmaz."""
+    h = hmac.new(S.phone_hmac_key, key.encode(), hashlib.sha256).hexdigest()
+    row = await q1(
+        """INSERT INTO patients (clinic_id, phone_hmac, phone_enc, display_name, lang, channel)
+           VALUES (%s, %s, %s, %s, COALESCE(%s, 'tr'), %s)
+           ON CONFLICT (clinic_id, phone_hmac) DO UPDATE
+             SET display_name = COALESCE(patients.display_name, EXCLUDED.display_name)
+           RETURNING id""",
+        clinic_id, h, enc(key), name, lang, channel)
+    return row["id"]
+
+
+def ip_hash(ip: str | None) -> str:
+    """Denetim kaydında IP'nin kendisi değil anahtarlı özeti tutulur (kişisel veri minimizasyonu)."""
+    return hmac.new(S.phone_hmac_key, (ip or "-").encode(), hashlib.sha256).hexdigest()[:16]
+
+
+class tx:
+    """Tek bağlantı üzerinde işlem (transaction). Hata olursa her şey geri alınır."""
+
+    async def __aenter__(self):
+        self._cm = pool.connection()
+        self.conn = await self._cm.__aenter__()
+        self._tx = self.conn.transaction()
+        await self._tx.__aenter__()
+        return self
+
+    async def __aexit__(self, et, ev, tb):
+        try:
+            await self._tx.__aexit__(et, ev, tb)
+        finally:
+            await self._cm.__aexit__(et, ev, tb)
+        return False
+
+    async def q(self, sql: str, *args) -> list[dict]:
+        cur = await self.conn.execute(sql, args)
+        return await cur.fetchall() if cur.description else []
+
+    async def q1(self, sql: str, *args) -> dict | None:
+        rows = await self.q(sql, *args)
+        return rows[0] if rows else None
+
+
+async def run_migrations(path: str):
+    with open(path, encoding="utf-8") as f:
+        sql = f.read()
+    async with pool.connection() as c:
+        await c.execute(sql)
+
+
+async def patient(pid: int) -> dict:
+    r = await q1("SELECT * FROM patients WHERE id=%s", pid)
+    if not r:
+        raise KeyError(pid)
+    r["phone"] = dec(r["phone_enc"])
+    return r
+
+
+async def has_consent(pid: int, kind: str) -> bool:
+    return bool(await q1("SELECT 1 FROM consents WHERE patient_id=%s AND kind=%s AND revoked_at IS NULL", pid, kind))
+
+
+async def add_consent(pid: int, kind: str, version: str, text: str, channel: str):
+    await q("INSERT INTO consents (patient_id, kind, text_version, text_sha256, channel) VALUES (%s,%s,%s,%s,%s)",
+            pid, kind, version, hashlib.sha256(text.encode()).hexdigest(), channel)
+
+
+async def log_msg(pid: int | None, direction: str, layer: str | None = None, intent: str | None = None, tin: int = 0, tout: int = 0, clinic_id: int | None = None):
+    if clinic_id is None:
+        if pid is not None:
+            row = await q1("SELECT clinic_id FROM patients WHERE id=%s", pid)
+            clinic_id = int(row["clinic_id"]) if row else 1
+        else:
+            clinic_id = 1
+    await q("INSERT INTO message_log (clinic_id, patient_id, direction, layer, intent, tokens_in, tokens_out) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            clinic_id, pid, direction, layer, intent, tin, tout)
+
+
+async def add_alert(pid: int | None, kind: str, detail: str, clinic_id: int | None = None) -> int:
+    if clinic_id is None:
+        if pid is not None:
+            row = await q1("SELECT clinic_id FROM patients WHERE id=%s", pid)
+            clinic_id = int(row["clinic_id"]) if row else 1
+        else:
+            clinic_id = 1
+    r = await q1("INSERT INTO alerts (clinic_id, patient_id, kind, detail) VALUES (%s,%s,%s,%s) RETURNING id", clinic_id, pid, kind, detail)
+    return r["id"]

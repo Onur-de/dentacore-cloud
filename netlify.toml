@@ -1,0 +1,12 @@
+[build]
+  publish = "docs"
+
+[[redirects]]
+  from = "/panel"
+  to = "/panel.html"
+  status = 200
+
+[[redirects]]
+  from = "/tanitim"
+  to = "/tanitim.html"
+  status = 200

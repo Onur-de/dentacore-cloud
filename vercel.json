@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "public": true,
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/", "destination": "/docs/index.html" },
+    { "source": "/panel", "destination": "/docs/panel.html" },
+    { "source": "/tanitim", "destination": "/docs/tanitim.html" }
+  ]
+}
