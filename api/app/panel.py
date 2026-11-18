@@ -798,11 +798,19 @@ async def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(ANY)):
             raise HTTPException(400, "Geçerli telefon girin")
         ph = phone_hmac(b.phone)
         pe = enc(norm_phone(b.phone))
+        dup = await q1("SELECT id FROM patients WHERE clinic_id=%s AND phone_hmac=%s AND id<>%s", cid, ph, pid)
+        if dup:
+            raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı")
     else:
         ph = p["phone_hmac"]
         pe = p["phone_enc"]
-    await q("UPDATE patients SET display_name=%s, lang=%s, phone_hmac=%s, phone_enc=%s WHERE id=%s AND clinic_id=%s",
-            new_name, new_lang, ph, pe, pid, cid)
+    try:
+        await q("UPDATE patients SET display_name=%s, lang=%s, phone_hmac=%s, phone_enc=%s WHERE id=%s AND clinic_id=%s",
+                new_name, new_lang, ph, pe, pid, cid)
+    except Exception as exc:
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı")
+        raise
     await log(u, "patient.update", f"patient:{pid}")
     return {"ok": True, "id": pid}
 
