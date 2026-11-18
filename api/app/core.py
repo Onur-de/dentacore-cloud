@@ -101,9 +101,17 @@ async def db_close():
         await pool.close()
 
 
+_SQL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
+
+
+def _clean_sql_args(args: tuple) -> tuple:
+    return tuple(_SQL_CTRL_RE.sub("", a) if isinstance(a, str) else a for a in args)
+
+
 async def q(sql: str, *args) -> list[dict]:
+    clean = _clean_sql_args(args)
     async with pool.connection() as c:
-        cur = await c.execute(sql, args)
+        cur = await c.execute(sql, clean)
         return await cur.fetchall() if cur.description else []
 
 
@@ -160,7 +168,7 @@ class tx:
         return False
 
     async def q(self, sql: str, *args) -> list[dict]:
-        cur = await self.conn.execute(sql, args)
+        cur = await self.conn.execute(sql, _clean_sql_args(args))
         return await cur.fetchall() if cur.description else []
 
     async def q1(self, sql: str, *args) -> dict | None:

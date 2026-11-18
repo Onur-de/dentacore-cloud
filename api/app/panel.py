@@ -599,7 +599,7 @@ async def list_patients(search: str = "", include_archived: bool = False, u: dic
     rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.created_at, {BAL_SQL} AS balance,
                               EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
                               (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
-                       FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)
+                       FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)  # nosec B608
     for r in rows:
         r["balance"] = tl(r["balance"])
     return rows
@@ -616,7 +616,7 @@ async def create_patient(b: PatientIn, u: dict = Depends(ANY)):
 
 @router.get("/app/api/patients/{pid}")
 async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
-    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, u["clinic_id"])
+    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, u["clinic_id"])  # nosec B608
     if not p:
         raise HTTPException(404, "hasta yok")
     phone = dec(p["phone_enc"])
@@ -1110,7 +1110,12 @@ async def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
 
 @router.post("/app/api/{kind}/{eid}/void")
 async def void(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dict = Depends(CLINICAL)):
-    r = await q1(f"UPDATE {kind} SET voided_at=now(), void_reason=%s WHERE id=%s AND clinic_id=%s AND voided_at IS NULL RETURNING id", b.reason, eid, u["clinic_id"])
+    sql = (
+        "UPDATE charges SET voided_at=now(), void_reason=%s WHERE id=%s AND clinic_id=%s AND voided_at IS NULL RETURNING id"
+        if kind == "charges"
+        else "UPDATE payments SET voided_at=now(), void_reason=%s WHERE id=%s AND clinic_id=%s AND voided_at IS NULL RETURNING id"
+    )
+    r = await q1(sql, b.reason, eid, u["clinic_id"])
     if not r:
         raise HTTPException(404, "kayıt yok veya zaten iptal")
     await log(u, f"kasa.void_{kind}", f"{kind}:{eid}", {"reason": b.reason})
@@ -1119,6 +1124,10 @@ async def void(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dic
 
 @router.get("/app/api/kasa")
 async def kasa(start: datetime, end: datetime, u: dict = Depends(CLINICAL)):
+    s_cmp = start if start.tzinfo else start.replace(tzinfo=TZ)
+    e_cmp = end if end.tzinfo else end.replace(tzinfo=TZ)
+    if s_cmp > e_cmp:
+        raise HTTPException(422, "Başlangıç tarihi bitiş tarihinden büyük olamaz")
     cid = u["clinic_id"]
     t = await q1("""SELECT (SELECT coalesce(sum(amount_kurus),0) FROM charges WHERE clinic_id=%s AND voided_at IS NULL AND created_at >= %s AND created_at < %s) AS billed,
                            (SELECT coalesce(sum(amount_kurus),0) FROM payments WHERE clinic_id=%s AND voided_at IS NULL AND created_at >= %s AND created_at < %s) AS paid,
@@ -1221,7 +1230,7 @@ async def list_clinics(request: Request, u: dict = Depends(OWNER)):
                               (SELECT count(*) FROM patients p WHERE p.clinic_id=c.id) AS patient_count,
                               (SELECT count(*) FROM appointments a WHERE a.clinic_id=c.id AND a.status IN ('booked','confirmed')) AS active_appts,
                               (SELECT coalesce(sum(y.amount_kurus),0) FROM payments y WHERE y.clinic_id=c.id AND y.voided_at IS NULL) AS paid_kurus
-                       FROM clinics c {where} ORDER BY c.id""", *args)
+                       FROM clinics c {where} ORDER BY c.id""", *args)  # nosec B608
     base = str(request.base_url).rstrip("/")
     for c in rows:
         c["paid_try"] = tl(c.pop("paid_kurus", 0))

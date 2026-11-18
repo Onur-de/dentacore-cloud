@@ -250,10 +250,19 @@ TREATMENT_KEYWORDS = (
 )
 
 
+_INVISIBLE_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
+_DOTTED_UNIT_RE = re.compile(r"\b(\d+)\s*m\s*[._-]\s*([gl])\.?\b")
+_LEET_ALPHA_RE = re.compile(r"(?<=[a-z])([0134])(?=[a-z])")
+_LEET_MAP = {"0": "o", "1": "i", "3": "e", "4": "a"}
+
+
 def normalize(s: str) -> str:
-    s = (s or "").replace("ı", "i").replace("İ", "i").replace("ə", "e").replace("Ə", "e")
+    s = _INVISIBLE_CTRL_RE.sub("", s or "")
+    s = s.replace("ı", "i").replace("İ", "i").replace("ə", "e").replace("Ə", "e")
     s = unicodedata.normalize("NFKD", s)
-    s = "".join(c for c in s if not unicodedata.combining(c)).casefold()
+    s = "".join(c for c in s if not unicodedata.combining(c) and unicodedata.category(c) not in ("Cf", "Cc")).casefold()
+    s = _DOTTED_UNIT_RE.sub(r"\1 m\2", s)
+    s = _LEET_ALPHA_RE.sub(lambda m: _LEET_MAP.get(m.group(1), m.group(1)), s)
     return re.sub(r"\s+", " ", s).strip()
 
 

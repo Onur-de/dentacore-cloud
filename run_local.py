@@ -183,9 +183,17 @@ def db() -> sqlite3.Connection:
     return _CONN
 
 
+_SQL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
+
+
+def _clean_sql_args(args: tuple) -> tuple:
+    return tuple(_SQL_CTRL_RE.sub("", a) if isinstance(a, str) else a for a in args)
+
+
 def q(sql: str, *args) -> list[dict]:
+    clean = _clean_sql_args(args)
     with _DB_LOCK:
-        cur = db().execute(sql, args)
+        cur = db().execute(sql, clean)
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -195,9 +203,10 @@ def q1(sql: str, *args) -> dict | None:
 
 
 def ex(sql: str, *args) -> int:
+    clean = _clean_sql_args(args)
     with _DB_LOCK:
         c = db()
-        cur = c.execute(sql, args)
+        cur = c.execute(sql, clean)
         c.commit()
         return cur.lastrowid
 
@@ -2389,9 +2398,19 @@ class VoidIn(BaseModel):
 @app.post("/app/api/{kind}/{eid}/void")
 def void_entry(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
-    if not q1(f"SELECT id FROM {kind} WHERE id=? AND clinic_id=? AND voided_at IS NULL", eid, cid):
+    sel_sql = (
+        "SELECT id FROM charges WHERE id=? AND clinic_id=? AND voided_at IS NULL"
+        if kind == "charges"
+        else "SELECT id FROM payments WHERE id=? AND clinic_id=? AND voided_at IS NULL"
+    )
+    if not q1(sel_sql, eid, cid):
         raise HTTPException(404, "kayıt yok veya zaten iptal")
-    ex(f"UPDATE {kind} SET voided_at=?, void_reason=? WHERE id=? AND clinic_id=? AND voided_at IS NULL", iso_now(), b.reason, eid, cid)
+    upd_sql = (
+        "UPDATE charges SET voided_at=?, void_reason=? WHERE id=? AND clinic_id=? AND voided_at IS NULL"
+        if kind == "charges"
+        else "UPDATE payments SET voided_at=?, void_reason=? WHERE id=? AND clinic_id=? AND voided_at IS NULL"
+    )
+    ex(upd_sql, iso_now(), b.reason, eid, cid)
     write_audit(u["id"], u["email"], f"kasa.void_{kind}", f"{kind}:{eid}", u["ip_h"], {"reason": b.reason}, clinic_id=cid)
     return {"ok": True}
 
@@ -2401,6 +2420,8 @@ def kasa(start: datetime, end: datetime, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
     s_dt = start if start.tzinfo else start.replace(tzinfo=TZ)
     e_dt = end if end.tzinfo else end.replace(tzinfo=TZ)
+    if s_dt > e_dt:
+        raise HTTPException(422, "Başlangıç tarihi bitiş tarihinden büyük olamaz")
     ch_all = q("SELECT c.*, p.display_name AS patient FROM charges c JOIN patients p ON p.id=c.patient_id WHERE c.clinic_id=? ORDER BY c.id DESC", cid)
     py_all = q("SELECT y.*, p.display_name AS patient FROM payments y JOIN patients p ON p.id=y.patient_id WHERE y.clinic_id=? ORDER BY y.id DESC", cid)
 
