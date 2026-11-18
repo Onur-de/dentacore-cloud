@@ -605,6 +605,7 @@ class TokenRouter:
                     if any(w in n for w in ("nakit", "pesin", "indirim")):
                         cash_note = rules.get("cash_discount_note") or DEFAULT_AI_CUSTOM_RULES["cash_discount_note"]
                         base_fiyat += f" {cash_note}"
+                        handled.add("odeme")
                     if rules.get("price_policy") == "starting_range" and rules.get("starting_price_note"):
                         base_fiyat += f" {rules['starting_price_note']}"
                     base_fiyat += " Ön değerlendirme ve size özel planlama için hangi gün ve saat aralığı size uyar?"
@@ -614,9 +615,9 @@ class TokenRouter:
                     saat_val = str(effective_facts.get("saatler", self.facts["saatler"])).rstrip(".")
                     if any(w in n for w in ("pazar", "nobetci", "aksam")):
                         clauses.append(
-                            f"Merhabalar, kliniğimizde sizleri hafta içi 09:00-19:00, Cumartesi günleri ise 09:00-15:00 saatleri arasında ağırlıyoruz ({saat_val}); "
-                            f"Pazar günleri rutin muayeneye kapalıyız ancak acil durumlar için nöbetçi hekim koordinasyonumuz mevcuttur. "
-                            f"Size uygun bir gün için randevu planlayalım mı?"
+                            "Merhabalar, kliniğimizde sizleri hafta içi her gün 09:00-19:00, Cumartesi günleri ise 09:00-15:00 saatleri arasında ağırlıyoruz. "
+                            "Pazar günleri rutin muayeneye kapalıyız ancak acil durumlar için nöbetçi hekim koordinasyonumuz mevcuttur. "
+                            "Size uygun bir gün için randevu planlayalım mı?"
                         )
                     else:
                         clauses.append(
