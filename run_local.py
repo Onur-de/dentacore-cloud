@@ -1650,12 +1650,10 @@ async def _handle_patient_reply(
             except ValueError:
                 target_appt = None
         else:
-            allowed = ("booked",) if is_confirm else ("booked", "confirmed")
-            placeholders = ",".join("?" for _ in allowed)
-            appts = q(
-                f"SELECT * FROM appointments WHERE clinic_id=? AND patient_id=? AND status IN ({placeholders})",
-                cid, pid, *allowed,
-            )
+            if is_confirm:
+                appts = q("SELECT * FROM appointments WHERE clinic_id=? AND patient_id=? AND status='booked'", cid, pid)
+            else:
+                appts = q("SELECT * FROM appointments WHERE clinic_id=? AND patient_id=? AND status IN ('booked','confirmed')", cid, pid)
             cutoff = now_utc() - timedelta(minutes=15)
             future = [a for a in appts if _parse_dt_tz(a["starts_at"]) >= cutoff]
             future.sort(key=lambda a: (
@@ -1705,7 +1703,10 @@ async def _handle_patient_reply(
 async def _run_scheduler_tick(clinic_id: int | None = None, now_dt: datetime | None = None, respect_hours: bool = True) -> dict:
     async with _SCHED_LOCK:
         ref_now = (now_dt if now_dt.tzinfo else now_dt.replace(tzinfo=TZ)) if now_dt else now_utc()
-        clinics = q("SELECT id, name, working_hours_json FROM clinics WHERE active=1" + (" AND id=?" if clinic_id is not None else ""), *([clinic_id] if clinic_id is not None else []))
+        if clinic_id is not None:
+            clinics = q("SELECT id, name, working_hours_json FROM clinics WHERE active=1 AND id=?", clinic_id)
+        else:
+            clinics = q("SELECT id, name, working_hours_json FROM clinics WHERE active=1")
         stats = {
             "ok": True,
             "at": ref_now.isoformat(),
