@@ -2682,7 +2682,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
 
 async def _probe_http(url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=0.9) as c:
+        async with httpx.AsyncClient(timeout=0.18) as c:
             resp = await c.get(url)
             return resp.status_code < 500
     except Exception:

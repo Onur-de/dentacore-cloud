@@ -556,7 +556,10 @@
     );
   }
 
+  let _activeRouteKey = "";
   function setMain(...nodes) {
+    const curK = (location.hash.replace(/^#\//, "") || "overview").split("?")[0];
+    if (_activeRouteKey && _activeRouteKey !== curK) return;
     const b = hqSwitchBanner();
     main.replaceChildren(...(b ? [b] : []), ...nodes.filter(Boolean));
   }
@@ -564,9 +567,11 @@
   async function route() {
     if (!S.user) return;
     const k = (location.hash.replace(/^#\//, "") || "overview").split("?")[0];
+    _activeRouteKey = "";
     document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.k === k));
     document.querySelectorAll(".m-bottom-nav a").forEach((a) => a.classList.toggle("active", a.dataset.mk === k));
     setMain(h("div", { class: "skeleton", role: "status", "aria-label": "Yükleniyor" }), h("div", { class: "empty", text: "Veriler yükleniyor..." }));
+    _activeRouteKey = k;
     const v = VIEWS[k] || VIEWS.overview;
     try {
       await v();
