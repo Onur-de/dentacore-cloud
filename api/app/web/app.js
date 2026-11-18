@@ -1994,9 +1994,72 @@
       ] : h("div", { class: "empty", text: "Ekosistem durum servisi şu an yanıt vermedi." })
     );
 
+    let aiRulesObj = {};
+    try {
+      aiRulesObj = s.ai_custom_rules_json ? JSON.parse(s.ai_custom_rules_json) : {};
+    } catch (e) { aiRulesObj = {}; }
+
+    const aiRulesForm = h("form", {
+      class: "card",
+      style: "margin-top:14px",
+      on: {
+        submit: async (e) => {
+          e.preventDefault();
+          if (!owner) return toast("Yalnızca yönetici kaydedebilir", true);
+          const f = Object.fromEntries(new FormData(aiRulesForm));
+          await run(() => api("/app/api/settings/ai-rules", { method: "POST", body: f }), "Müşteriye özel WhatsApp yapay zeka cevap politikası kaydedildi");
+        },
+      },
+    },
+      h("h3", null,
+        "Müşteriye / Kliniğe Özel WhatsApp Yapay Zeka Cevap Politikası (Parlant VIP Koordinatör Motoru)",
+        tag("Resmi & Samimi İnsan Üslubu", "teal")
+      ),
+      h("p", { style: "color:var(--muted);margin:0 0 12px;font-size:13.5px", text: "Kliniğinizin fiyat, ilk muayene, nakit avantajı, çocuk diş, iğne korkusu ve yurt dışı hasta politikalarını buradan özelleştirin; WhatsApp ve Instagram asistanı hastanın mesajındaki isteğe göre bu kurallarla yanıt verir." }),
+      h("div", { class: "row" },
+        fld("Konuşma Üslubu & Tonu", sel("tone", [
+          ["resmi_samimi", "Resmi, Samimi ve Değer Hissettiren VIP Hasta Koordinatörü (Önerilen)"],
+          ["kurumsal_akademik", "Kurumsal ve Akademik Poliklinik Üslubu"],
+          ["sicak_butik", "Sıcak ve Butik Aile Diş Kliniği Üslubu"],
+        ], aiRulesObj.tone || "resmi_samimi")),
+        fld("Fiyat Sorusu Politikası", sel("price_policy", [
+          ["free_exam_invite", "Seçenek A (Önerilen): Fiyat verilmesin, muayene & röntgen sonrası yazılı plan densin"],
+          ["starting_range", "Seçenek B: Özel not eklensin ve muayeneye davet edilsin"],
+          ["direct_handoff", "Seçenek C: Fiyat soran hastalar öncelikle koordinatöre devredilsin"],
+        ], aiRulesObj.price_policy || "free_exam_invite"))
+      ),
+      h("div", { class: "row" },
+        fld("Nakit / Peşin Ödeme Avantajı Cevabı", inp("cash_discount_note", {
+          value: aiRulesObj.cash_discount_note || "Nakit veya peşin ödemelerde sağladığımız özel ödeme kolaylıklarını da muayeneniz sırasında planınıza özenle yansıtıyoruz.",
+        })),
+        fld("Taksit ve Özel Sigorta Cevabı", inp("payment_note", {
+          value: aiRulesObj.payment_note || "Kredi kartlarına taksit kolaylığı sağlıyor, özel sağlık sigortası ve anlaşmalı kurumlar için gereken tüm evrakları eksiksiz hazırlıyoruz.",
+        }))
+      ),
+      h("div", { class: "row" },
+        fld("İğne Korkusu & Sedasyon Konfor Cevabı", inp("pain_comfort_note", {
+          value: aiRulesObj.pain_comfort_note || "İğne ve diş hekimi korkusu olan misafirlerimizde işlem öncesinde yüzey uyuşturucu jel, modern lokal anestezi ve sedasyon destekli konfor protokolü uyguluyoruz.",
+        })),
+        fld("Çocuk Diş (Pedodonti) Yaklaşımı Cevabı", inp("kids_note", {
+          value: aiRulesObj.kids_note || "Çocuk diş hekimimiz (pedodonti uzmanımız), minik misafirlerimizin tedavilerini hiç korkutmadan, oyunlaştırılmış ve koruyucu bir yaklaşımla gerçekleştiriyor.",
+        }))
+      ),
+      h("div", { class: "row" },
+        fld("Yurt Dışı / Şehir Dışı Misafir VIP Karşılama Notu", inp("health_tourism_note", {
+          value: aiRulesObj.health_tourism_note || "Yurt dışından ve şehir dışından gelen misafirlerimiz için seyahat takvimine özel hızlandırılmış VIP randevu planlaması yapıyoruz.",
+        })),
+        fld("Kliniğe Özel Ekstra Bilgi / Kampanya / Vale Notu", inp("custom_extra_note", {
+          value: aiRulesObj.custom_extra_note || "",
+          placeholder: "Örn: Ücretsiz vale ve havalimanı VIP transfer desteğimiz mevcuttur.",
+        }))
+      ),
+      owner ? h("button", { class: "btn btn-primary", type: "submit" }, "WhatsApp AI Cevap Kurallarını Kaydet") : null
+    );
+
     setMain(
-      header("Ayarlar", "Otopilot kimliği, 16 dil seçimi, slot adımı ve ekosistem altyapı durumu."),
+      header("Ayarlar", "Otopilot kimliği, müşteriye özel WhatsApp yapay zeka cevap politikası, 16 dil seçimi ve ekosistem durumu."),
       form,
+      aiRulesForm,
       ecoCard
     );
   };

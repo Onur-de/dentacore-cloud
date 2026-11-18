@@ -43,17 +43,17 @@
     tabSched.addEventListener("click", () => switchPreviewTab("schedule"));
   }
 
-  // Hero senaryoları (TR, EN, AR RTL, DE)
+  // Hero senaryoları (TR, EN, AR RTL, DE — Parlant VIP Hasta Koordinatörü Üslubu)
   const SCENARIOS = {
     tr: {
       dir: "ltr",
       lang: "tr",
       msgs: [
         { cls: "msg-in", meta: "23:41 WhatsApp", text: "Yarın 14:30 randevuma yetişemeyeceğim, iptal edebilir misiniz?" },
-        { cls: "msg-out", meta: "23:41 Otopilot", text: "Randevunuz iptal edildi. Uygun yeni gün yazarsanız hemen planlayalım." },
+        { cls: "msg-out", meta: "23:41 VIP Koordinatör AI", text: "Merhabalar, bilgi verdiğiniz için çok teşekkür ederiz; yarın 14:30 randevunuzu iptal ettik. Takviminize uygun yeni bir gün ve saat paylaşırsanız memnuniyetle hemen planlayabiliriz." },
         { cls: "msg-sys", meta: "", text: "Bekleme listesi dalga 1: 3 hastaya 14:30 teklifi gitti, Selin Arslan “EVET” dedi, koltuk 2 doldu." }
       ],
-      layer: "L1 Kural + Bekleme Listesi",
+      layer: "L1 Parlant VIP + Bekleme Listesi",
       tokens: "yok",
       status: "Koltuk 2 yeniden doldu"
     },
@@ -62,19 +62,19 @@
       lang: "en",
       msgs: [
         { cls: "msg-in", meta: "23:47 Instagram DM", text: "Hi, I'm in London. How much is a full set of zirconia crowns? Can I come next month?" },
-        { cls: "msg-out", meta: "23:47 Otopilot", text: "Your treatment plan and cost are shared in writing after our dentist reviews your X-ray. Which dates suit you?" },
-        { cls: "msg-sys", meta: "", text: "Yüksek değerli tedavi talebi: Görsel kalite kontrolü geçti, koordinatöre öncelikli düşürüldü." }
+        { cls: "msg-out", meta: "23:47 VIP Koordinatör AI", text: "Hello and a warm welcome from Istanbul! For guests traveling from London, our specialist dentist prepares a personalized written treatment and cost plan after reviewing your X-ray, and our 4-6 day VIP zirconia schedule is tailored to your flights. Which dates next month suit you best?" },
+        { cls: "msg-sys", meta: "", text: "Yüksek değerli sağlık turizmi talebi: Görsel kalite kontrolü geçti, koordinatöre öncelikli düşürüldü." }
       ],
-      layer: "L2 Anahtar Kelime + Şablon",
+      layer: "L1 Parlant Bağlamsal Besteci",
       tokens: "yok",
-      status: "Yüksek değerli hasta"
+      status: "Yüksek değerli VIP misafir"
     },
     ar: {
       dir: "rtl",
       lang: "ar",
       msgs: [
         { cls: "msg-in", meta: "01:12 WhatsApp", text: "لدي تورم في الوجه ونزيف لا يتوقف بعد الخلع، ماذا أفعل؟" },
-        { cls: "msg-out", meta: "01:12 L1 Acil Kural", text: "قد تحتاج حالتك إلى رعاية عاجلة. يرجى الاتصال بالرقم 112 فوراً. تم إبلاغ الطبيب المناوب." },
+        { cls: "msg-out", meta: "01:12 L1 Acil Triyaj", text: "نتمنى لكم السلامة؛ قد تحتاج حالتكم إلى رعاية طبية عاجلة. يرجى الاتصال بالرقم 112 فوراً أو التوجه لأقرب قسم طوارئ. تم إبلاغ طبيبنا المناوب فوراً." },
         { cls: "msg-sys", meta: "", text: "Acil durum alarmı tetiklendi: Nöbetçi hekim ve panel uyarı kutusu bilgilendirildi." }
       ],
       layer: "L1 Acil Durum Radarı",
@@ -86,10 +86,10 @@
       lang: "de",
       msgs: [
         { cls: "msg-in", meta: "08:05 WhatsApp", text: "Guten Morgen, wo ist Ihre Adresse und haben Sie Parkplätze?" },
-        { cls: "msg-out", meta: "08:05 Otopilot", text: "Unsere Adresse: Bağdat Cad. No:142, Kadıköy / İstanbul. Parkmöglichkeiten direkt vor der Klinik." },
-        { cls: "msg-sys", meta: "", text: "Konum + otopark yanıtı 1 saniye altında şablondan gönderildi." }
+        { cls: "msg-out", meta: "08:05 VIP Koordinatör AI", text: "Guten Morgen und herzlich willkommen! Wir begrüßen Sie gerne in unserer Klinik in der Bağdat Cad. No:142, Kadıköy / İstanbul. Sie können bequem mit dem Auto anreisen: Kostenlose Gästeparkplätze befinden sich direkt vor der Klinik." },
+        { cls: "msg-sys", meta: "", text: "Konum + otopark birleşik VIP yanıtı 1 saniye altında gönderildi." }
       ],
-      layer: "L1 Çok Dilli SSS",
+      layer: "L1 Parlant Birleşik Niyet",
       tokens: "yok",
       status: "Otomatik yanıtlandı"
     }
