@@ -2211,21 +2211,35 @@ def calendar_feed(token: str):
 @app.get("/app/api/patients")
 def list_patients(search: str = "", include_archived: bool = False, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    if include_archived:
-        rows = q("SELECT * FROM patients WHERE clinic_id=? ORDER BY id DESC", cid)
-    else:
-        rows = q("SELECT * FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", cid)
+    sql_base = """
+        SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.phone_hmac,
+               COALESCE((SELECT sum(c.amount_kurus) FROM charges c WHERE c.patient_id=p.id AND c.voided_at IS NULL), 0) AS billed_k,
+               COALESCE((SELECT sum(y.amount_kurus) FROM payments y WHERE y.patient_id=p.id AND y.voided_at IS NULL), 0) AS paid_k,
+               EXISTS (SELECT 1 FROM anamnesis a WHERE a.patient_id=p.id AND a.red_flags_json <> '[]') AS rf,
+               (SELECT max(ap.starts_at) FROM appointments ap WHERE ap.patient_id=p.id) AS last_appt
+        FROM patients p
+        WHERE p.clinic_id=?
+    """
+    if not include_archived:
+        sql_base += " AND p.active=1"
+    sql_base += " ORDER BY p.id DESC"
+    rows = q(sql_base, cid)
     s = search.strip().lower()
+    s_hmac = phone_hmac(s) if s else ""
     out = []
     for p in rows:
-        if s and s not in (p["display_name"] or "").lower() and phone_hmac(s) != p["phone_hmac"]:
+        if s and s not in (p["display_name"] or "").lower() and s_hmac != p["phone_hmac"]:
             continue
-        billed = q1("SELECT coalesce(sum(amount_kurus),0) AS k FROM charges WHERE patient_id=? AND voided_at IS NULL", p["id"])["k"]
-        paid = q1("SELECT coalesce(sum(amount_kurus),0) AS k FROM payments WHERE patient_id=? AND voided_at IS NULL", p["id"])["k"]
-        rf = q1("SELECT 1 FROM anamnesis WHERE patient_id=? AND red_flags_json <> '[]'", p["id"])
-        la = q1("SELECT max(starts_at) AS d FROM appointments WHERE patient_id=?", p["id"])
-        out.append({"id": p["id"], "display_name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
-                    "active": bool(p.get("active", 1)), "balance": tl(billed - paid), "red_flag": bool(rf), "last_appt": la["d"] if la else None})
+        out.append({
+            "id": p["id"],
+            "display_name": p["display_name"],
+            "lang": p["lang"],
+            "channel": p["channel"],
+            "active": bool(p.get("active", 1)),
+            "balance": tl(int(p["billed_k"]) - int(p["paid_k"])),
+            "red_flag": bool(p["rf"]),
+            "last_appt": p["last_appt"],
+        })
     return out
 
 
@@ -2241,11 +2255,25 @@ def create_patient(b: PatientIn, u: dict = Depends(ANY)):
         raise HTTPException(400, "Geçerli telefon girin")
     cid = u["clinic_id"]
     ph = phone_hmac(b.phone)
-    ex_p = q1("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", cid, ph)
-    if ex_p:
-        return {"id": ex_p["id"], "duplicate": True}
-    pid = ex("INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,created_at) VALUES (?,?,?,?,?,?,?)",
-             cid, ph, enc(norm_phone(b.phone)), b.name, b.lang, "wa", iso_now())
+    pe = enc(norm_phone(b.phone))
+    t_now = iso_now()
+    with _DB_LOCK:
+        c = db()
+        ex_p = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", _clean_sql_args((cid, ph))).fetchone()
+        if ex_p:
+            return {"id": ex_p["id"], "duplicate": True}
+        try:
+            cur = c.execute(
+                "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,created_at) VALUES (?,?,?,?,?,?,?)",
+                _clean_sql_args((cid, ph, pe, b.name, b.lang, "wa", t_now)),
+            )
+            pid = cur.lastrowid
+            c.commit()
+        except sqlite3.IntegrityError:
+            ex_p2 = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=?", _clean_sql_args((cid, ph))).fetchone()
+            if ex_p2:
+                return {"id": ex_p2["id"], "duplicate": True}
+            raise HTTPException(409, "Bu telefon numarası zaten kayıtlı")
     write_audit(u["id"], u["email"], "patient.create", f"patient:{pid}", u["ip_h"], clinic_id=cid)
     return {"id": pid, "duplicate": False}
 
@@ -2259,21 +2287,32 @@ class PatientUpdateIn(BaseModel):
 @app.patch("/app/api/patients/{pid}")
 def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    p = q1("SELECT * FROM patients WHERE id=? AND clinic_id=?", pid, cid)
-    if not p:
-        raise HTTPException(404, "hasta yok")
-    new_name = b.name if b.name is not None else p["display_name"]
-    new_lang = b.lang if b.lang is not None else p["lang"]
-    if b.phone is not None:
-        if len(norm_phone(b.phone)) < 10:
-            raise HTTPException(400, "Geçerli telefon girin")
-        ph = phone_hmac(b.phone)
-        pe = enc(norm_phone(b.phone))
-    else:
-        ph = p["phone_hmac"]
-        pe = p["phone_enc"]
-    ex("UPDATE patients SET display_name=?, lang=?, phone_hmac=?, phone_enc=? WHERE id=? AND clinic_id=?",
-       new_name, new_lang, ph, pe, pid, cid)
+    with _DB_LOCK:
+        c = db()
+        p = c.execute("SELECT * FROM patients WHERE id=? AND clinic_id=?", (pid, cid)).fetchone()
+        if not p:
+            raise HTTPException(404, "hasta yok")
+        new_name = b.name if b.name is not None else p["display_name"]
+        new_lang = b.lang if b.lang is not None else p["lang"]
+        if b.phone is not None:
+            if len(norm_phone(b.phone)) < 10:
+                raise HTTPException(400, "Geçerli telefon girin")
+            ph = phone_hmac(b.phone)
+            pe = enc(norm_phone(b.phone))
+            dup = c.execute("SELECT id FROM patients WHERE clinic_id=? AND phone_hmac=? AND id<>?", (cid, ph, pid)).fetchone()
+            if dup:
+                raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı")
+        else:
+            ph = p["phone_hmac"]
+            pe = p["phone_enc"]
+        try:
+            c.execute(
+                "UPDATE patients SET display_name=?, lang=?, phone_hmac=?, phone_enc=? WHERE id=? AND clinic_id=?",
+                _clean_sql_args((new_name, new_lang, ph, pe, pid, cid)),
+            )
+            c.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı")
     write_audit(u["id"], u["email"], "patient.update", f"patient:{pid}", u["ip_h"], clinic_id=cid)
     return {"ok": True, "id": pid}
 
