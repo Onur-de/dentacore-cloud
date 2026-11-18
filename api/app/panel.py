@@ -599,7 +599,7 @@ async def list_patients(search: str = "", include_archived: bool = False, u: dic
     rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.created_at, {BAL_SQL} AS balance,
                               EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
                               (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
-                       FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)  # nosec B608
+                       FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)
     for r in rows:
         r["balance"] = tl(r["balance"])
     return rows
@@ -616,7 +616,7 @@ async def create_patient(b: PatientIn, u: dict = Depends(ANY)):
 
 @router.get("/app/api/patients/{pid}")
 async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
-    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, u["clinic_id"])  # nosec B608
+    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, u["clinic_id"])
     if not p:
         raise HTTPException(404, "hasta yok")
     phone = dec(p["phone_enc"])
@@ -1230,7 +1230,7 @@ async def list_clinics(request: Request, u: dict = Depends(OWNER)):
                               (SELECT count(*) FROM patients p WHERE p.clinic_id=c.id) AS patient_count,
                               (SELECT count(*) FROM appointments a WHERE a.clinic_id=c.id AND a.status IN ('booked','confirmed')) AS active_appts,
                               (SELECT coalesce(sum(y.amount_kurus),0) FROM payments y WHERE y.clinic_id=c.id AND y.voided_at IS NULL) AS paid_kurus
-                       FROM clinics c {where} ORDER BY c.id""", *args)  # nosec B608
+                       FROM clinics c {where} ORDER BY c.id""", *args)
     base = str(request.base_url).rstrip("/")
     for c in rows:
         c["paid_try"] = tl(c.pop("paid_kurus", 0))
