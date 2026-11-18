@@ -56,7 +56,9 @@ def main() -> None:
     print("\n[*] Dosyalar GitHub'a yukleniyor (Tarayicida giris penceresi acilirsa onaylayin)...")
     run_git("add", ".")
     run_git("commit", "-m", "chore: update DentaCore v6.2 cloud bundle")
-    push_proc = subprocess.run([GIT_EXE, "push", "-u", "origin", "main", "--force"], cwd=str(REPO_DIR))
+    push_proc = subprocess.run([GIT_EXE, "push", "-u", "origin", "main"], cwd=str(REPO_DIR))
+    if push_proc.returncode != 0:
+        push_proc = subprocess.run([GIT_EXE, "push", "-u", "origin", "main", "--force-with-lease"], cwd=str(REPO_DIR))
 
     if push_proc.returncode == 0:
         clean_url = remote_url[:-4] if remote_url.endswith(".git") else remote_url
@@ -74,7 +76,7 @@ def main() -> None:
         print(f"  • Kalici Tanitim     : {pages_url}tanitim.html")
         print(f"  • Kalici Panel       : {pages_url}panel.html")
         print("=" * 72)
-        print("\n[*] Simdi GitHub Pages ayarlar sayfasi aciliyor ('Source: GitHub Actions' veya 'Branch: main /docs' secin)...")
+        print("\n[*] Simdi GitHub Pages ayarlar sayfasi aciliyor ('Source: GitHub Actions' secin — Branch secerseniz cift dagitim cakismasi olur)...")
         webbrowser.open(settings_pages_url)
     else:
         print("\n[!] Yukleme sirasinda GitHub girisi tamamlanmadi veya baglanti hatasi olustu.")

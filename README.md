@@ -3,7 +3,7 @@
 Bu depo hem **Ömür Boyu Ücretsiz GitHub Pages / Vercel / Netlify Statik Bulut Sürümünü** (`docs/`) hem de **7/24 Ortak Veritabanlı Canlı Python FastAPI Sunucusunu** (`run_cloud.py`) içerir.
 
 ## 1. Ömür Boyu Ücretsiz Link (GitHub Pages / Vercel / Netlify)
-- **GitHub Pages:** Depo ayarlarından `Settings -> Pages -> Source: GitHub Actions` (veya `Deploy from a branch -> main -> /docs`) seçildiğinde:
+- **GitHub Pages:** Depo ayarlarından `Settings -> Pages -> Source: GitHub Actions` seçildiğinde `.github/workflows/deploy-pages.yml` tekil olarak yayına alır:
   - Tam Sistem & Yönetim Paneli (3 Şube): `https://<kullanici-adi>.github.io/<depo-adi>/`
   - Tanıtım Sitesi: `https://<kullanici-adi>.github.io/<depo-adi>/tanitim.html`
 - **Vercel / Netlify:** Depoyu bağladığınız anda otomatik olarak `vercel.json` / `netlify.toml` ile yayına girer.
