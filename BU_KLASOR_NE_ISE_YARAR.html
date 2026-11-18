@@ -3,12 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="5_KALICI_GITHUB_VE_BULUT_KURULUMU : Klasör Kullanım Rehberi - DentaCore v6.2 klasör içi kullanım kılavuzu.">
-  <title>5_KALICI_GITHUB_VE_BULUT_KURULUMU : Klasör Kullanım Rehberi</title>
-  <style>/* Hallmark · shape: station-sequence · genre: modern-minimal · theme: Wayfind (deal 2/3, seed dentacore-klinik-rehberi-fb5d·aec816b4·2026-11-18·r0) · job: try · draw: dentacore-v62
- * hero: stage · nav: top-bar · footer: ledger · imagery: none · signature: station-index · wayfind: 4px-grid
- * axes: light/mono/cool · posture: committed · contrast: pass · fold: pass · v2.0.0 */
-/* Hallmark · pre-emit critique: P9 H9 E9 S9 R9 V9 · weakest: S, tightened spacing to strict 4px scale */
+  <meta name="description" content="5_KALICI_GITHUB_VE_BULUT_KURULUMU klasöründeki GitHub Pages ve 7/24 bulut yayın dosyaları.">
+  <title>5_KALICI_GITHUB_VE_BULUT_KURULUMU : 7/24 İnternet ve Bulut Yayını</title>
+  <style>/* Hallmark · shape: station-sequence · genre: modern-minimal · theme: Wayfind · v2.0.0 */
   :root {
     --bg-page: #F3F7F6;
     --bg-surface: #FAFDFC;
@@ -38,227 +35,102 @@
     --radius-md: 12px;
     --radius-sm: 8px;
   }
-
-  * {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-  }
-
+  * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     overflow-x: clip;
-    -webkit-text-size-adjust: 100%;
-    -moz-text-size-adjust: 100%;
-    text-size-adjust: 100%;
     background-color: var(--bg-page);
     color: var(--text-main);
     font-family: var(--font-body);
     font-size: 16px;
     line-height: 1.65;
   }
-
-  p, li, td, th, label, span, div, h1, h2, h3, h4 {
-    max-height: 999999px;
-    overflow-wrap: break-word;
-  }
-
-  h1, h2, h3 {
-    text-wrap: balance;
-  }
-
-  .container {
-    max-width: 1180px;
-    margin: 0 auto;
-    padding: 32px 20px 72px;
-  }
-
+  .container { max-width: 1120px; margin: 0 auto; padding: 32px 20px 64px; }
   .hero-banner {
     background-color: var(--primary);
     color: var(--bg-surface);
-    padding: 36px 32px;
+    padding: 32px;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-card);
-    margin-bottom: 28px;
+    margin-bottom: 24px;
     border: 1px solid var(--primary-hover);
   }
-
-  .hero-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background-color: var(--primary-hover);
-    color: var(--bg-surface);
-    padding: 8px 16px;
-    border-radius: 999px;
-    font-size: 0.88rem;
-    font-weight: 600;
-    margin-bottom: 16px;
-  }
-
   h1 {
     font-family: var(--font-heading);
-    font-size: clamp(1.65rem, 2.8vw, 2.35rem);
-    line-height: 1.26;
+    font-size: clamp(1.55rem, 2.5vw, 2.15rem);
+    line-height: 1.25;
     font-weight: 800;
     margin-bottom: 12px;
   }
-
   .hero-lead {
-    font-size: 1.05rem;
+    font-size: 1.02rem;
     line-height: 1.6;
     color: var(--bg-subtle);
-    max-width: 880px;
+    max-width: 68ch;
   }
-
   h2 {
     font-family: var(--font-heading);
-    font-size: clamp(1.28rem, 2vw, 1.55rem);
-    line-height: 1.3;
+    font-size: 1.35rem;
     color: var(--primary);
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
-
   h3 {
     font-family: var(--font-heading);
-    font-size: 1.12rem;
-    line-height: 1.35;
+    font-size: 1.08rem;
     color: var(--text-main);
     margin-bottom: 8px;
   }
-
   .section-card {
     background-color: var(--bg-surface);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    padding: 28px;
-    margin-bottom: 24px;
+    padding: 26px;
+    margin-bottom: 22px;
     box-shadow: var(--shadow-card);
     transition: transform 0.18s ease, box-shadow 0.18s ease;
   }
-
-  .section-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-hover);
-  }
-
-  .grid-2 {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
-    gap: 20px;
-    margin-top: 16px;
-  }
-
-  .grid-3 {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-    gap: 20px;
-    margin-top: 16px;
-  }
-
+  .section-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin-top: 14px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 14px; }
   .info-box {
     background-color: var(--bg-subtle);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
-    padding: 20px;
-    margin: 16px 0;
+    padding: 18px;
+    margin: 12px 0;
   }
-
-  .warn-box {
-    background-color: var(--bg-warn-soft);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    padding: 20px;
-    margin: 16px 0;
-    color: var(--text-main);
-  }
-
   .success-box {
     background-color: var(--bg-success-soft);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
-    padding: 20px;
-    margin: 16px 0;
-    color: var(--text-main);
+    padding: 18px;
+    margin: 12px 0;
   }
-
   .analogy-card {
     background-color: var(--bg-accent-soft);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
-    padding: 20px;
-    margin: 16px 0;
+    padding: 18px;
+    margin: 12px 0;
   }
-
-  .analogy-title {
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .step-tag {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: var(--radius-sm);
-    background-color: var(--bg-subtle);
-    color: var(--primary);
-    border: 1px solid var(--border-strong);
-    font-weight: 700;
-    font-size: 0.85rem;
-    margin-bottom: 8px;
-  }
-
   .table-wrap {
     width: 100%;
     overflow-x: auto;
-    margin-top: 16px;
+    margin-top: 14px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
   }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    text-align: left;
-  }
-
-  th, td {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-color);
-    font-size: 0.94rem;
-    vertical-align: top;
-  }
-
-  th {
-    background-color: var(--bg-subtle);
-    color: var(--primary);
-    font-weight: 700;
-  }
-
-  code, .code-inline {
+  table { width: 100%; border-collapse: collapse; text-align: left; }
+  th, td { padding: 12px 16px; border-bottom: 1px solid var(--border-color); font-size: 0.94rem; vertical-align: top; }
+  th { background-color: var(--bg-subtle); color: var(--primary); font-weight: 700; }
+  code {
     font-family: var(--font-mono);
     background-color: var(--bg-subtle);
     color: var(--primary);
-    padding: 4px 8px;
+    padding: 3px 7px;
     border-radius: 4px;
     font-size: 0.88rem;
     font-weight: 600;
   }
-
-  pre {
-    background-color: var(--bg-code);
-    color: var(--text-code);
-    padding: 16px 20px;
-    border-radius: var(--radius-md);
-    overflow-x: auto;
-    font-family: var(--font-mono);
-    font-size: 0.88rem;
-    line-height: 1.55;
-    margin: 12px 0;
-  }
-
   .btn {
     display: inline-flex;
     align-items: center;
@@ -266,162 +138,68 @@
     background-color: var(--primary);
     color: var(--bg-surface);
     text-decoration: none;
-    padding: 12px 20px;
+    padding: 11px 18px;
     border-radius: var(--radius-sm);
     font-weight: 700;
-    font-size: 0.94rem;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
+    font-size: 0.93rem;
     transition: transform 0.16s ease, background-color 0.16s ease;
   }
-
-  .btn:hover {
-    background-color: var(--primary-hover);
-    transform: translateY(-2px);
-  }
-
-  .btn:active, button:active {
-    transform: translateY(0);
-  }
-
-  .btn:disabled, button:disabled, .form-control:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  .btn-secondary {
-    background-color: var(--bg-subtle);
-    color: var(--primary);
-    border: 1px solid var(--border-strong);
-  }
-
-  .btn-secondary:hover {
-    background-color: var(--border-color);
-    color: var(--text-main);
-  }
-
-  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
-  ul, ol {
-    padding-left: 24px;
-    margin: 8px 0;
-  }
-
-  li {
-    margin-bottom: 8px;
-  }
-
-  .svg-icon {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    stroke: currentColor;
-    stroke-width: 2;
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .form-group {
-    margin-bottom: 16px;
-  }
-
-  .form-group label {
-    display: block;
-    font-weight: 700;
-    font-size: 0.92rem;
-    margin-bottom: 8px;
-    color: var(--text-main);
-  }
-
-  .form-control {
-    width: 100%;
-    padding: 12px 16px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-body);
-    font-size: 0.95rem;
-    background-color: var(--bg-surface);
-    color: var(--text-main);
-  }
-
-  textarea.form-control {
-    min-height: 88px;
-    resize: vertical;
-  }
-
-  @media (max-width: 640px) {
-    .container {
-      padding: 20px 16px 48px;
-    }
-    .hero-banner, .section-card {
-      padding: 20px 16px;
-    }
-    .btn {
-      white-space: normal;
-    }
-  }
-
-  @media print {
-    .no-print {
-      display: none !important;
-    }
-    body {
-      background-color: var(--bg-surface);
-    }
-    .section-card {
-      box-shadow: none;
-      break-inside: avoid;
-    }
-  }
-
+  .btn:hover { background-color: var(--primary-hover); transform: translateY(-2px); }
+  a:focus-visible, button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  ul, ol { padding-left: 22px; margin: 8px 0; }
+  li { margin-bottom: 6px; }
+  .svg-icon { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-      scroll-behavior: auto !important;
-    }
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
-</style>
+  </style>
 </head>
 <body>
 <div class="container">
+
   <header class="hero-banner">
-    <div class="hero-badge">
-      <svg class="svg-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-      <span>5_KALICI_GITHUB_VE_BULUT_KURULUMU : Klasör Kullanım Rehberi</span>
-    </div>
-    <h1>Bu Klasör Sistemi 7/24 Kapanmayan Bulut Sunucuya Taşır</h1>
-    <p class="hero-lead">Eğer anlaşma yaptığın klinik sistem bizim bilgisayarımıza bağlı kalmasın, bilgisayarımız kapalıyken de 7/24 bulutta çalışsın derse bu klasörü kullanırsın.</p>
+    <h1>5_KALICI_GITHUB_VE_BULUT_KURULUMU : 7/24 Kapanmayan Bulut Yayını</h1>
+    <p class="hero-lead">Telefonundan ve doktorların telefonundan tıklanan canlı internet linklerini (GitHub Pages) ve 7/24 bulut sunucu dosyalarını barındırır. Arka planda otomatik güncellenir.</p>
   </header>
 
   <section class="section-card">
-    <h2>Bu Klasördeki Dosyalar ve Ne İşe Yaradıkları</h2>
+    <h2>Bu Klasördeki Önemli Dosyalar ve Ne İşe Yaradıkları</h2>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>Dosya / Klasör Adı</th>
-            <th>Gerçek Hayatta Ne İşe Yarar ve Nasıl Kullanılır?</th>
+            <th>Ne İşe Yarar?</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td><code>1_GITHUB_VE_BULUT_HAZIRLA.bat</code></td><td>Projeyi tek tıkla Git deposuna dönüştürür ve Render, Railway veya DigitalOcean bulut sunucularına yüklemeye hazır hale getirir.</td></tr>
-<tr><td><code>KALICI_BULUT_VE_GITHUB_REHBERI.html</code></td><td>Adım adım ücretsiz GitHub hesabına yükleme ve PostgreSQL + Redis bulut veritabanı bağlama kılavuzu.</td></tr>
+          <tr>
+            <td><code>1_TEK_TIKLA_GITHUBA_YUKLE.bat</code></td>
+            <td>İstediğin zaman çift tıklayarak tüm güncel sayfaları GitHub bulutuna manuel olarak da göndermeni sağlar (arka planda zaten otomatik çalışır).</td>
+          </tr>
+          <tr>
+            <td><code>docs/</code> (<code>index.html</code>, <code>panel.html</code>, <code>studyo.html</code>)</td>
+            <td>İnternette <code>https://onur-de.github.io/dentacore-cloud/</code> adresinde yayınlanan canlı tanıtım sitesi, 3 şubeli yönetim paneli ve WhatsApp bot stüdyosudur.</td>
+          </tr>
+          <tr>
+            <td><code>KALICI_GITHUB_LINKLERI.json</code></td>
+            <td>Yayındaki tüm canlı GitHub Pages ve depo adreslerinin kayıtlı olduğu dosyadır.</td>
+          </tr>
+          <tr>
+            <td><code>Dockerfile</code>, <code>docker-compose.yml</code>, <code>render.yaml</code>, <code>railway.json</code></td>
+            <td>Anlaştığın bir klinik 7/24 bulut sunucu istediğinde Render, Railway veya VPS sunucuya tek komutla kurulum yapan hazır yapılandırma dosyalarıdır.</td>
+          </tr>
         </tbody>
       </table>
     </div>
+
     <div style="margin-top: 20px;">
       <a class="btn" href="../00_BURADAN_BASLA_KULLANIM_VE_SATIS_REHBERI.html">
         <svg class="svg-icon" aria-hidden="true" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
         <span>Ana Rehbere Dön</span>
       </a>
     </div>
+
   </section>
 </div>
 </body>
