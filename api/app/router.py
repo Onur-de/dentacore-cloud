@@ -395,8 +395,7 @@ class TokenRouter:
         self.sem_threshold = float(os.environ.get("SEMANTIC_THRESHOLD", "0.92"))
         self.price_on = os.environ.get("PRICE_DISCLOSURE", "off").lower() == "on"
         self.forbidden = re.compile(normalize(
-            r"(\b\d+\s?(mg|ml|gr)\b|amoksisilin|amoxicillin|augmentin|ibuprofen|parol|majezik|apranax|antibiyotik|antibiotic|recete|"
-            r"teshis(iniz)?|tanisi|garanti|en iyi|agrisiz|kusursuz|indirim|kampanya|ucretsiz|\b\d[\d.]*\s?(tl|try|euro|eur|usd|\$|€))"
+            r"(\b\d+\s?(mg|ml|gr|mcg)\b|augmentin|klamoks|largopen|amoksisilin|amoxicillin|rovamycine|flagyl|nidazol|biteral|metronidazol|klindan|klindamisin|azitro|zitromax|azitromisin|cipro|siprofloksasin|tetradox|doksisiklin|cefaks|suprax|keflex|macrol|klacid|penisilin|bactrim|duocid|tavanic|avelox|rocephin|apranax|naprosyn|naproksen|majezik|flurbiprofen|arveles|dexomen|deksketoprofen|dexday|dexforte|dolorex|dikloron|voltaren|cataflam|diklofenak|brufen|nurofen|suprafen|ibuprofen|advil|dolven|calpol|parol|vermidon|minoset|tylol|parasetamol|paracetamol|panadol|novalgin|metamizol|geralgine|etol|etodolak|melox|ponstan|muscoril|tramadol|kloroben|andorex|tantum\s*verde|klorheksidin|chlorhexidine|listerine|batticon|betadine|aftojel|kenacort|anestol|dentinox|corsodyl|coumadin|warfarin|xarelto|eliquis|pradaxa|coraspin|ecopirin|aspirin|plavix|clexane|hibor|innohep|prednol|kortizon|dekort|deltacortril|fosamax|zometa|antibiyotik|antibiotic|painkiller|schmerzmittel|antibiotikum|recete|prescription|surup|tablet|kapsul|gargara|merhem|pomad|teshis(iniz)?|tanisi|garanti|en iyi|agrisiz|kusursuz|indirim|kampanya|ucretsiz|\b\d[\d.]*\s?(tl|try|euro|eur|usd|\$|€))"
         ))
 
     # ---------- yardımcılar ----------
