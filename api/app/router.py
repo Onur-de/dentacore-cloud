@@ -381,8 +381,8 @@ MULTILINGUAL_TYPO_TOKEN_MAP: dict[str, str] = {
 MULTILINGUAL_CANONICAL_VOCAB: dict[str, tuple[str, ...]] = {
     "tr": (
         "merhaba", "implant", "zirkonyum", "kaplama", "beyazlatma", "randevu", "muayene",
-        "fiyat", "ucret", "otopark", "adres", "nerede", "cumartesi", "pazartesi", "kapaniyor",
-        "aciliyor", "kanama", "durmuyor", "yutkunamiyorum", "sigorta", "taksit", "pedodonti",
+        "otopark", "cumartesi", "pazartesi", "kapaniyor",
+        "aciliyor", "durmuyor", "yutkunamiyorum", "sigorta", "pedodonti",
     ),
     "en": (
         "hello", "implant", "zirconia", "appointment", "parking", "address", "location",
@@ -474,7 +474,7 @@ def normalize_multilingual_typos(n_text: str, lang: str | None = None) -> str:
         w = m.group(0)
         if w in MULTILINGUAL_TYPO_TOKEN_MAP:
             return MULTILINGUAL_TYPO_TOKEN_MAP[w]
-        if w in _ALL_CANONICAL_SET or len(w) < 5 or _rf_fuzz is None or not vocab_candidates:
+        if w in _ALL_CANONICAL_SET or len(w) < 6 or _rf_fuzz is None or not vocab_candidates:
             return w
         best_cand = w
         best_score = 0.0
@@ -485,7 +485,7 @@ def normalize_multilingual_typos(n_text: str, lang: str | None = None) -> str:
             if w[0] != cand[0] and not (len(w) > 1 and len(cand) > 1 and w[0] == cand[1] and w[1] == cand[0]):
                 continue
             sc = _rf_fuzz.ratio(w, cand)
-            if sc >= 82.0 and sc > best_score:
+            if sc >= 85.0 and sc > best_score:
                 best_score = sc
                 best_cand = cand
         return best_cand
