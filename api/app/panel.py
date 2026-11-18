@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -394,16 +395,78 @@ async def calendar_feed(token: str):
     return PlainTextResponse(cal.feed_ics(rows, cname, caddr), media_type="text/calendar; charset=utf-8")
 
 
+DEFAULT_WORKING_HOURS_JSON = '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}'
+VALID_FDI_TEETH = {
+    *{n for qd in (10, 20, 30, 40) for n in range(qd + 1, qd + 9)},
+    *{n for qd in (50, 60, 70, 80) for n in range(qd + 1, qd + 6)},
+}
+
+
+def _parse_hhmm(val: str) -> int:
+    parts = str(val or "00:00").strip().split(":")
+    return int(parts[0]) * 60 + (int(parts[1]) if len(parts) > 1 else 0)
+
+
+def validate_working_hours(starts: datetime, duration_min: int, working_hours_json: str | None = None):
+    s_loc = (starts if starts.tzinfo else starts.replace(tzinfo=TZ)).astimezone(TZ)
+    e_loc = (s_loc + timedelta(minutes=duration_min)).astimezone(TZ)
+    if s_loc.date() != e_loc.date():
+        raise HTTPException(422, "Randevu aynı gün içinde başlamalı ve bitmelidir")
+    try:
+        wh = json.loads(working_hours_json or DEFAULT_WORKING_HOURS_JSON)
+        if not isinstance(wh, dict):
+            wh = json.loads(DEFAULT_WORKING_HOURS_JSON)
+    except Exception:
+        wh = json.loads(DEFAULT_WORKING_HOURS_JSON)
+
+    wd = s_loc.weekday()
+    day_keys = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    dkey = day_keys[wd]
+    if dkey in wh:
+        hrs = wh[dkey]
+    elif wd < 5:
+        hrs = wh.get("mon_fri", ["09:00", "19:00"])
+    elif wd == 5:
+        hrs = wh.get("sat", ["09:00", "15:00"])
+    else:
+        hrs = wh.get("sun", None)
+
+    if not hrs or not isinstance(hrs, (list, tuple)) or len(hrs) < 2 or not hrs[0] or not hrs[1]:
+        raise HTTPException(422, "Seçilen gün klinik kapalıdır (kapalı güne randevu oluşturulamaz)")
+
+    open_m = _parse_hhmm(hrs[0])
+    close_m = _parse_hhmm(hrs[1])
+    s_m = s_loc.hour * 60 + s_loc.minute
+    e_m = e_loc.hour * 60 + e_loc.minute
+    if s_m < open_m or e_m > close_m:
+        raise HTTPException(422, f"Randevu saati klinik çalışma saatleri ({hrs[0]}-{hrs[1]}) dışındadır")
+
+
+async def _require_active_patient(pid: int, cid: int) -> dict:
+    p = await q1("SELECT * FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    if not p.get("active", True):
+        raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
+    return p
+
+
 @router.post("/app/api/appointments")
 async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
+    cinfo = await q1("SELECT chairs, working_hours_json, buffer_min FROM clinics WHERE id=%s", cid)
+    max_chairs = int((cinfo and cinfo["chairs"]) or S.chairs)
+    if not b.chair.isdigit() or not (1 <= int(b.chair) <= max_chairs):
+        raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
     pid = b.patient_id
     if pid is not None:
-        if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid):
-            raise HTTPException(404, "hasta yok")
+        await _require_active_patient(pid, cid)
     else:
         if not b.phone or len(norm_phone(b.phone)) < 10:
             raise HTTPException(400, "Hasta seçin veya geçerli telefon girin")
+        ex_p = await q1("SELECT id, active FROM patients WHERE clinic_id=%s AND phone_hmac=%s", cid, phone_hmac(b.phone))
+        if ex_p and not ex_p.get("active", True):
+            raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
         pid = await upsert_patient(b.phone, name=b.name, clinic_id=cid)
     if b.doctor_id is not None:
         if not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
@@ -411,23 +474,21 @@ async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
     starts = b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)
     if starts < datetime.now(timezone.utc) - timedelta(minutes=5):
         raise HTTPException(400, "Geçmiş tarihe randevu oluşturulamaz")
-    cinfo = await q1("SELECT chairs FROM clinics WHERE id=%s", cid)
-    max_chairs = int((cinfo and cinfo["chairs"]) or S.chairs)
-    if not b.chair.isdigit() or not (1 <= int(b.chair) <= max_chairs):
-        raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
-    ends = starts + timedelta(minutes=b.duration_min)
+    validate_working_hours(starts, b.duration_min, (cinfo and cinfo.get("working_hours_json")) or DEFAULT_WORKING_HOURS_JSON)
+    buf_min = max(0, int((cinfo and cinfo.get("buffer_min")) or 0))
+    ends = starts + timedelta(minutes=b.duration_min + buf_min)
     async with tx() as t:
         # Aynı koltuğa eşzamanlı iki kayıt yarışını engelle
         await t.q("SELECT pg_advisory_xact_lock(hashtext(%s))", f"chair:{cid}:{b.chair}")
         clash = await t.q1("""SELECT id FROM appointments WHERE clinic_id=%s AND chair=%s AND status IN ('booked','confirmed')
-                              AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
-                           cid, b.chair, ends, starts)
+                              AND starts_at < %s AND starts_at + make_interval(mins => duration_min + %s) > %s LIMIT 1""",
+                           cid, b.chair, ends, buf_min, starts)
         if clash:
             raise HTTPException(409, f"Koltuk {b.chair} bu saatte dolu (randevu #{clash['id']})")
         if b.doctor_id is not None:
             doc_clash = await t.q1("""SELECT id FROM appointments WHERE clinic_id=%s AND doctor_id=%s AND status IN ('booked','confirmed')
-                                      AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
-                                   cid, b.doctor_id, ends, starts)
+                                      AND starts_at < %s AND starts_at + make_interval(mins => duration_min + %s) > %s LIMIT 1""",
+                                   cid, b.doctor_id, ends, buf_min, starts)
             if doc_clash:
                 raise HTTPException(409, f"Seçilen hekim bu saatte başka koltukta dolu (randevu #{doc_clash['id']})")
         r = await t.q1("""INSERT INTO appointments (clinic_id, patient_id, starts_at, duration_min, treatment, chair, doctor_id, source)
@@ -447,37 +508,39 @@ class ApptUpdate(BaseModel):
 @router.patch("/app/api/appointments/{aid}")
 async def update_appt(aid: int, b: ApptUpdate, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    cinfo = await q1("SELECT chairs FROM clinics WHERE id=%s", cid)
+    cinfo = await q1("SELECT chairs, working_hours_json, buffer_min FROM clinics WHERE id=%s", cid)
     max_chairs = int((cinfo and cinfo["chairs"]) or S.chairs)
+    buf_min = max(0, int((cinfo and cinfo.get("buffer_min")) or 0))
     async with tx() as t:
         cur_row = await t.q1("SELECT * FROM appointments WHERE id=%s AND clinic_id=%s", aid, cid)
         if not cur_row:
             raise HTTPException(404, "randevu yok")
-        starts = (b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)) if b.starts_at else cur_row["starts_at"]
-        if starts < datetime.now(timezone.utc) - timedelta(minutes=5):
-            raise HTTPException(400, "Geçmiş tarihe randevu taşınamaz")
-        dur = b.duration_min if b.duration_min is not None else cur_row["duration_min"]
         chair = str(b.chair if b.chair is not None else cur_row["chair"])
         if not chair.isdigit() or not (1 <= int(chair) <= max_chairs):
             raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
         doc_id = b.doctor_id if b.doctor_id is not None else cur_row["doctor_id"]
         if doc_id is not None and not await t.q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", doc_id, cid):
             raise HTTPException(404, "hekim yok")
+        starts = (b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)) if b.starts_at else cur_row["starts_at"]
+        if starts < datetime.now(timezone.utc) - timedelta(minutes=5):
+            raise HTTPException(400, "Geçmiş tarihe randevu taşınamaz")
+        dur = b.duration_min if b.duration_min is not None else cur_row["duration_min"]
+        validate_working_hours(starts, dur, (cinfo and cinfo.get("working_hours_json")) or DEFAULT_WORKING_HOURS_JSON)
         treat = b.treatment if b.treatment is not None else cur_row["treatment"]
-        ends = starts + timedelta(minutes=dur)
+        ends = starts + timedelta(minutes=dur + buf_min)
         await t.q("SELECT pg_advisory_xact_lock(hashtext(%s))", f"chair:{cid}:{chair}")
         clash = await t.q1(
             """SELECT id FROM appointments WHERE clinic_id=%s AND id<>%s AND chair=%s AND status IN ('booked','confirmed')
-               AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
-            cid, aid, chair, ends, starts,
+               AND starts_at < %s AND starts_at + make_interval(mins => duration_min + %s) > %s LIMIT 1""",
+            cid, aid, chair, ends, buf_min, starts,
         )
         if clash:
             raise HTTPException(409, f"Koltuk {chair} bu saatte dolu (randevu #{clash['id']})")
         if doc_id is not None:
             doc_clash = await t.q1(
                 """SELECT id FROM appointments WHERE clinic_id=%s AND id<>%s AND doctor_id=%s AND status IN ('booked','confirmed')
-                   AND starts_at < %s AND starts_at + make_interval(mins => duration_min) > %s LIMIT 1""",
-                cid, aid, doc_id, ends, starts,
+                   AND starts_at < %s AND starts_at + make_interval(mins => duration_min + %s) > %s LIMIT 1""",
+                cid, aid, doc_id, ends, buf_min, starts,
             )
             if doc_clash:
                 raise HTTPException(409, f"Seçilen hekim bu saatte başka koltukta dolu (randevu #{doc_clash['id']})")
@@ -523,16 +586,17 @@ BAL_SQL = """(SELECT coalesce(sum(amount_kurus),0) FROM charges c WHERE c.patien
 
 
 @router.get("/app/api/patients")
-async def list_patients(search: str = "", u: dict = Depends(ANY)):
+async def list_patients(search: str = "", include_archived: bool = False, u: dict = Depends(ANY)):
     cid = u["clinic_id"]
     search = search.strip()[:60]
+    act_clause = "" if include_archived else " AND p.active"
     if search and len(re.sub(r"\D", "", search)) >= 10:
-        where, args = "p.clinic_id=%s AND p.active AND p.phone_hmac=%s", [cid, phone_hmac(search)]
+        where, args = f"p.clinic_id=%s{act_clause} AND p.phone_hmac=%s", [cid, phone_hmac(search)]
     elif search:
-        where, args = "p.clinic_id=%s AND p.active AND p.display_name ILIKE %s", [cid, f"%{search}%"]
+        where, args = f"p.clinic_id=%s{act_clause} AND p.display_name ILIKE %s", [cid, f"%{search}%"]
     else:
-        where, args = "p.clinic_id=%s AND p.active", [cid]
-    rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.created_at, {BAL_SQL} AS balance,
+        where, args = f"p.clinic_id=%s{act_clause}", [cid]
+    rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.created_at, {BAL_SQL} AS balance,
                               EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
                               (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
                        FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)
@@ -565,15 +629,134 @@ async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
     for c in charges + pays:
         c["amount"] = tl(c.pop("amount_kurus"))
     return {"id": p["id"], "name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
+            "active": bool(p.get("active", True)),
             "phone": phone if reveal else mask_phone(phone), "balance": tl(p["balance"]), "appointments": appts,
             "charges": charges, "payments": pays, "anamnesis": anam, "consents": consents,
             "anamnesis_links": {a["id"]: modules.sign(f"/view/anamnez/{a['id']}", ttl=900) for a in anam} if u["role"] != "secretary" else {}}
 
 
+class OdontogramIn(BaseModel):
+    tooth_fdi: int
+    surface: Literal["M", "D", "O", "B", "L", "FULL"] = "FULL"
+    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] = "planned"
+    procedure_code: str = Field("", max_length=40)
+    procedure_name: str = Field(min_length=2, max_length=120)
+    amount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)
+    doctor_id: int | None = None
+    note: str = Field("", max_length=300)
+    auto_charge: bool = False
+    idempotency_key: str | None = Field(default=None, max_length=80)
+
+    @field_validator("tooth_fdi")
+    @classmethod
+    def check_fdi(cls, v: int) -> int:
+        if v not in VALID_FDI_TEETH:
+            raise ValueError("Geçersiz FDI diş numarası (11-48 daimi veya 51-85 süt dişi olmalı)")
+        return v
+
+
+class OdontogramUpdateIn(BaseModel):
+    surface: Literal["M", "D", "O", "B", "L", "FULL"] | None = None
+    status: Literal["healthy", "caries", "planned", "treated", "implant", "crown", "root_canal", "missing", "extraction"] | None = None
+    procedure_code: str | None = Field(default=None, max_length=40)
+    procedure_name: str | None = Field(default=None, min_length=2, max_length=120)
+    amount: Decimal | None = Field(default=None, ge=0, le=10_000_000)
+    doctor_id: int | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
+@router.get("/app/api/patients/{pid}/odontogram")
+async def get_odontogram(pid: int, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    p = await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
+    if not p:
+        raise HTTPException(404, "hasta yok")
+    rows = await q(
+        """SELECT t.*, s.full_name AS doctor_name
+           FROM tooth_records t LEFT JOIN staff_users s ON s.id=t.doctor_id
+           WHERE t.clinic_id=%s AND t.patient_id=%s ORDER BY t.tooth_fdi, t.id DESC""",
+        cid, pid,
+    )
+    for r in rows:
+        r["amount_try"] = tl(r["amount_kurus"])
+    return {
+        "patient_id": pid,
+        "clinic_id": cid,
+        "records": rows,
+        "summary": {
+            "total_records": len(rows),
+            "treated_count": sum(1 for r in rows if r["status"] in ("treated", "implant", "crown", "root_canal")),
+            "planned_count": sum(1 for r in rows if r["status"] in ("planned", "caries", "extraction")),
+        },
+    }
+
+
+@router.post("/app/api/patients/{pid}/odontogram")
+async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    await _require_active_patient(pid, cid)
+    if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
+        raise HTTPException(404, "hekim yok")
+    amt_k = kurus(b.amount)
+    charge_id = None
+    async with tx() as t:
+        rec = await t.q1(
+            """INSERT INTO tooth_records
+               (clinic_id, patient_id, tooth_fdi, surface, status, procedure_code, procedure_name, amount_kurus, doctor_id, note)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            cid, pid, b.tooth_fdi, b.surface, b.status, b.procedure_code, b.procedure_name, amt_k, b.doctor_id or u["id"], b.note,
+        )
+        if b.auto_charge and amt_k > 0:
+            if b.idempotency_key:
+                dup = await t.q1("SELECT id FROM charges WHERE clinic_id=%s AND idempotency_key=%s", cid, b.idempotency_key)
+                if dup:
+                    raise HTTPException(409, "Bu odontogram hizmet borçlandırması zaten işlendi")
+            desc = f"Diş #{b.tooth_fdi} ({b.surface}) - {b.procedure_name}"[:120]
+            ch = await t.q1(
+                """INSERT INTO charges (clinic_id, patient_id, description, amount_kurus, doctor_id, created_by, idempotency_key)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                cid, pid, desc, amt_k, b.doctor_id or u["id"], u["id"], b.idempotency_key,
+            )
+            charge_id = ch["id"]
+    await log(u, "odontogram.create", f"patient:{pid}:tooth:{b.tooth_fdi}", {"surface": b.surface, "status": b.status, "charge_id": charge_id})
+    return {"id": rec["id"], "tooth_fdi": b.tooth_fdi, "surface": b.surface, "status": b.status, "charge_id": charge_id}
+
+
+@router.patch("/app/api/patients/{pid}/odontogram/{rid}")
+async def update_odontogram_record(pid: int, rid: int, b: OdontogramUpdateIn, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    rec = await q1("SELECT * FROM tooth_records WHERE id=%s AND patient_id=%s AND clinic_id=%s", rid, pid, cid)
+    if not rec:
+        raise HTTPException(404, "diş kaydı yok")
+    new_surface = b.surface if b.surface is not None else rec["surface"]
+    new_status = b.status if b.status is not None else rec["status"]
+    new_code = b.procedure_code if b.procedure_code is not None else rec["procedure_code"]
+    new_name = b.procedure_name if b.procedure_name is not None else rec["procedure_name"]
+    new_amt = kurus(b.amount) if b.amount is not None else rec["amount_kurus"]
+    new_doc = b.doctor_id if b.doctor_id is not None else rec["doctor_id"]
+    new_note = b.note if b.note is not None else rec["note"]
+    await q(
+        """UPDATE tooth_records SET surface=%s, status=%s, procedure_code=%s, procedure_name=%s, amount_kurus=%s, doctor_id=%s, note=%s
+           WHERE id=%s AND patient_id=%s AND clinic_id=%s""",
+        new_surface, new_status, new_code, new_name, new_amt, new_doc, new_note, rid, pid, cid,
+    )
+    await log(u, "odontogram.update", f"tooth_record:{rid}", {"status": new_status})
+    return {"ok": True, "id": rid}
+
+
+@router.delete("/app/api/patients/{pid}/odontogram/{rid}")
+async def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICAL)):
+    cid = u["clinic_id"]
+    r = await q1("DELETE FROM tooth_records WHERE id=%s AND patient_id=%s AND clinic_id=%s RETURNING id", rid, pid, cid)
+    if not r:
+        raise HTTPException(404, "diş kaydı yok")
+    await log(u, "odontogram.delete", f"tooth_record:{rid}")
+    return {"ok": True}
+
+
 @router.post("/app/api/patients/{pid}/anamnesis")
 async def send_anam(pid: int, u: dict = Depends(ANY)):
-    if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, u["clinic_id"]):
-        raise HTTPException(404, "hasta yok")
+    await _require_active_patient(pid, u["clinic_id"])
     link = await modules.send_anamnesis(pid)
     await log(u, "anamnesis.send", f"patient:{pid}")
     return {"link": link}
@@ -639,8 +822,7 @@ async def waitlist(u: dict = Depends(ANY)):
 
 @router.post("/app/api/waitlist")
 async def add_wait(b: WaitIn, u: dict = Depends(ANY)):
-    if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", b.patient_id, u["clinic_id"]):
-        raise HTTPException(404, "hasta yok")
+    await _require_active_patient(b.patient_id, u["clinic_id"])
     r = await q1("INSERT INTO waitlist (patient_id, treatment) VALUES (%s,%s) RETURNING id", b.patient_id, b.treatment)
     await log(u, "waitlist.add", f"patient:{b.patient_id}")
     return {"id": r["id"]}
@@ -830,7 +1012,9 @@ class ChargeIn(BaseModel):
     description: str = Field(min_length=2, max_length=120)
     amount: Decimal = Field(gt=0, le=10_000_000)
     doctor_id: int | None = None
-    discount: Decimal = Field(Decimal(0), ge=0, le=100)
+    discount: Decimal = Field(Decimal(0), ge=0, le=10_000_000)
+    idempotency_key: str | None = Field(default=None, max_length=80)
+    allow_duplicate: bool = False
 
 
 class PaymentIn(BaseModel):
@@ -838,6 +1022,7 @@ class PaymentIn(BaseModel):
     amount: Decimal = Field(gt=0, le=10_000_000)
     method: Literal["nakit", "kart", "havale", "diger"]
     idempotency_key: str | None = Field(default=None, max_length=80)
+    allow_advance: bool = False
 
 
 class VoidIn(BaseModel):
@@ -846,26 +1031,51 @@ class VoidIn(BaseModel):
 
 @router.post("/app/api/charges")
 async def add_charge(b: ChargeIn, u: dict = Depends(ANY)):
+    if not await limiter.hit(f"chg:{u['id']}", 60, 60):
+        raise HTTPException(429, "Çok fazla hizmet ekleme isteği")
     cid = u["clinic_id"]
-    if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", b.patient_id, cid):
-        raise HTTPException(404, "hasta yok")
+    await _require_active_patient(b.patient_id, cid)
     if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
         raise HTTPException(404, "hekim yok")
-    net_k = kurus(b.amount * (Decimal(100) - b.discount) / Decimal(100))
-    if net_k <= 0:
+    net_amount = b.amount - b.discount
+    if net_amount <= 0:
         raise HTTPException(400, "Net hizmet tutarı pozitif olmalıdır")
-    r = await q1("""INSERT INTO charges (clinic_id, patient_id, description, amount_kurus, discount, doctor_id, created_by)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                 cid, b.patient_id, b.description, net_k, b.discount, b.doctor_id, u["id"])
+    net_k = kurus(net_amount)
+    desc = (f"{b.description} (İndirim: {b.discount} TL)" if b.discount > 0 else b.description)[:120]
+    try:
+        async with tx() as t:
+            if b.idempotency_key:
+                await t.q("SELECT pg_advisory_xact_lock(hashtext(%s))", f"chg:{cid}:{b.idempotency_key}")
+                dup = await t.q1("SELECT id FROM charges WHERE clinic_id=%s AND idempotency_key=%s", cid, b.idempotency_key)
+                if dup:
+                    raise HTTPException(409, "Bu hizmet borçlandırması zaten işlendi (mükerrer işlem engellendi)")
+            elif not b.allow_duplicate:
+                recent_dup = await t.q1(
+                    """SELECT id FROM charges WHERE clinic_id=%s AND patient_id=%s AND description=%s AND amount_kurus=%s
+                       AND COALESCE(doctor_id,0)=COALESCE(%s,0) AND voided_at IS NULL AND created_at > now() - interval '15 seconds' LIMIT 1""",
+                    cid, b.patient_id, desc, net_k, b.doctor_id,
+                )
+                if recent_dup:
+                    raise HTTPException(409, "Aynı hizmet borcu az önce eklendi (çift tıklama / mükerrer borç engellendi)")
+            r = await t.q1(
+                """INSERT INTO charges (clinic_id, patient_id, description, amount_kurus, discount, doctor_id, created_by, idempotency_key)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                cid, b.patient_id, desc, net_k, min(b.discount, Decimal(100)), b.doctor_id, u["id"], b.idempotency_key,
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(409, "Mükerrer hizmet borçlandırması engellendi")
     await log(u, "kasa.charge", f"charge:{r['id']}", {"kurus": net_k, "discount": str(b.discount)})
-    return {"id": r["id"], "amount_try": tl(net_k)}
+    return {"id": r["id"], "amount_try": tl(net_k), "net_kurus": net_k}
 
 
 @router.post("/app/api/payments")
 async def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
+    if not await limiter.hit(f"pay:{u['id']}", 60, 60):
+        raise HTTPException(429, "Çok fazla tahsilat isteği")
     cid = u["clinic_id"]
-    if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", b.patient_id, cid):
-        raise HTTPException(404, "hasta yok")
+    await _require_active_patient(b.patient_id, cid)
     amt_k = kurus(b.amount)
     try:
         async with tx() as t:
@@ -874,6 +1084,17 @@ async def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
                 dup = await t.q1("SELECT id FROM payments WHERE clinic_id=%s AND idempotency_key=%s", cid, b.idempotency_key)
                 if dup:
                     raise HTTPException(409, f"Bu ödeme isteği daha önce işlendi (idempotency #{dup['id']})")
+            bal_row = await t.q1(
+                """SELECT (SELECT coalesce(sum(amount_kurus),0) FROM charges WHERE clinic_id=%s AND patient_id=%s AND voided_at IS NULL)
+                        - (SELECT coalesce(sum(amount_kurus),0) FROM payments WHERE clinic_id=%s AND patient_id=%s AND voided_at IS NULL) AS bal""",
+                cid, b.patient_id, cid, b.patient_id,
+            )
+            balance_k = int((bal_row and bal_row["bal"]) or 0)
+            if amt_k > max(0, balance_k) and not b.allow_advance:
+                raise HTTPException(
+                    422,
+                    f"Hastanın açık bakiyesi {tl(max(0, balance_k)):.2f} TL; bakiye üstü tahsilat için avans onayı (allow_advance=true) gereklidir",
+                )
             r = await t.q1(
                 """INSERT INTO payments (clinic_id, patient_id, amount_kurus, method, created_by, idempotency_key)
                    VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
@@ -1062,7 +1283,7 @@ async def list_conversations(u: dict = Depends(ANY)):
                              (SELECT m.layer FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_layer,
                              (SELECT m.intent FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_intent,
                              (SELECT count(*) FROM message_log m WHERE m.patient_id=p.id) AS msg_count
-                      FROM patients p WHERE p.clinic_id=%s ORDER BY last_at DESC NULLS LAST, p.id DESC LIMIT 100""", cid)
+                      FROM patients p WHERE p.clinic_id=%s AND p.active ORDER BY last_at DESC NULLS LAST, p.id DESC LIMIT 100""", cid)
 
 
 class ReplyIn(BaseModel):
@@ -1071,9 +1292,7 @@ class ReplyIn(BaseModel):
 
 @router.post("/app/api/conversations/{pid}/send")
 async def send_conversation(pid: int, b: ReplyIn, u: dict = Depends(ANY)):
-    p = await q1("SELECT id, phone_enc FROM patients WHERE id=%s AND clinic_id=%s", pid, u["clinic_id"])
-    if not p:
-        raise HTTPException(404, "hasta yok")
+    p = await _require_active_patient(pid, u["clinic_id"])
     from . import wa
     await wa.send_text(dec(p["phone_enc"]), b.text)
     await log_msg(pid, "out", "panel-manuel", "personel", 0, 0, clinic_id=u["clinic_id"])
@@ -1143,6 +1362,8 @@ class SettingsIn(BaseModel):
     default_lang: str = Field("tr", max_length=10)
     slot_step_min: int = Field(15, ge=5, le=60)
     google_review_url: str = Field("", max_length=250)
+    working_hours_json: str | None = None
+    buffer_min: int = Field(0, ge=0, le=120)
 
 
 @router.get("/app/api/settings")
@@ -1153,9 +1374,16 @@ async def get_settings(u: dict = Depends(ANY)):
 
 @router.post("/app/api/settings")
 async def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
+    wh_str = b.working_hours_json or DEFAULT_WORKING_HOURS_JSON
+    try:
+        parsed_wh = json.loads(wh_str)
+        if not isinstance(parsed_wh, dict):
+            raise ValueError("dict değil")
+    except Exception:
+        raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı")
     await q("""UPDATE clinics SET name=%s, city=%s, address=%s, phone=%s, autopilot_name=%s, default_lang=%s,
-               slot_step_min=%s, google_review_url=%s WHERE id=%s""",
-            b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, u["clinic_id"])
+               slot_step_min=%s, google_review_url=%s, working_hours_json=%s, buffer_min=%s WHERE id=%s""",
+            b.name, b.city, b.address, b.phone, b.autopilot_name, b.default_lang, b.slot_step_min, b.google_review_url, wh_str, b.buffer_min, u["clinic_id"])
     await log(u, "settings.update", f"clinic:{u['clinic_id']}")
     return {"ok": True}
 
@@ -1166,6 +1394,8 @@ class AskIn(BaseModel):
 
 @router.post("/app/api/assistant")
 async def panel_assistant(b: AskIn, u: dict = Depends(ANY)):
+    if not await limiter.hit(f"asst:{u['id']}", 30, 60):
+        raise HTTPException(429, "Çok fazla asistan sorgusu")
     from . import staff_bot
     txt = b.question.lower()
     if any(k in txt for k in ("bugün", "bugun")):
@@ -1184,6 +1414,9 @@ async def panel_assistant(b: AskIn, u: dict = Depends(ANY)):
 class SimIn(BaseModel):
     text: str = Field(min_length=1, max_length=1200)
     lang: str | None = Field(default=None, max_length=10)
+    session_id: str | None = Field(default=None, max_length=80)
+    patient_id: int | None = None
+    context_previous_turn: str | None = Field(default=None, max_length=1200)
 
 
 _SIM_ROUTER: TokenRouter | None = None
@@ -1198,18 +1431,44 @@ def _get_sim_router() -> TokenRouter:
 
 @router.post("/app/api/conversations/simulate")
 async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
+    sim_limit = 20 if u["role"] == "secretary" else (40 if u["role"] == "doctor" else 60)
+    if not await limiter.hit(f"sim:{u['id']}", sim_limit, 60):
+        raise HTTPException(429, "Çok fazla simülasyon isteği gönderildi; lütfen 1 dakika bekleyin")
     cid = u["clinic_id"]
     c = await q1("SELECT name, address, phone FROM clinics WHERE id=%s", cid)
-    facts: dict[str, str] = {"clinic": (c and c["name"]) or u.get("clinic_name") or S.clinic}
+    all_branches = await q("SELECT id, name, city, address, phone FROM clinics WHERE active")
+    facts: dict = {
+        "clinic": (c and c["name"]) or u.get("clinic_name") or S.clinic,
+        "branches": all_branches,
+    }
     if c and c.get("address"):
         facts["adres"] = c["address"]
     if c and c.get("phone"):
         facts["telefon"] = c["phone"]
     rtr = _get_sim_router()
     try:
-        res = await asyncio.wait_for(rtr.route(b.text, lang=b.lang, clinic_facts=facts, allow_llm=True), timeout=16.0)
+        res = await asyncio.wait_for(
+            rtr.route(
+                b.text,
+                lang=b.lang,
+                clinic_facts=facts,
+                allow_llm=True,
+                session_id=b.session_id,
+                patient_id=b.patient_id,
+                context_previous_turn=b.context_previous_turn,
+            ),
+            timeout=16.0,
+        )
     except Exception:
-        res = await rtr.route(b.text, lang=b.lang, clinic_facts=facts, allow_llm=False)
+        res = await rtr.route(
+            b.text,
+            lang=b.lang,
+            clinic_facts=facts,
+            allow_llm=False,
+            session_id=b.session_id,
+            patient_id=b.patient_id,
+            context_previous_turn=b.context_previous_turn,
+        )
     await log_msg(None, "in", None, "simulator", 0, 0, clinic_id=cid)
     await log_msg(None, "out", res.layer, f"simulator:{res.intent}", res.tokens_in, res.tokens_out, clinic_id=cid)
     await log(u, "conversation.simulate", f"clinic:{cid}", {"lang": res.lang, "layer": res.layer, "intent": res.intent})
@@ -1222,6 +1481,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
         "tokens_out": res.tokens_out,
         "alert": res.alert,
         "handoff": res.handoff,
+        "meta": res.meta,
     }
 
 

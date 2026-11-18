@@ -277,7 +277,7 @@
         "he": "(האם זה כואב|ללא כאב|פחד מרופא שיניים|טשטוש|הרדמה מקומית|סדציה)"
       },
       "answers": {
-        "tr": "İşlemlerimiz öncesinde modern lokal anestezi uygulandığı için işlem sırasında ağrı hissetmezsiniz. Diş hekimi korkusu (fobi) olan hastalarımız için hekim kontrolünde konforlu tedavi seçeneklerimiz mevcuttur. Muayene randevusu oluşturmamı ister misiniz?",
+        "tr": "Hiç endişelenmeyin; işlem öncesinde bölgeyi modern lokal anesteziyle tamamen uyuşturduğumuz için ağrı hissetmezsiniz. Diş hekimi korkusu olan hastalarımızda hekimimiz çok daha sakin ve konforlu bir yöntem izliyor. Ön görüşme için randevu oluşturalım mı?",
         "en": "All procedures are performed under modern local anesthesia so you feel comfortable during treatment. For patients with dental anxiety, our doctors offer gentle, stress-free care options. Would you like me to schedule a consultation?",
         "de": "Dank moderner Lokalanästhesie verläuft die Behandlung schmerzfrei und schonend. Auch für Angstpatienten bieten wir eine besonders einfühlsame Betreuung an. Möchten Sie einen Beratungstermin vereinbaren?",
         "ar": "تتم جميع المعالجات تحت التخدير الموضعي الحديث لضمان راحتكم التامة دون ألم. هل ترغبون في حجز موعد للاستشارة الطبية؟",
@@ -315,7 +315,7 @@
         "he": "(כמה ימים נמשך|משך הטיפול|זמן החלמה)"
       },
       "answers": {
-        "tr": "Tedavi süresi yapılacak işleme ve çene kemiği yapınıza göre değişmektedir. Tek seanslık işlemler aynı gün tamamlanırken, zirkonyum ve estetik gülüş tasarımı ortalama 4-6 gün, implant uygulamaları ise hekim muayenesi sonrası netleşen takvimle planlanır. Hekimimizin size özel süre planı çıkarması için randevu oluşturalım mı?",
+        "tr": "Tedavi süresi yapılacak işleme göre değişiyor. Tek seanslık işlemleri aynı gün bitiriyoruz; zirkonyum ve gülüş tasarımı ortalama 4 ile 6 gün sürüyor. İmplant takvimini ise hekimimiz muayenede netleştiriyor. Size özel plan çıkarmamız için randevu oluşturalım mı?",
         "en": "Treatment duration depends on your clinical plan: zirconia and smile design typically take 4 to 6 days, while implant timelines are confirmed by our specialist after an X-ray evaluation. Shall we book a consultation or review your dental X-ray?",
         "de": "Die Behandlungsdauer richtet sich nach Ihrem Befund: Zirkonkronen und Smile-Design dauern meist 4 bis 6 Tage, Implantatpläne werden nach Röntgenanalyse individuell erstellt. Sollen wir einen Termin für Sie planen?",
         "ar": "تختلف مدة العلاج حسب الحالة؛ تصميم الابتسامة والزيركون يستغرق عادة من 4 إلى 6 أيام، وتحدد خطة الزراعة بعد فحص الطبيب للأشعة.",
@@ -353,7 +353,7 @@
         "he": "(רופא שיניים לילדים|שן חלב|שיני חלב|טיפול שיניים לילדים)"
       },
       "answers": {
-        "tr": "Kliniğimizde çocuk hastalarımız (pedodonti) için yaş grubuna uygun, korkutmayan ve koruyucu diş hekimliği yaklaşımları uygulanmaktadır. Çocuğunuzun yaşını ve şikayetini paylaşırsanız uygun hekimimiz için hemen randevu planlayabilirim.",
+        "tr": "Çocuk diş hekimimiz (pedodonti) minik hastalarımızla korkutmayan, koruyucu bir yaklaşımla ilgileniyor. Çocuğunuzun yaşını ve şikayetini yazarsanız uzman hekimimize hemen randevu planlayabiliriz.",
         "en": "Yes, we provide gentle pediatric dental care tailored for children in a calm environment. Share your child's age and preferred day so we can arrange a suitable appointment.",
         "de": "Ja, wir bieten einfühlsame Kinderzahnheilkunde in ruhiger Atmosphäre an. Teilen Sie uns gerne das Alter Ihres Kindes für einen Termin mit.",
         "ar": "نعم، نقدم رعاية أسنان لطيفة ومخصصة للأطفال في بيئة مريحة. يرجى مشاركة عمر الطفل لتحديد موعد مناسب.",
@@ -391,7 +391,7 @@
         "he": "(ביטוח שיניים|ביטוח בריאות|תשלומים|פריסת תשלומים)"
       },
       "answers": {
-        "tr": "Kliniğimizde kredi kartına taksit imkanları ve özel sağlık sigortası / anlaşmalı kurum evrak süreçleri bulunmaktadır. Poliçenizin kapsamını veya güncel kart taksit seçeneklerini hasta kabul ekibimizin kontrol etmesi için iletişim numaranızı bırakabilir veya randevu oluşturabilirsiniz.",
+        "tr": "Kredi kartlarına taksit yapıyor, özel sağlık sigortası ve anlaşmalı kurumlar için gereken tüm evrakları hazırlıyoruz. Poliçenizin kapsamını veya kartınıza uygun taksit seçeneklerini kontrol etmemiz için telefon numaranızı bırakabilirsiniz.",
         "en": "We support major credit cards, flexible installment options, and provide full medical documentation and invoices for international and private dental insurance claims.",
         "de": "Wir unterstützen gängige Kreditkarten sowie flexible Zahlungsoptionen und stellen alle erforderlichen Unterlagen für Ihre Zahnzusatzversicherung bereit.",
         "ar": "ندعم بطاقات الائتمان وخيارات التقسيط، ونوفر كافة التقارير والفواتير الطبية اللازمة لشركات التأمين.",
@@ -450,7 +450,7 @@
   },
   "templates": {
     "fiyat": {
-      "tr": "Tedavi planı ve ücret; muayene ve gerekli görüntüleme sonrası hekimimiz tarafından size özel ve yazılı olarak paylaşılır. Ön değerlendirme için size uygun gün ve saat aralığını yazar mısınız?",
+      "tr": "Tedavi planı ve ücreti, muayene ve röntgen kontrolünüzden sonra hekimimiz size özel yazılı olarak paylaşıyor. Ön değerlendirme için size hangi gün ve saat aralığı uyar?",
       "en": "Your treatment plan and its cost are shared in writing by our dentist after the examination and any required imaging. Which day and time would suit you for an initial consultation?",
       "de": "Behandlungsplan und Kosten erhalten Sie nach der Untersuchung und ggf. Röntgenaufnahmen schriftlich von unserem Zahnarzt. Welcher Tag und welche Uhrzeit passen Ihnen für einen ersten Termin?",
       "ar": "تتم مشاركة خطة العلاج وتكلفتها كتابياً من قبل طبيبنا بعد الفحص والتصوير اللازم. ما اليوم والوقت المناسبان لكم لموعد الاستشارة الأولى؟",
@@ -468,7 +468,7 @@
       "he": "תוכנית הטיפול והעלות נמסרות בכתב על ידי הרופא לאחר בדיקה וצילום. איזה יום ושעה נוחים לכם לבדיקה?"
     },
     "randevu": {
-      "tr": "Randevu talebinizi aldık. Size uygun gün ve saat aralığını (örn. Salı öğleden sonra) yazarsanız ekibimiz çalışma saatlerinde teyit edecektir.",
+      "tr": "Randevu talebinizi aldık. Size uygun gün ve saati (örneğin Salı öğleden sonra) yazarsanız ekibimiz hemen onaylayacaktır.",
       "en": "We have received your appointment request. Please tell us a preferred day and time (e.g. Tuesday afternoon); our team will confirm during working hours.",
       "de": "Ihre Terminanfrage ist eingegangen. Nennen Sie uns bitte Wunschtag und Uhrzeit (z. B. Dienstagnachmittag); unser Team bestätigt während der Öffnungszeiten.",
       "ar": "تم استلام طلب الموعد. يرجى إخبارنا باليوم والوقت المفضلين (مثلاً الثلاثاء بعد الظهر) وسيؤكد فريقنا خلال ساعات العمل.",
@@ -486,7 +486,7 @@
       "he": "בקשת התור התקבלה. כתבו לנו איזה יום ושעה מתאימים ונאשר מולכם."
     },
     "insan": {
-      "tr": "Mesajınızı ekibimize ilettik; çalışma saatlerinde size dönüş yapılacaktır.",
+      "tr": "Mesajınızı hasta kabul ekibimize ilettik; çalışma saatlerimiz içinde size hemen dönüş yapacağız.",
       "en": "We have forwarded your message to our team; they will get back to you during working hours.",
       "de": "Wir haben Ihre Nachricht an unser Team weitergeleitet; Sie erhalten während der Öffnungszeiten eine Antwort.",
       "ar": "تم تحويل رسالتكم إلى فريقنا وسيتواصلون معكم خلال ساعات العمل.",
@@ -504,7 +504,7 @@
       "he": "העברנו את הודעתכם לצוות שלנו ונחזור אליכם בשעות הפעילות."
     },
     "sikayet": {
-      "tr": "Yaşadığınız durum için üzgünüz. Mesajınız doğrudan başhekimliğimize iletildi; en kısa sürede sizinle iletişime geçilecektir.",
+      "tr": "Yaşadığınız aksaklık için gerçekten üzgünüz. Mesajınızı doğrudan başhekimliğimize ilettik; sizinle en kısa sürede bizzat iletişime geçeceğiz.",
       "en": "We are sorry to hear this. Your message has been forwarded directly to our clinical director, who will contact you shortly.",
       "de": "Das tut uns leid. Ihre Nachricht wurde direkt an unsere Praxisleitung weitergeleitet; wir melden uns zeitnah.",
       "ar": "نأسف لما حدث. تم تحويل رسالتكم مباشرة إلى المدير الطبي وسيتم التواصل معكم قريباً.",
@@ -540,7 +540,7 @@
       "he": "לפני שליחת תמונות או צילומי רנטגן יש לאשר את טופס ההסכמה לנתונים רפואיים שישלח הצוות שלנו."
     },
     "guvenli_yedek": {
-      "tr": "Bu konuda doğru bilgiyi hekimimiz verebilir; mesajınızı ekibimize ilettik.",
+      "tr": "Bu konuda en doğru bilgiyi uzman diş hekimimiz verebilir. Mesajınızı doğrudan hekimimize ilettik, kısa süre içinde size dönüş yapacağız.",
       "en": "Our dentist is the right person to answer this; we have forwarded your message to our team.",
       "de": "Diese Frage beantwortet am besten unser Zahnarzt; wir haben Ihre Nachricht weitergeleitet.",
       "ar": "طبيبنا هو الأنسب للإجابة على ذلك؛ تم تحويل رسالتكم إلى فريقنا.",
@@ -558,7 +558,7 @@
       "he": "רופא השיניים שלנו הוא הגורם המוסמך להשיב על כך; העברנו את הודעתך לצוות המרפאה."
     },
     "tibbi_soru": {
-      "tr": "Hekim muayenesi ve klinik değerlendirme olmadan ilaç kullanımı, doz tavsiyesi veya ilaç kesimi önerilmez. Mesajınızı değerlendirmesi için doğrudan hekimimize ve ekibimize ilettik.",
+      "tr": "Geçmiş olsun. Sağlığınız için sizi muayene etmeden buradan ilaç, antibiyotik veya doz önermemiz doğru olmaz. Sorunuzu doğrudan uzman diş hekimimize ilettik; sizi en kısa sürede arayıp bilgilendireceğiz.",
       "en": "Medication use, dosage advice, or stopping prescribed blood thinners is never recommended without a clinical examination by our dentist. We have forwarded your message to our medical team.",
       "de": "Ohne ärztliche Untersuchung empfehlen wir keine Medikamenteneinnahme oder Dosisänderung. Ihre Anfrage wurde direkt an unseren Zahnarzt weitergeleitet.",
       "ar": "لا يُنصح بتناول أي دواء أو تعديل الجرعة دون فحص سريري من قبل الطبيب. تم تحويل رسالتكم إلى فريقنا الطبي.",
@@ -581,7 +581,7 @@
     "randevu": "(randevu|randvu|muayene olmak|gelmek istiyorum|almak istiyorum|almk istiyom|appointment|book|termin|rendez-vous|afspraak|cita|appuntamento|prenotare|gorus|nə vaxt|запис|записаться|прием|приём|час|programare|ραντεβού|ραντεβου|תור|موعد|نوبت)",
     "sikayet": "(sikayet|memnun degil|rezalet|magdur|telefonumu acmiyor|complain|disappointed|beschwerde|reclamation|queja|klacht|reclamo|şikayət|скарга|оплакване|plangere|παράπονο|תלונה|شكوى|жалоб|شکایت)",
     "gorsel": "(rontgen|fotograf|resim gonder|x-?ray|photo|panoramik|röntgen|radio|radiographie|radiografia|foto|şəkil|знімок|снимок|рентген|ακτινογραφία|צילום|רנטגן|صورة|أشعة|عکس|رادیوگرافی)",
-    "tibbi_soru": "(augmentin|amoksisilin|amoxicillin|apranax|majezik|parol|ibuprofen|coumadin|warfarin|xarelto|eliquis|coraspin|kan sulandirici|antibiyotik|agri kesici|\\b\\d+\\s?mg\\b|kac tane iceyim|gunde kac tane|ilaci kesmeden|kalp kapak)",
+    "tibbi_soru": "(\\b(augmentin|klamoks|largopen|amoksisilin|amoxicillin|rovamycine|spiramisin|flagyl|nidazol|biteral|metronidazol|metronidazole|klindan|klindamisin|clindamycin|cleocin|azitro|zitromax|azitromisin|azithromycin|zmax|cipro|ciproxin|siprofloksasin|ciprofloxacin|tetradox|doksisiklin|doxycycline|monodoks|cefaks|ceftin|sefuroksim|cefuroxime|suprax|sefiksim|cefixime|keflex|sefaleksin|cephalexin|macrol|klaritromisin|clarithromycin|klacid|penisilin|penicillin|deposilin|penadur|bactrim|kotrimoksazol|sulbaktam|ampisilin|ampicillin|duocid|alfasilin|levofloksasin|levofloxacin|tavanic|moksifloksasin|avelox|ornidazol|tiberal|sefazolin|seftriakson|rocephin|iesef|apranax|naprosyn|naproksen|naproxen|aleve|majezik|flurbiprofen|maximus|arveles|dexomen|deksketoprofen|dexketoprofen|dexday|dexforte|dexpass|ketavel|leodex|rastel|zikold|dolorex|dikloron|voltaren|cataflam|diklofenak|diclofenac|dicloflam|miyokord|brufen|nurofen|suprafen|ibuprofen|advil|motrin|ibucold|pedifen|ibufen|dolven|calpol|parol|vermidon|minoset|tylol|parasetamol|paracetamol|acetaminophen|panadol|afebryl|tamol|novalgin|adeka|metamizol|dipyrone|geralgine|etol|etodolak|etodolac|tadolak|melox|meloksikam|meloxicam|zeloxim|ponstan|mefenamik|piroksikam|feldene|tenoksikam|tilcotil|indometazin|endol|ketoprofen|profend|aseket|muscoril|tiyokolikosid|cabral|norgesic|parafon|diklomek|buscopan|spazmolitik|tramadol|contramal|kodein|codeine|kloroben|andorex|tantum\\s*verde|benzidamin|klorheksidin|chlorhexidine|klorhex|farhex|heksطال|heksiral|hexoral|listerine|oroheks|batticon|betadine|povidon|aftojel|kenacort|orabase|anestol|lidokain\\s*pomad|xylocaine\\s*sprey|dentinox|calgel|teegel|corsodyl|merhem(i|ini)?|pomad(i|ini)?|gargara(si|yi)?|agiz\\s*spreyi|dis\\s*jeli|aft\\s*jeli|coumadin|kumadin|warfarin|varfarin|xarelto|rivaroksaban|eliquis|apiksaban|pradaxa|dabigatran|lixiana|edoksaban|coraspin|ecopirin|aspirin|asa|plavix|klopidogrel|clopidogrel|brilinta|tikagrelor|efient|prasugrel|clexane|enoksaparin|hibor|innohep|fragmin|heparin|kan\\s*sulandirici|prednol|kortizon|cortisone|metilprednizolon|dekort|deksametazon|dexamethasone|deltacortril|prednizolon|fosamax|alendronat|zometa|zoledronik|bifosfonat|prolia|denosumab|insülin|insulin|metformin|glifor|glucophage|diaformin|tiroid|levotiron|euthyrox|antibiyotik(ler|leri|i|ini)?|agri\\s*kesici(ler|leri|yi|si)?|ates\\s*dusurucu|kas\\s*gevsetici|ilac(i|im|imi|in|ini|lar|lari|larimi|tan|larla)?|recete(si|yi|لي|siz|yle)?|eczane(den|de|ye)?|hap(i|ini|lar|lari)?|tablet(i|ini|ler)?|kapsul(u|unu|ler)?|surup(u|unu|lar)?|ampul(u)?|antibiyotik\\s*igne|agri\\s*kesici\\s*igne|penisilin\\s*ignesi|pastil(i)?|doz(u|unu|aj|aji)?|miligram|antibiotic(s)?|painkiller(s)?|medication(s)?|medicine(s)?|prescription|dosage|blood\\s*thinner(s)?|mouthwash|paracetamol|acetaminophen|antibiotikum|antibiotika|schmerzmittel|medikament(e|en)?|rezept|dosierung|blutverdunner|mundspulung|антибиотик(и|ов)?|обезболивающе(е|го)|лекарств(о|а)|таблетк(и|а)|рецепт|дозировк(а|у)|полоскани(е|я)|مضاد\\s*حيوي|مضادات|مسكن(ات)?|دواء|أدوية|ادوية|وصفة\\s*طبية|جرعة|حبوب|شراب|مضمضة|antibiotique(s)?|antidouleur(s)?|medicament(s)?|ordonnance|posologie|bain\\s*de\\s*bouche|antibiotica|pijnstiller(s)?|medicijn(en)?|voorschrift|dosering|mondspoeling|antibiotico(s)?|analgesico(s)?|medicamento(s)?|receta|dosis|enjuague\\s*bucal|farmaco|farmaci|antidolorifico|ricetta|collutorio|آنتی\\s*بیوتیک|مسکن|دارو|قرص|شربت|نسخه|دوز|دهانشویه|derman(lar|i)?|resept(siz)?|agrikesici|antibiotik|антибіотик(и)?|знеболювальн(е|і)|ліки|пігулки|таблетки|рецепт|дозування|болкоуспокояващ(о|и)|лекарств(о|а)|хапче(та)?|рецепта|доза|calmante|medicament(e)?|reteta|doza|apa\\s*de\\s*gura|αντιβιοτικό|αντιβιοτικο|αντιβίωση|παυσίπονο|παυσιπονο|φάρμακο|φαρμακο|συνταγή|δόση|אנטיביוטיקה|משכך\\s*כאבים|תרופה|תרופות|מרשם|מינון|כדורים)\\b|\\b\\d+\\s?(mg|ml|mcg|gr)\\b|(kac\\s*tane\\s*iceyim|gunde\\s*kac\\s*(tane|kez|defa)|kac\\s*saatte\\s*bir|ac\\s*karnina|tok\\s*karnina|ne\\s*iceyim|ne\\s*icsem|hangi\\s*ilac|ilaci\\s*kesmeden|kalp\\s*kapak))",
     "yuksek_deger": "(implant|inpilant|all.?on.?4|all.?on.?6|zirkonyum|zirconia|zirkon|gulus tasarimi|smile design|veneer|lamina|seffaf plak|invisalign|clear aligner|hollywood smile|couronne|facette|faccette|corona|implan)"
   }
 }
