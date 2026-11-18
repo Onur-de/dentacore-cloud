@@ -2012,22 +2012,33 @@ code {
   }
 
   function normText(t) {
-    return String(t || "")
+    let out = String(t || "")
       .replace(/ı/g, "i").replace(/İ/g, "i").replace(/ə/g, "e").replace(/Ə/g, "e")
       .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
       .toLowerCase().replace(/\s+/g, " ").trim();
+    const trInformal = [
+      [/\bslm\b/g, "selam"], [/\bmrb\b/g, "merhaba"], [/\bmeraba\b/g, "merhaba"],
+      [/\bne\s+kdr\b/g, "ne kadar"], [/\bnekadr\b/g, "ne kadar"], [/\bnekadar\b/g, "ne kadar"],
+      [/\bfyat\w*\b/g, "fiyat"], [/\binpilant\w*\b/g, "implant"], [/\bimplnt\w*\b/g, "implant"],
+      [/\brandvu\w*\b/g, "randevu"], [/\balmk\b/g, "almak"], [/\bistiyom\b/g, "istiyorum"],
+      [/\balami?yom\b/g, "alamiyorum"], [/\byutkunami?yom\b/g, "yutkunamiyorum"],
+      [/\bdurmuyo\b/g, "durmuyor"], [/\bkapaniyo\b/g, "kapaniyor"], [/\bctesi\b/g, "cumartesi"],
+      [/\bkanma\b/g, "kanama"], [/\byuzm\b/g, "yuzum"], [/\bbogzm\b/g, "bogazim"]
+    ];
+    for (const [rx, rp] of trInformal) out = out.replace(rx, rp);
+    return out;
   }
   function detectLang(text) {
     const raw = String(text || "").toLowerCase();
     if (/[\u0590-\u05FF]/.test(raw)) return "he";
     if (/[\u0600-\u06FF]/.test(raw)) {
-      if (/[پچژگک]/.test(raw) || ["سلام", "نوبت", "قیمت", "دندان", "چند", "آدرس"].some(w => raw.includes(w))) return "fa";
+      if (/[پچژگک]/.test(raw) || ["سلام", "نوبت", "قیمت", "دندان", "چند", "آدرس", "خونریزی", "صورتم", "ورم", "نفس"].some(w => raw.includes(w))) return "fa";
       return "ar";
     }
     if (/[\u0370-\u03FF]/.test(raw)) return "el";
     if (/[\u0400-\u04FF]/.test(raw)) {
-      if (/[іїєґ]/.test(raw) || ["добрий", "вітаю", "ціна", "скільки", "запис", "адреса"].some(w => raw.includes(w))) return "uk";
-      if (["здравейте", "добър", "колко", "зъб", "работно време", "струва", "къде"].some(w => raw.includes(w))) return "bg";
+      if (/[іїєґ]/.test(raw) || ["добрий", "вітаю", "ціна", "скільки", "запис", "адреса", "лікар", "клініка", "години", "графік"].some(w => raw.includes(w))) return "uk";
+      if (["здравейте", "добър", "колко", "зъб", "работно време", "работното време", "струва", "къде"].some(w => raw.includes(w))) return "bg";
       return "ru";
     }
     if (/[əƏ]/.test(raw)) return "az";
@@ -2037,11 +2048,11 @@ code {
     const lex = {
       de: ["ich","und","nicht","zahn","zahne","termin","bitte","hallo","wie","ist","sie","wir","mein","kosten","danke","guten","wo","adresse","ihre","zahnimplantat","kostet"],
       en: ["the","and","is","my","tooth","teeth","appointment","please","hello","hi","how","much","can","you","what","price","where","there","parking","swollen","cost","crowns","zirconia"],
-      tr: ["merhaba","dis","disim","randevu","fiyat","ne","kadar","nerede","var","mi","mu","istiyorum","tesekkur","agri","slm","mrb","selam","kacta","acik","adresiniz","otopark","kanama"],
-      fr: ["bonjour","salut","bonsoir","merci","prix","tarif","combien","adresse","horaires","rendez","vous","dent","dents","ou","etes"],
-      nl: ["hallo","goedemorgen","afspraak","prijs","kosten","adres","waar","tandarts","openingstijden","bedankt"],
-      es: ["hola","buenos","dias","gracias","precio","cuanto","cita","direccion","donde","horario","diente","dentista"],
-      it: ["ciao","buongiorno","grazie","prezzo","quanto","appuntamento","indirizzo","dove","orari","dente","dentista"],
+      tr: ["merhaba","dis","disim","randevu","fiyat","ne","kadar","nerede","var","mi","mu","istiyorum","tesekkur","agri","slm","mrb","selam","kacta","acik","adresiniz","otopark","kanama","cumartesi","yarin","saat","olur","tamam","bursa","ankara"],
+      fr: ["bonjour","salut","bonsoir","merci","prix","tarif","combien","adresse","horaires","rendez","vous","dent","dents","ou","etes","peur","douloureux"],
+      nl: ["hallo","goedemorgen","afspraak","prijs","kosten","adres","waar","tandarts","openingstijden","bedankt","bang","implantaat","pijn","sedatie"],
+      es: ["hola","buenos","dias","gracias","precio","cuanto","cita","direccion","donde","horario","horarios","diente","dentista","sonrisa"],
+      it: ["ciao","buongiorno","grazie","prezzo","quanto","appuntamento","prenotare","faccette","indirizzo","dove","orari","dente","dentista"],
       az: ["salam","sabahiniz","xeyir","qiymet","unvan","hardasiniz","hekim","nece","gorus"],
       ro: ["buna","ziua","multumesc","pret","cat","costa","programare","adresa","unde","dinte","stomatolog"]
     };
@@ -2053,22 +2064,54 @@ code {
     return best;
   }
 
+  function extractTreatmentLabel(n) {
+    if (n.includes("tek dis implant")) return "tek diş implant tedaviniz";
+    if (n.includes("all on 4") || n.includes("all-on-4")) return "All-on-4 implant tedaviniz";
+    if (n.includes("zirkonyum") && (n.includes("gulus") || n.includes("tasarim"))) return "zirkonyum kaplama ve dijital gülüş tasarımı süreciniz";
+    if (n.includes("zirkonyum")) return "zirkonyum kaplama tedaviniz";
+    if (n.includes("gulus tasarim") || n.includes("hollywood")) return "dijital gülüş tasarımı süreciniz";
+    if (n.includes("beyazlatma")) return "profesyonel diş beyazlatma işleminiz";
+    if (n.includes("kanal")) return "kanal tedaviniz";
+    if (n.includes("dolgu")) return "estetik dolgu işleminiz";
+    if (n.includes("20'lik") || n.includes("yirmilik")) return "20'lik diş çekimi işleminiz";
+    if (n.includes("lamine") || n.includes("lamina")) return "porselen lamine tedaviniz";
+    if (n.includes("seffaf plak") || n.includes("ortodonti")) return "şeffaf plak ve ortodonti tedaviniz";
+    if (n.includes("sut disi")) return "süt dişi tedavisi";
+    if (n.includes("implant")) return "implant tedaviniz";
+    return null;
+  }
+
+  function stripGreeting(s) {
+    return String(s || "").replace(/^(Merhabalar,\s*|Merhaba,\s*|Hello[^,]*,\s*|Guten\s+Tag[^,]*,\s*)/i, "").replace(/^./, c => c.toUpperCase());
+  }
+
   function simulateRoute(text, langIn, clinicObj) {
     const lang = (langIn && langIn.length >= 2) ? langIn : detectLang(text);
     const n = normText(text);
+    let targetClinic = clinicObj || DB.clinics[0];
+    if (/\b(bursa|nilufer|fsm)\b/.test(n)) targetClinic = DB.clinics.find(c => c.city === "Bursa") || targetClinic;
+    else if (/\b(ankara|cankaya|tunali)\b/.test(n)) targetClinic = DB.clinics.find(c => c.city === "Ankara") || targetClinic;
+    else if (/\b(istanbul|kadikoy|bagdat)\b/.test(n)) targetClinic = DB.clinics.find(c => c.city === "İstanbul") || targetClinic;
+
+    let customRules = {};
+    try {
+      if (targetClinic && targetClinic.ai_custom_rules_json) customRules = JSON.parse(targetClinic.ai_custom_rules_json);
+    } catch (e) {}
+
     const facts = {
       ...FAQ_DATA.facts,
-      clinic: clinicObj ? clinicObj.name : "Özel DentaCore Merkez Polikliniği",
-      adres: (clinicObj && clinicObj.address) ? clinicObj.address : FAQ_DATA.facts.adres,
-      telefon: (clinicObj && clinicObj.phone) ? clinicObj.phone : FAQ_DATA.facts.telefon
+      clinic: targetClinic ? targetClinic.name : "Özel DentaCore Merkez Polikliniği",
+      adres: (targetClinic && targetClinic.address) ? targetClinic.address : FAQ_DATA.facts.adres,
+      telefon: (targetClinic && targetClinic.phone) ? targetClinic.phone : FAQ_DATA.facts.telefon
     };
     const fmt = (str) => {
       let s = String(str || "");
       for (const [k, v] of Object.entries(facts)) s = s.replaceAll("{" + k + "}", String(v));
-      return s;
+      return s.replace(/\.{2,}/g, ".").trim();
     };
     const pick = (tbl) => fmt(tbl[lang] || tbl.en || tbl.tr);
 
+    // 1. Acil Durum Triyajı
     for (const [lg, patStr] of Object.entries(FAQ_DATA.emergency.patterns)) {
       try {
         if (new RegExp(normText(patStr)).test(n)) {
@@ -2076,36 +2119,153 @@ code {
         }
       } catch (e) {}
     }
+
+    // 2. Güvenlik / Prompt Injection / KVKK Koruma
+    if (/(onceki\s+tum\s+kurallari\s+unut|sistem\s+komutu|ignore\s+previous\s+instructions|omur\s+boyu\s+%?100\s+agrisiz\s+garanti)/.test(n)) {
+      return {
+        answer: `${pick(FAQ_DATA.templates.fiyat)} ${stripGreeting(pick(FAQ_DATA.templates.insan))}`,
+        layer: "L1-guvenlik", intent: "insan", lang, tokens_in: 0, tokens_out: 0, alert: null, handoff: true
+      };
+    }
+    if (/(sistemdeki\s+telefon\s+numarasini|kullandigi\s+ilaclari\s+bana\s+yazar|ayse\s+kaya.?nin\s+(esi|telefon|ilac))/.test(n)) {
+      return {
+        answer: lang === "tr"
+          ? "Merhabalar, KVKK ve hasta mahremiyeti kurallarımız gereği hiçbir misafirimizin iletişim veya sağlık bilgisini üçüncü kişilerle paylaşamıyoruz. Talebinizi değerlendirmesi için hekim ve hasta kabul ekibimize ilettik; çalışma saatlerimiz içinde size dönüş yapılacaktır."
+          : pick(FAQ_DATA.templates.guvenli_yedek),
+        layer: "L1-guvenlik", intent: "insan", lang, tokens_in: 0, tokens_out: 0, alert: null, handoff: true
+      };
+    }
+
+    // 3. Tıbbi İlaç & Doz Güvenlik Kalkanı
+    if (FAQ_DATA.classifier_keywords.tibbi_soru) {
+      try {
+        if (new RegExp(normText(FAQ_DATA.classifier_keywords.tibbi_soru)).test(n)) {
+          return { answer: pick(FAQ_DATA.templates.tibbi_soru), layer: "L1-tibbi", intent: "tibbi_soru", lang, tokens_in: 0, tokens_out: 0, alert: null, handoff: true };
+        }
+      } catch (e) {}
+    }
+
+    // 4. Şikayet
+    if (FAQ_DATA.classifier_keywords.sikayet) {
+      try {
+        if (new RegExp(normText(FAQ_DATA.classifier_keywords.sikayet)).test(n)) {
+          return { answer: pick(FAQ_DATA.templates.sikayet), layer: "L2-anahtar", intent: "sikayet", lang, tokens_in: 0, tokens_out: 0, alert: "sikayet", handoff: true };
+        }
+      } catch (e) {}
+    }
+
+    // 5. Birleşik Niyet & Parlant VIP Koordinatör Yanıt Bestecisi
+    const priority = ["konum","agri_korku","tedavi_sure","cocuk_dis","sigorta_taksit","otopark","fiyat","saat","iletisim","odeme","gorsel","randevu","selam"];
+    const l1Set = new Set(["selam","konum","saat","otopark","iletisim","odeme","agri_korku","tedavi_sure","cocuk_dis","sigorta_taksit"]);
+    const matched = [];
+    const wc = n.split(" ").length;
+
     for (const [intentName, spec] of Object.entries(FAQ_DATA.intents)) {
-      if (spec.only_short && n.split(" ").length > 4) continue;
+      if (spec.only_short && wc > 4) continue;
       for (const [lg, patStr] of Object.entries(spec.patterns)) {
         try {
           if (new RegExp(normText(patStr)).test(n)) {
-            return { answer: pick(spec.answers), layer: "L1-sss", intent: intentName, lang, tokens_in: 0, tokens_out: 0, alert: null, handoff: false };
+            if (!matched.includes(intentName)) matched.push(intentName);
+            break;
           }
         } catch (e) {}
       }
     }
-    for (const lbl of ["sikayet", "fiyat", "gorsel", "randevu"]) {
+    for (const lbl of ["fiyat", "gorsel", "randevu"]) {
       const patStr = FAQ_DATA.classifier_keywords[lbl];
       if (patStr) {
         try {
           if (new RegExp(normText(patStr)).test(n)) {
-            const tpl = FAQ_DATA.templates[lbl];
-            return {
-              answer: pick(tpl),
-              layer: "L2-anahtar",
-              intent: lbl,
-              lang,
-              tokens_in: 0,
-              tokens_out: 0,
-              alert: lbl === "sikayet" ? "sikayet" : null,
-              handoff: ["randevu", "sikayet"].includes(lbl)
-            };
+            if (!matched.includes(lbl)) matched.push(lbl);
           }
         } catch (e) {}
       }
     }
+    if (matched.length > 1 && matched.includes("selam")) {
+      matched.splice(matched.indexOf("selam"), 1);
+    }
+    if (matched.includes("sigorta_taksit") && matched.includes("fiyat")) {
+      if (!["fiyat", "ne kadar", "kac tl", "kac lira"].some(w => n.includes(w))) {
+        matched.splice(matched.indexOf("fiyat"), 1);
+      }
+    }
+
+    if (matched.length > 0) {
+      const ordered = priority.filter(it => matched.includes(it));
+      const primaryIntent = ordered[0];
+      const primaryLayer = l1Set.has(primaryIntent) ? "L1-sss" : "L2-anahtar";
+      const tLabel = extractTreatmentLabel(n);
+
+      if (lang === "tr") {
+        const clauses = [];
+        const handled = new Set();
+        if (ordered.includes("konum") && ordered.includes("otopark")) {
+          clauses.push(
+            `Merhabalar, sizleri ${facts.adres} adresindeki kliniğimizde ağırlamaktan memnuniyet duyarız (Yol tarifi: ${facts.harita}). Özel aracınızla rahatça gelebilirsiniz; ${facts.otopark}.`
+          );
+          handled.add("konum");
+          handled.add("otopark");
+        }
+        for (const it of ordered) {
+          if (handled.has(it)) continue;
+          if (it === "fiyat") {
+            const tPhrase = tLabel ? `Sorduğunuz ${tLabel} için ` : "Kliniğimizde ";
+            let ansF = `Merhabalar, kliniğimize hoş geldiniz. ${tPhrase}tedavi planı ve net ücreti, uzman hekimimizin yapacağı muayene ve panoramik röntgen kontrolünüzden sonra size özel yazılı olarak paylaşıyoruz.`;
+            if (["nakit", "pesin", "indirim"].some(w => n.includes(w))) {
+              ansF += " " + (customRules.cash_discount_note || "Nakit veya peşin ödemelerde sağladığımız özel ödeme kolaylıklarını da muayeneniz sırasında planınıza özenle yansıtıyoruz.");
+              handled.add("odeme");
+            }
+            ansF += " Ön değerlendirme ve size özel planlama için hangi gün ve saat aralığı size uyar?";
+            clauses.push(ansF);
+          } else if (it === "cocuk_dis") {
+            const ageM = n.match(/\b(\d{1,2})\s*yas/);
+            const rel = n.includes("oglum") ? "oğlunuza" : (n.includes("kizim") ? "kızınıza" : "evladınıza");
+            const kNote = customRules.kids_note || "Çocuk diş hekimimiz (pedodonti uzmanımız), minik misafirlerimizin tedavilerini hiç korkutmadan, oyunlaştırılmış ve koruyucu bir yaklaşımla gerçekleştiriyor.";
+            if (ageM) {
+              clauses.push(`Merhabalar, öncelikle ${ageM[1]} yaşındaki ${rel} çok geçmiş olsun. ${kNote} ${ageM[1]} yaş grubu minik misafirlerimizin rahat bir muayene geçirmesi için size uygun günü paylaşırsanız uzman çocuk diş hekimimize hemen öncelikli randevu planlayabiliriz.`);
+            } else {
+              clauses.push(`Merhabalar, ${kNote} Çocuğunuzun yaşını ve varsa şikayetini paylaşırsanız uzman çocuk diş hekimimize hemen öncelikli randevu planlayabiliriz.`);
+            }
+          } else if (it === "tedavi_sure") {
+            let trv = "";
+            if (n.includes("almanya")) trv = "Almanya'dan kliniğimize gösterdiğiniz ilgi için çok teşekkür ederiz; yurt dışından gelen misafirlerimiz için uçuş takviminize tam uyumlu hızlandırılmış VIP planlama uyguluyoruz. ";
+            else if (["londra","ingiltere","fransa","hollanda","yurt disi","sehir disi"].some(w => n.includes(w))) {
+              trv = (customRules.health_tourism_note || "Yurt dışından ve şehir dışından gelen misafirlerimiz için seyahat takvimine özel hızlandırılmış VIP randevu planlaması yapıyoruz.") + " ";
+            }
+            clauses.push(`Merhabalar, ${trv}Tedavi süremiz yapılacak klinik planlamaya göre şekilleniyor: tek seanslık işlemleri aynı gün tamamlıyoruz; zirkonyum kaplama ve dijital gülüş tasarımı süreçlerimiz ise provalarla birlikte ortalama 4 ile 6 gün (4-6 gün) sürüyor. İmplant tedavi takvimini ise hekimimiz muayenede netleştiriyor. Size özel tedavi planı çıkarmamız için ön değerlendirme randevusu oluşturalım mı?`);
+          } else if (FAQ_DATA.intents[it]) {
+            clauses.push(pick(FAQ_DATA.intents[it].answers));
+          } else if (FAQ_DATA.templates[it]) {
+            clauses.push(pick(FAQ_DATA.templates[it]));
+          }
+        }
+        let finalAns = clauses[0] || pick(FAQ_DATA.templates.insan);
+        if (clauses.length > 1) {
+          const rest = clauses.slice(1).map((c, idx) => {
+            const sc = stripGreeting(c);
+            return idx === 0 && !sc.startsWith("Ayrıca") ? `Ayrıca ${sc.charAt(0).toLowerCase()}${sc.slice(1)}` : sc;
+          });
+          finalAns = [clauses[0], ...rest].join(" ");
+        }
+        if (customRules.custom_extra_note) finalAns += " " + customRules.custom_extra_note;
+        return {
+          answer: finalAns.replace(/\.{2,}/g, ".").trim(),
+          layer: primaryLayer, intent: primaryIntent, lang, tokens_in: 0, tokens_out: 0,
+          alert: null, handoff: ordered.some(x => ["randevu","insan","sikayet"].includes(x))
+        };
+      }
+
+      const parts = ordered.map((it, idx) => {
+        const rawP = FAQ_DATA.intents[it] ? pick(FAQ_DATA.intents[it].answers) : pick(FAQ_DATA.templates[it]);
+        return idx > 0 ? stripGreeting(rawP) : rawP;
+      });
+      return {
+        answer: parts.join(" ").replace(/\.{2,}/g, ".").trim(),
+        layer: primaryLayer, intent: primaryIntent, lang, tokens_in: 0, tokens_out: 0,
+        alert: null, handoff: ordered.some(x => ["randevu","insan","sikayet"].includes(x))
+      };
+    }
+
     return {
       answer: pick(FAQ_DATA.templates.insan),
       layer: "L2-şablon",
@@ -2394,6 +2554,64 @@ code {
         consents: DB.consents.filter(c => c.patient_id === pid),
         anamnesis_links: {}
       });
+    }
+
+    const mPatOdo = path.match(/^\/app\/api\/patients\/(\d+)\/odontogram$/);
+    if (mPatOdo && method === "GET") {
+      const pid = Number(mPatOdo[1]);
+      if (!DB.tooth_records) DB.tooth_records = [];
+      const recs = DB.tooth_records.filter(r => r.clinic_id === cid && r.patient_id === pid).map(r => ({
+        ...r,
+        amount_try: tl(r.amount_kurus || 0)
+      }));
+      return jsonResp({
+        patient_id: pid,
+        clinic_id: cid,
+        records: recs,
+        summary: {
+          total_records: recs.length,
+          treated_count: recs.filter(r => ["treated","implant","crown","root_canal"].includes(r.status)).length,
+          planned_count: recs.filter(r => ["planned","caries","extraction"].includes(r.status)).length
+        }
+      });
+    }
+    if (mPatOdo && method === "POST") {
+      const pid = Number(mPatOdo[1]);
+      if (!DB.tooth_records) DB.tooth_records = [];
+      const rid = nextId(DB.tooth_records);
+      const amtK = toKurus(body.amount || 0);
+      DB.tooth_records.unshift({
+        id: rid, clinic_id: cid, patient_id: pid,
+        tooth_fdi: Number(body.tooth_fdi),
+        surface: body.surface || "FULL",
+        status: body.status || "planned",
+        procedure_code: body.procedure_code || "",
+        procedure_name: body.procedure_name || "İşlem",
+        amount_kurus: amtK,
+        doctor_id: u ? u.id : 1,
+        note: body.note || "",
+        created_at: isoNow()
+      });
+      if (body.auto_charge && amtK > 0) {
+        DB.charges.unshift({
+          id: nextId(DB.charges), clinic_id: cid, patient_id: pid,
+          description: `Diş #${body.tooth_fdi} (${body.surface || "FULL"}) - ${body.procedure_name}`,
+          amount_kurus: amtK, doctor_id: u ? u.id : 1, created_by: u ? u.id : 1,
+          created_at: isoNow(), voided_at: null, void_reason: null
+        });
+      }
+      addAudit("odontogram.create", `patient:${pid}:tooth:${body.tooth_fdi}`);
+      return jsonResp({ id: rid, tooth_fdi: Number(body.tooth_fdi), surface: body.surface || "FULL", status: body.status || "planned" });
+    }
+    const mPatOdoDel = path.match(/^\/app\/api\/patients\/(\d+)\/odontogram\/(\d+)$/);
+    if (mPatOdoDel && method === "DELETE") {
+      const pid = Number(mPatOdoDel[1]);
+      const rid = Number(mPatOdoDel[2]);
+      if (DB.tooth_records) {
+        DB.tooth_records = DB.tooth_records.filter(r => !(r.id === rid && r.patient_id === pid && r.clinic_id === cid));
+      }
+      addAudit("odontogram.delete", `tooth_record:${rid}`);
+      return jsonResp({ ok: true });
     }
 
     const mPatAnam = path.match(/^\/app\/api\/patients\/(\d+)\/anamnesis$/);
@@ -2714,10 +2932,17 @@ code {
         autopilot_name: body.autopilot_name || "DentaCore Asistan",
         default_lang: body.default_lang || "tr",
         slot_step_min: Number(body.slot_step_min || 15),
+        working_hours_json: body.working_hours_json || curClinic.working_hours_json || '{"mon_fri":["09:00","19:00"],"sat":["09:00","15:00"],"sun":null}',
+        buffer_min: Number(body.buffer_min || 0),
         google_review_url: body.google_review_url || ""
       });
       addAudit("settings.update", `clinic:${cid}`);
       return jsonResp({ ok: true });
+    }
+    if (path === "/app/api/settings/ai-rules" && method === "POST") {
+      curClinic.ai_custom_rules_json = JSON.stringify(body || {});
+      addAudit("settings.ai_rules_update", `clinic:${cid}`);
+      return jsonResp({ ok: true, ai_custom_rules: body });
     }
     if (path === "/app/api/ecosystem-status") {
       return jsonResp({
