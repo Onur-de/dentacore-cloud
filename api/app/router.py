@@ -224,7 +224,47 @@ PROMPT_INJECTION_RE = re.compile(
 
 KVKK_TRAP_RE = re.compile(
     r"(sistemdeki\s+telefon\s+numarasini|kullandigi\s+ilaclari\s+bana\s+yazar|"
-    r"esinin\s+telefon\s+numarasi|baska\s+hastanin\s+bilgileri|ayse\s+kaya'?nin\s+(esi|telefon|ilac))"
+    r"esinin\s+telefon\s+numarasi|baska\s+hastanin\s+bilgileri|ayse\s+kaya'?nin\s+(esi|telefon|ilac)|"
+    r"diger\s+hastalarin\s+telefon|veritabani\s+sifren)"
+)
+
+# Tehlikeli ev yapımı / kimyasal / kesici alet müdahale tuzakları (Japon yapıştırıcısı, çamaşır suyu, penseyle çekim vb.)
+DIY_HAZARD_RE = re.compile(
+    r"\b(japon\s+yapistirici\w*|pattex|super\s+glue|uhu\s+ile|camasir\s+suyu\w*|tuz\s+ruhu\w*|"
+    r"pense\w*\s+.*cek\w*|penseyle|iple\s+cek\w*|kendi\s+kendime\s+cek\w*|igneyle\s+patlat\w*|"
+    r"apseyi\s+patlat\w*|raki\s+bas\w*|kolonya\s+bas\w*|sarimsak\s+bas\w*|aspirin\s+bas\w*)\b"
+)
+
+# Kapsam dışı veteriner / evcil hayvan tuzakları ('köpek dişi' insan anatomisiyle karışmaması için iyelik/hayvan kalıpları)
+VET_SCOPE_RE = re.compile(
+    r"\b(kedi|kedim|kedimin|kediye|kedilere|kopegim|kopegimin|kopege|kopeklere|kusum|kusuma|papagan\w*|"
+    r"evcil\s+hayvan\w*|hayvanlara\s+(?:dolgu|cekim|implant|dis)|veteriner\w*)\b"
+)
+
+# Kapsam dışı medikal estetik / plastik cerrahi tuzakları (dudak dolgusu, burun dolgusu, saç ekimi, yüz botoksu)
+NON_DENTAL_COSMETIC_RE = re.compile(
+    r"\b(dudak\s+dolgu\w*|burun\s+dolgu\w*|goz\s+alti\s+dolgu\w*|isik\s+dolgu\w*|"
+    r"sac\s+ekim\w*|burun\s+esteti\w*|rinoplasti\w*|yuz\s+botoks\w*|alin\s+botoks\w*|kas\s+kaldirma)\b"
+)
+
+# Absürt takas (zeytinyağı/fındık/altın/kripto), veresiye, elden senet, influencer bedava işlem tuzakları
+BARTER_VERESIYE_RE = re.compile(
+    r"\b(takas\b|zeytinyagi|findik|veresiye|elden\s+senet\w*|senetle\b|kripto\b|bitcoin\b|"
+    r"bedava\s+yap\w*|influencer\w*|takipcim\s+var|hikayemde\s+paylas\w*|story\s+atsam)\b"
+)
+
+# Çoklu dil karışımı (Code-Switching) yabancı fiyat ifadeleri
+CODESWITCH_PRICE_RE = re.compile(
+    r"(wie\s+viel\s+kostet|was\s+kostet|how\s+much|what\s+is\s+the\s+price|combien\s+coute|cuanto\s+cuesta|quanto\s+costa)"
+)
+
+# İmkansız takvim tarihleri (30 Şubat, 31 Nisan, dün vb.) ve mesai dışı saatler (Pazar, gece 03:00 vb.)
+IMPOSSIBLE_DATE_RE = re.compile(
+    r"\b(30\s*subat|31\s*subat|29\s*subat\s*202[567]|31\s*nisan|31\s*haziran|31\s*eylul|31\s*kasim|"
+    r"3[2-9]\s*(?:ocak|subat|mart|nisan|mayis|haziran|temmuz|agustos|eylul|ekim|kasim|aralik)|\bdun\b|gecen\s+hafta)\b"
+)
+OFF_HOURS_SLOT_RE = re.compile(
+    r"(\bpazar\b|\bgece\b|\b(?:0[0-8]|19|2[0-3])[:.]\d{2}\b)"
 )
 
 # Çok turlu diyalogda zaman/slot onayı veya randevu bağlama ifadeleri
@@ -256,12 +296,18 @@ _LEET_ALPHA_RE = re.compile(r"(?<=[a-z])([0134])(?=[a-z])")
 _LEET_MAP = {"0": "o", "1": "i", "3": "e", "4": "a"}
 
 
+_WORD_PUNCT_RUN_RE = re.compile(r"(?<!\d)[.,!?;:/\\|_*~]{2,}(?!\d)")
+_REPEAT_CHAR_RE = re.compile(r"([a-z])\1{2,}")
+
+
 def normalize(s: str) -> str:
     s = _INVISIBLE_CTRL_RE.sub("", s or "")
     s = s.replace("ı", "i").replace("İ", "i").replace("ə", "e").replace("Ə", "e")
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c) and unicodedata.category(c) not in ("Cf", "Cc")).casefold()
     s = _DOTTED_UNIT_RE.sub(r"\1 m\2", s)
+    s = _WORD_PUNCT_RUN_RE.sub(" ", s)
+    s = _REPEAT_CHAR_RE.sub(r"\1", s)
     s = _LEET_ALPHA_RE.sub(lambda m: _LEET_MAP.get(m.group(1), m.group(1)), s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -716,6 +762,22 @@ class TokenRouter:
             else:
                 final_tr = clauses[0] if clauses else self._pick(self.tpl["insan"], lang, effective_facts)
 
+            if BARTER_VERESIYE_RE.search(n):
+                barter_note = (
+                    "Kurumsal sağlık hizmeti standartlarımız gereği ürün takası, veresiye, elden senet veya sosyal medya paylaşımı karşılığı "
+                    "ücretsiz işlem uygulamamız bulunmamaktadır; ödemelerinizi nakit, havale/EFT veya kredi kartına taksit seçenekleriyle güvenle gerçekleştirebilirsiniz."
+                )
+                if barter_note not in final_tr:
+                    final_tr = f"{final_tr} {barter_note}"
+
+            if NON_DENTAL_COSMETIC_RE.search(n):
+                cosmetic_note = (
+                    "Önemli bilgi olarak; kliniğimiz yalnızca ağız, diş ve çene sağlığı alanında hizmet vermektedir, "
+                    "dudak dolgusu, burun dolgusu, yüz botoksu veya saç ekimi gibi diş dışı medikal estetik işlemleri kliniğimizde uygulanmamaktadır."
+                )
+                if cosmetic_note not in final_tr:
+                    final_tr = f"{final_tr} {cosmetic_note}"
+
             extra_note = str(rules.get("custom_extra_note") or "").strip()
             if extra_note and extra_note not in final_tr:
                 final_tr = f"{final_tr} {extra_note}"
@@ -751,14 +813,28 @@ class TokenRouter:
         if lang != "tr":
             return self._pick(self.tpl["randevu"], lang, effective_facts)
 
+        treatment_lbl = self._extract_human_treatment_label(n, prev_norm)
+        clinic_lbl = branch_facts["clinic"] if branch_facts else effective_facts.get("clinic", self.clinic)
+        topic_phrase = f"{clinic_lbl} bünyesinde {treatment_lbl}" if treatment_lbl else f"{clinic_lbl}"
+
+        if IMPOSSIBLE_DATE_RE.search(n):
+            return (
+                f"Merhabalar, belirttiğiniz tarih takvimde geçerli bir ileri randevu günü değildir. "
+                f"{topic_phrase} randevunuzu oluşturabilmemiz için hafta içi 09:00-19:00 veya Cumartesi 09:00-15:00 "
+                f"saatleri arasında geçerli bir gün ve saat paylaşmanızı rica ederiz."
+            )
+
+        if OFF_HOURS_SLOT_RE.search(n):
+            return (
+                f"Merhabalar, belirttiğiniz gün veya saat klinik çalışma saatlerimiz "
+                f"(Hafta içi 09:00-19:00, Cumartesi 09:00-15:00; Pazar günü rutin muayeneye kapalı) dışında kalmaktadır. "
+                f"{topic_phrase} randevunuz için mesai saatlerimiz içinde size uygun bir gün ve saat paylaşır mısınız?"
+            )
+
         time_m = re.search(r"\b(\d{1,2}[:.]\d{2})\b", n)
         day_word = "yarın" if "yarin" in n else ("bugün" if "bugun" in n else "")
         part_of_day = "sabah" if "sabah" in n else ("öğleden sonra" if "ogleden sonra" in n else "")
         slot_desc = " ".join(filter(None, [day_word, part_of_day, f"saat {time_m.group(1)}" if time_m else "belirttiğiniz saat"])).strip()
-
-        treatment_lbl = self._extract_human_treatment_label(n, prev_norm)
-        clinic_lbl = branch_facts["clinic"] if branch_facts else effective_facts.get("clinic", self.clinic)
-        topic_phrase = f"{clinic_lbl} bünyesinde {treatment_lbl}" if treatment_lbl else f"{clinic_lbl}"
 
         return (
             f"Memnuniyetle! {topic_phrase} için {slot_desc} randevu talebinizi öncelikli olarak sisteme aldık. "
@@ -944,6 +1020,31 @@ class TokenRouter:
                 self.fsm.record_turn(sess_key, text, "insan", branch_key, cur_treatment, ans)
             return RouteResult(ans, "L1-guvenlik", "insan", lang, handoff=True, meta={"guardrail": "kvkk_privacy"})
 
+        # Katman-1b1: Tehlikeli Ev Yapımı Kimyasal / Yapıştırıcı / Pense Müdahalesi Kalkanı (0 token)
+        if DIY_HAZARD_RE.search(n):
+            ans = (
+                "Merhabalar, öncelikle çok geçmiş olsun; ağrınızı ve yaşadığınız durumu çok iyi anlıyoruz. "
+                "Ancak diş veya diş etinize Japon yapıştırıcısı, çamaşır suyu, kolonya, alkol, sarımsak veya ev aletleriyle "
+                "müdahale etmek ağız dokusunda ciddi kimyasal yanıklara ve ağır enfeksiyona yol açar; bu maddeleri kesinlikle "
+                "uygulamamanızı ve ağzınızı bol temiz suyla çalkalamanızı rica ederiz. Uzman diş hekimimizin güvenli klinik "
+                "müdahalesi ve muayenesi için talebinizi hemen hekim ekibimize ilettik."
+                if lang == "tr"
+                else self._pick(self.tpl["tibbi_soru"], lang, effective_facts)
+            )
+            if sess is not None:
+                self.fsm.record_turn(sess_key, text, "tibbi_soru", branch_key, cur_treatment, ans)
+            return RouteResult(ans, "L1-tibbi", "tibbi_soru", lang, handoff=True, high_value=high_value, meta={"guardrail": "diy_hazard"})
+
+        # Katman-1b1-Vet: Veteriner / Evcil Hayvan Kapsam Dışı Kalkanı (Kediye/köpeğe panoramik röntgen teklif edilmesini önler)
+        if VET_SCOPE_RE.search(n):
+            ans = (
+                "Merhabalar, kliniğimiz yalnızca insan ağız, diş ve çene sağlığı alanında hizmet veren uzman bir diş polikliniğidir; "
+                "evcil hayvanların diş tedavisi ve muayenesi için bir veteriner kliniğine başvurmanızı rica ederiz."
+            )
+            if sess is not None:
+                self.fsm.record_turn(sess_key, text, "genel", branch_key, None, ans)
+            return RouteResult(ans, "L1-kapsam", "genel", lang, handoff=False, meta={"guardrail": "out_of_scope_vet"})
+
         # Katman-1b2: Tıbbi Güvenlik, İlaç Dozu & Kan Sulandırıcı Sınıflandırıcısı (0 token)
         if "tibbi_soru" in self.kw and self.kw["tibbi_soru"].search(n):
             ans = self._pick(self.tpl["tibbi_soru"], lang, effective_facts)
@@ -999,6 +1100,11 @@ class TokenRouter:
                 if l2_lbl not in matched_intents:
                     matched_intents.append(l2_lbl)
 
+        # Gurbetçi / Çoklu dil karışımı (Code-Switching: 'wie viel kostet', 'how much' vb.) veya Takas/Veresiye/Senet soruları
+        if (CODESWITCH_PRICE_RE.search(n) or BARTER_VERESIYE_RE.search(n)) and not self.price_on:
+            if "fiyat" not in matched_intents:
+                matched_intents.append("fiyat")
+
         # Eğer birden fazla niyet eşleştiyse 'selam'ı çıkar (asıl sorular yanıtlansın)
         if len(matched_intents) > 1 and "selam" in matched_intents:
             matched_intents.remove("selam")
@@ -1017,6 +1123,15 @@ class TokenRouter:
             for fh in fuzzy_hits:
                 if fh not in matched_intents:
                     matched_intents.append(fh)
+
+        if not matched_intents and NON_DENTAL_COSMETIC_RE.search(n):
+            ans = (
+                "Merhabalar, kliniğimiz yalnızca ağız, diş ve çene sağlığı alanında hizmet vermektedir; "
+                "dudak dolgusu, burun dolgusu, yüz botoksu veya saç ekimi gibi diş dışı medikal estetik işlemleri kliniğimizde uygulanmamaktadır."
+            )
+            if sess is not None:
+                self.fsm.record_turn(sess_key, text, "genel", branch_key, None, ans)
+            return RouteResult(ans, "L1-kapsam", "genel", lang, handoff=False, meta={"guardrail": "out_of_scope_cosmetic"})
 
         if matched_intents:
             ordered = [it for it in INTENT_PRIORITY if it in matched_intents]
