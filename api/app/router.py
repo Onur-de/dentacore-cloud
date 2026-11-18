@@ -985,6 +985,9 @@ class TokenRouter:
         # Eğer birden fazla niyet eşleştiyse 'selam'ı çıkar (asıl sorular yanıtlansın)
         if len(matched_intents) > 1 and "selam" in matched_intents:
             matched_intents.remove("selam")
+        if "sigorta_taksit" in matched_intents and "fiyat" in matched_intents:
+            if not any(w in n for w in ("fiyat", "ne kadar", "kac tl", "kac lira")):
+                matched_intents.remove("fiyat")
 
         # Hiçbir katı regex eşleşmediyse RapidFuzz bulanık eşleştirmeyi çalıştır
         if not matched_intents:
