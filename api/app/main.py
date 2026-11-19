@@ -251,7 +251,7 @@ async def _is_dup_webhook_msg(msg_id: str) -> bool:
 async def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
     if channel_id:
         col = "wa_phone_id" if channel == "wa" else "ig_handle"
-        row = await q1(f"SELECT id FROM clinics WHERE {col}=%s AND active LIMIT 1", channel_id)  # nosec B608
+        row = await q1(f"SELECT id FROM clinics WHERE {col}=%s AND active LIMIT 1", channel_id)  # nosec B608  # noqa: S608
         if row:
             return int(row["id"])
     log.error("Eşleşmeyen webhook kanalı: channel=%s id=%s", channel, channel_id or "<boş>")
@@ -329,7 +329,7 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
     try:
         body = json.loads(raw)
     except json.JSONDecodeError:
-        raise HTTPException(400, "Geçersiz JSON gövdesi")
+        raise HTTPException(400, "Geçersiz JSON gövdesi") from None
     async_mode = _is_async_webhook(request)
     processed, queued, dedup, unmapped = 0, 0, 0, 0
     for entry in body.get("entry", []):
@@ -382,7 +382,7 @@ async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(
     try:
         body = json.loads(raw)
     except json.JSONDecodeError:
-        raise HTTPException(400, "Geçersiz JSON gövdesi")
+        raise HTTPException(400, "Geçersiz JSON gövdesi") from None
     async_mode = _is_async_webhook(request)
     processed, queued, dedup, unmapped = 0, 0, 0, 0
     for entry in body.get("entry", []):

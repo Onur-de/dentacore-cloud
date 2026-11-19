@@ -1385,8 +1385,8 @@ class TokenRouter:
                 if cand in LABELS:
                     label, layer2 = cand, "L2-kucuk-model"
                     await self.cache.set(lkey, cand, ex=30 * 86400)
-            except (ValueError, TypeError):
-                return rules
+            except Exception:
+                label, layer2 = label, layer2
 
         if label == "fiyat" and not self.price_on:
             return RouteResult(

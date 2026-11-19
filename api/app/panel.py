@@ -240,7 +240,7 @@ async def _hash_pw(pw: str) -> str:
     try:
         return await asyncio.to_thread(sec.hash_password, pw)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from None
 
 
 @router.post("/auth/totp/setup")
@@ -553,7 +553,7 @@ async def available_appts(
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d").date()
         except ValueError:
-            raise HTTPException(400, "Geçersiz tarih formatı (YYYY-MM-DD olmalı)")
+            raise HTTPException(400, "Geçersiz tarih formatı (YYYY-MM-DD olmalı)") from None
     else:
         target_date = datetime.now(TZ).date()
     cinfo = await q1("SELECT chairs, slot_step_min, working_hours_json, buffer_min FROM clinics WHERE id=%s", cid) or {
@@ -810,7 +810,7 @@ async def list_patients(search: str = "", include_archived: bool = False, u: dic
     rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.created_at, {BAL_SQL} AS balance,
                               EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
                               (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
-                       FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)  # nosec B608
+                       FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)  # nosec B608  # noqa: S608
     for r in rows:
         r["balance"] = tl(r["balance"]) if can_fin_view else 0.0
     return rows
@@ -829,7 +829,7 @@ async def create_patient(b: PatientIn, u: dict = Depends(require_perm("patient_e
 async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(require_perm("patient_view"))):
     cid = u["clinic_id"]
     await _enforce_doc_own_patient_pg(cid, pid, u)
-    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, cid)  # nosec B608
+    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, cid)  # nosec B608  # noqa: S608
     if not p:
         raise HTTPException(404, "hasta yok")
     phone = dec(p["phone_enc"])
@@ -1496,7 +1496,7 @@ async def add_charge(b: ChargeIn, u: dict = Depends(require_perm("finance_edit")
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(409, "Mükerrer hizmet borçlandırması engellendi")
+        raise HTTPException(409, "Mükerrer hizmet borçlandırması engellendi") from None
     await log(u, "kasa.charge", f"charge:{r['id']}", {"kurus": net_k, "discount": str(b.discount)})
     return {"id": r["id"], "amount_try": tl(net_k), "net_kurus": net_k}
 
@@ -1535,7 +1535,7 @@ async def add_payment(b: PaymentIn, u: dict = Depends(require_perm("finance_edit
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(409, "Bu ödeme isteği daha önce işlendi (Mükerrer işlem engellendi)")
+        raise HTTPException(409, "Bu ödeme isteği daha önce işlendi (Mükerrer işlem engellendi)") from None
     await log(u, "kasa.payment", f"payment:{r['id']}", {"kurus": amt_k, "method": b.method})
     return {"id": r["id"]}
 
@@ -1622,7 +1622,7 @@ async def add_staff(b: StaffIn, u: dict = Depends(OWNER)):
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                      u["clinic_id"], email, b.full_name, b.role, jt, p_json, h, phone_hmac(b.phone) if b.phone else None, b.share_pct)
     except Exception:
-        raise HTTPException(409, "Bu e-posta veya telefon zaten kayıtlı")
+        raise HTTPException(409, "Bu e-posta veya telefon zaten kayıtlı") from None
     await log(u, "staff.create", f"staff:{r['id']}", {"role": b.role, "job_title": jt})
     return {"id": r["id"]}
 
@@ -1666,7 +1666,7 @@ async def list_clinics(request: Request, u: dict = Depends(OWNER)):
                               (SELECT count(*) FROM patients p WHERE p.clinic_id=c.id) AS patient_count,
                               (SELECT count(*) FROM appointments a WHERE a.clinic_id=c.id AND a.status IN ('booked','confirmed')) AS active_appts,
                               (SELECT coalesce(sum(y.amount_kurus),0) FROM payments y WHERE y.clinic_id=c.id AND y.voided_at IS NULL) AS paid_kurus
-                       FROM clinics c {where} ORDER BY c.id""", *args)  # nosec B608
+                       FROM clinics c {where} ORDER BY c.id""", *args)  # nosec B608  # noqa: S608
     base = str(request.base_url).rstrip("/")
     for c in rows:
         c["paid_try"] = tl(c.pop("paid_kurus", 0))
@@ -1693,7 +1693,7 @@ async def create_clinic(b: ClinicCreateIn, request: Request, u: dict = Depends(O
             su = await t.q1("""INSERT INTO staff_users (clinic_id, email, full_name, role, pw_hash)
                                VALUES (%s,%s,%s,'owner',%s) RETURNING id""", c["id"], email, b.owner_name, h)
         except Exception:
-            raise HTTPException(409, "Bu yönetici e-postası zaten kayıtlı")
+            raise HTTPException(409, "Bu yönetici e-postası zaten kayıtlı") from None
         await t.q("""INSERT INTO message_templates (clinic_id, name, channel, lang, category, body, status)
                      VALUES (%s,'randevu_hatirlatma','whatsapp','tr','UTILITY','Sayın {{1}}, yarın {{2}} randevunuzu hatırlatırız.','APPROVED')""", c["id"])
     await log(u, "clinic.create", f"clinic:{c['id']}", {"email": email})
@@ -1742,7 +1742,7 @@ async def list_conversations(u: dict = Depends(require_perm("patient_view"))):
                    (SELECT m.delivery_status FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_delivery_status,
                    (SELECT m.delivery_error FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_delivery_error,
                    (SELECT count(*) FROM message_log m WHERE m.patient_id=p.id) AS msg_count
-            FROM patients p WHERE {where_c} ORDER BY last_at DESC NULLS LAST, p.id DESC LIMIT 100""",  # nosec B608
+            FROM patients p WHERE {where_c} ORDER BY last_at DESC NULLS LAST, p.id DESC LIMIT 100""",  # nosec B608  # noqa: S608
         *args_c,
     )
     for r in rows:
@@ -1927,7 +1927,7 @@ async def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
         if not isinstance(parsed_wh, dict):
             raise ValueError("dict değil")
     except Exception:
-        raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı")
+        raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı") from None
     cur_c = await q1("SELECT ai_custom_rules_json, wa_phone_id, ig_handle FROM clinics WHERE id=%s", cid) or {}
     ai_rules_str = b.ai_custom_rules_json if b.ai_custom_rules_json is not None else (cur_c.get("ai_custom_rules_json") or "{}")
     try:
@@ -1935,7 +1935,7 @@ async def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
         if not isinstance(parsed_ai, dict):
             raise ValueError("dict değil")
     except Exception:
-        raise HTTPException(400, "Geçersiz yapay zeka cevap kuralları JSON formatı")
+        raise HTTPException(400, "Geçersiz yapay zeka cevap kuralları JSON formatı") from None
     wa_pid = b.wa_phone_id.strip() if b.wa_phone_id is not None else (cur_c.get("wa_phone_id") or "")
     ig_hdl = b.ig_handle.strip() if b.ig_handle is not None else (cur_c.get("ig_handle") or "")
     if wa_pid and await q1("SELECT id FROM clinics WHERE wa_phone_id=%s AND id<>%s", wa_pid, cid):
@@ -2329,7 +2329,7 @@ async def upload_patient_media_pg(pid: int, request: Request, u: dict = Depends(
     try:
         qc = media.assess_media_file(data, filename=safe_filename)
     except ValueError as ve:
-        raise HTTPException(400, str(ve))
+        raise HTTPException(400, str(ve)) from None
     is_dcm = bool(qc.get("is_dicom") or qc.get("kind") == "dicom")
     eff_mime = str(qc.get("mime_type") or qc.get("mime") or "image/jpeg")
     enc_path = media.store_encrypted(pid, data, eff_mime)

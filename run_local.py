@@ -221,7 +221,7 @@ def _hash_pw(pw: str) -> str:
     try:
         return sec.hash_password(pw)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from None
 
 
 def kurus(v: Decimal | float | int | str) -> int:
@@ -2206,7 +2206,7 @@ def available_appts(
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d").date()
         except ValueError:
-            raise HTTPException(400, "Geçersiz tarih formatı (YYYY-MM-DD olmalı)")
+            raise HTTPException(400, "Geçersiz tarih formatı (YYYY-MM-DD olmalı)") from None
     else:
         target_date = datetime.now(TZ).date()
 
@@ -2806,7 +2806,7 @@ def create_patient(b: PatientIn, u: dict = Depends(require_perm("patient_edit", 
             ex_p2 = c.execute("SELECT id, display_name, first_source, last_source FROM patients WHERE clinic_id=? AND phone_hmac=?", _clean_sql_args((cid, ph))).fetchone()
             if ex_p2:
                 return {"id": ex_p2["id"], "duplicate": True, "existing_name": ex_p2["display_name"], "first_source": ex_p2["first_source"], "last_source": ex_p2["last_source"]}
-            raise HTTPException(409, "Bu telefon numarası zaten kayıtlı")
+            raise HTTPException(409, "Bu telefon numarası zaten kayıtlı") from None
     write_audit(u["id"], u["email"], "patient.create", f"patient:{pid}", u["ip_h"],
                 {"first_source": detected_src, "primary_doctor_id": b.primary_doctor_id, "campaign_id": camp_id}, clinic_id=cid)
     return {"id": pid, "duplicate": False, "first_source": detected_src, "last_source": detected_src, "primary_doctor_id": b.primary_doctor_id}
@@ -2896,7 +2896,7 @@ def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(require_perm(
             )
             c.commit()
         except sqlite3.IntegrityError:
-            raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı")
+            raise HTTPException(409, "Bu telefon numarası kliniğinizde başka bir hastaya kayıtlı") from None
     if first_source_audit:
         write_audit(u["id"], u["email"], "patient.first_source_change", f"patient:{pid}", u["ip_h"], first_source_audit, clinic_id=cid)
     write_audit(u["id"], u["email"], "patient.update", f"patient:{pid}", u["ip_h"],
@@ -2968,12 +2968,12 @@ async def upload_patient_media(pid: int, request: Request, u: dict = Depends(req
                 try:
                     appointment_id = int(str(form.get("appointment_id")))
                 except ValueError:
-                    raise HTTPException(400, "Geçersiz randevu kimliği")
+                    raise HTTPException(400, "Geçersiz randevu kimliği") from None
             if form.get("tooth_record_id"):
                 try:
                     tooth_record_id = int(str(form.get("tooth_record_id")))
                 except ValueError:
-                    raise HTTPException(400, "Geçersiz diş kaydı kimliği")
+                    raise HTTPException(400, "Geçersiz diş kaydı kimliği") from None
             if form.get("note"):
                 note = str(form.get("note"))[:300]
         except HTTPException:
@@ -3000,9 +3000,9 @@ async def upload_patient_media(pid: int, request: Request, u: dict = Depends(req
     try:
         qc = media.assess_media_file(data, filename=safe_filename, mime=mime)
     except ValueError as ve:
-        raise HTTPException(400, str(ve))
+        raise HTTPException(400, str(ve)) from None
     except Exception:
-        raise HTTPException(400, "Geçersiz görsel veya belge formatı (yalnız JPEG, PNG, WebP, PDF ve DICOM desteklenir)")
+        raise HTTPException(400, "Geçersiz görsel veya belge formatı (yalnız JPEG, PNG, WebP, PDF ve DICOM desteklenir)") from None
     is_dcm = bool(qc.get("is_dicom") or qc.get("kind") == "dicom")
     eff_mime = str(qc.get("mime_type") or qc.get("mime") or "image/jpeg")
     if is_dcm:
@@ -4475,7 +4475,7 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
     try:
         body = json.loads(raw)
     except json.JSONDecodeError:
-        raise HTTPException(400, "Geçersiz JSON gövdesi")
+        raise HTTPException(400, "Geçersiz JSON gövdesi") from None
     async_mode = _is_async_webhook_local(request)
     processed = 0
     queued = 0
@@ -4540,7 +4540,7 @@ async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = H
     try:
         body = json.loads(raw)
     except json.JSONDecodeError:
-        raise HTTPException(400, "Geçersiz JSON gövdesi")
+        raise HTTPException(400, "Geçersiz JSON gövdesi") from None
     async_mode = _is_async_webhook_local(request)
     processed = 0
     queued = 0
@@ -4630,7 +4630,7 @@ def add_item(b: ItemIn, u: dict = Depends(require_perm("inventory_manage"))):
         try:
             date.fromisoformat(exp_d[:10])
         except ValueError:
-            raise HTTPException(422, "Geçersiz son kullanma tarihi (YYYY-MM-DD formatında olmalıdır)")
+            raise HTTPException(422, "Geçersiz son kullanma tarihi (YYYY-MM-DD formatında olmalıdır)") from None
     t_now = iso_now()
     iid = ex(
         """INSERT INTO inventory_items
@@ -4830,7 +4830,7 @@ async def add_charge(b: ChargeIn, u: dict = Depends(require_perm("finance_edit")
             cid_id = cur_ch.lastrowid
             c.commit()
         except sqlite3.IntegrityError:
-            raise HTTPException(409, "Mükerrer hizmet borçlandırması engellendi")
+            raise HTTPException(409, "Mükerrer hizmet borçlandırması engellendi") from None
     write_audit(u["id"], u["email"], "kasa.charge", f"charge:{cid_id}", u["ip_h"],
                 {"gross_kurus": gross_k, "discount_kurus": disc_k, "kurus": net_k, "bank_agreement_id": used_bank_id}, clinic_id=cid)
     return {
@@ -4896,7 +4896,7 @@ async def add_payment(b: PaymentIn, u: dict = Depends(require_perm("finance_edit
             c.commit()
             fin_after = ent.compute_patient_finance_summary(c, cid, b.patient_id, tl)
         except sqlite3.IntegrityError:
-            raise HTTPException(409, "Mükerrer ödeme engellendi")
+            raise HTTPException(409, "Mükerrer ödeme engellendi") from None
     write_audit(u["id"], u["email"], "kasa.payment", f"payment:{pid_id}", u["ip_h"],
                 {"kurus": amt_k, "status": b.status, "method": b.method, "is_advance": bool(is_adv)}, clinic_id=cid)
     return {"id": pid_id, "status": b.status, "is_advance": bool(is_adv), "finance_summary": fin_after}
@@ -5129,7 +5129,7 @@ def add_staff(b: StaffIn, u: dict = Depends(OWNER)):
             phone_hmac(b.phone) if b.phone else None, float(b.share_pct), iso_now(),
         )
     except sqlite3.IntegrityError:
-        raise HTTPException(409, "Bu e-posta veya telefon zaten kayıtlı")
+        raise HTTPException(409, "Bu e-posta veya telefon zaten kayıtlı") from None
     write_audit(u["id"], u["email"], "staff.create", f"staff:{sid}", u["ip_h"], {"role": b.role, "job_title": jt}, clinic_id=u["clinic_id"])
     return {"id": sid, "role": b.role, "job_title": jt}
 
@@ -5583,7 +5583,7 @@ def analytics(request: Request, u: dict = Depends(require_perm("finance_view")))
         c["patients_created"] = len(p_ids)
         if p_ids:
             ph_in = ",".join("?" for _ in p_ids)
-            ap_rows = q(f"SELECT status FROM appointments WHERE clinic_id=? AND (campaign_id=? OR patient_id IN ({ph_in}))", cid, cp_id, *p_ids)
+            ap_rows = q(f"SELECT status FROM appointments WHERE clinic_id=? AND (campaign_id=? OR patient_id IN ({ph_in}))", cid, cp_id, *p_ids)  # noqa: S608
             real_appts = len(ap_rows)
             real_done = sum(1 for a in ap_rows if a["status"] == "done")
             rev_row = q1(
@@ -5591,7 +5591,7 @@ def analytics(request: Request, u: dict = Depends(require_perm("finance_view")))
                       CASE WHEN status='refunded' THEN -amount_kurus
                            WHEN COALESCE(status,'completed')='completed' AND method<>'avans_mahsup' THEN amount_kurus
                            ELSE 0 END
-                    ),0) AS s FROM payments WHERE clinic_id=? AND voided_at IS NULL AND patient_id IN ({ph_in})""",
+                    ),0) AS s FROM payments WHERE clinic_id=? AND voided_at IS NULL AND patient_id IN ({ph_in})""",  # noqa: S608
                 cid, *p_ids,
             )
             real_rev_k = max(0, int((rev_row or {}).get("s") or 0))
@@ -5689,7 +5689,7 @@ def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
         if not isinstance(parsed_wh, dict):
             raise ValueError("dict değil")
     except Exception:
-        raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı")
+        raise HTTPException(400, "Geçersiz çalışma saatleri JSON formatı") from None
     cur_c = q1("SELECT ai_custom_rules_json, wa_phone_id, ig_handle FROM clinics WHERE id=?", cid) or {}
     ai_rules_str = b.ai_custom_rules_json if b.ai_custom_rules_json is not None else (cur_c.get("ai_custom_rules_json") or "{}")
     try:
@@ -5697,7 +5697,7 @@ def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
         if not isinstance(parsed_ai, dict):
             raise ValueError("dict değil")
     except Exception:
-        raise HTTPException(400, "Geçersiz yapay zeka cevap kuralları JSON formatı")
+        raise HTTPException(400, "Geçersiz yapay zeka cevap kuralları JSON formatı") from None
     wa_pid = b.wa_phone_id.strip() if b.wa_phone_id is not None else (cur_c.get("wa_phone_id") or "")
     ig_hdl = b.ig_handle.strip() if b.ig_handle is not None else (cur_c.get("ig_handle") or "")
     if wa_pid and q1("SELECT id FROM clinics WHERE wa_phone_id=? AND id<>?", wa_pid, cid):
@@ -5832,7 +5832,7 @@ async def restore_encrypted_backup_test(b: RestoreTestIn, u: dict = Depends(HQ_O
         decrypted = _FERNET.decrypt(src_file.read_bytes())
         raw_db = gzip.decompress(decrypted)
     except Exception:
-        raise HTTPException(400, "Yedek şifresi çözülemedi veya dosya bozuk")
+        raise HTTPException(400, "Yedek şifresi çözülemedi veya dosya bozuk") from None
     rconn = None
     try:
         dst_file.write_bytes(raw_db)

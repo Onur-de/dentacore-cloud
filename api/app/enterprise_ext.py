@@ -37,7 +37,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import cal, media, security as sec
+from . import media, security as sec
 from .dental_catalog import (
     DEFAULT_TREATMENT_CATALOG,
     FDI_TOOTH_CATALOG,
@@ -50,7 +50,6 @@ from .dental_catalog import (
     ROLE_DEFAULT_PERMISSIONS,
     STAFF_PROFESSIONS,
     VALID_FDI_NUMBERS,
-    VALID_PATIENT_SOURCES,
     compute_ai_cost_report,
     compute_bank_discount,
     detect_acquisition_source,
@@ -1106,7 +1105,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             )
         except Exception as exc:
             if isinstance(exc, sqlite3.IntegrityError) or "integrity" in type(exc).__name__.lower() or "unique" in str(exc).lower():
-                raise HTTPException(409, "Bu isimde bir hasta grubu zaten mevcut")
+                raise HTTPException(409, "Bu isimde bir hasta grubu zaten mevcut") from None
             raise
         write_audit(u["id"], u["email"], "patient_group.create", f"group:{gid}", u["ip_h"], {"name": b.name}, clinic_id=cid)
         return {"id": gid}
@@ -1543,7 +1542,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         try:
             start_d = date.fromisoformat(b.first_due_date[:10])
         except ValueError:
-            raise HTTPException(422, "Geçersiz taksit başlangıç tarihi (YYYY-MM-DD olmalıdır)")
+            raise HTTPException(422, "Geçersiz taksit başlangıç tarihi (YYYY-MM-DD olmalıdır)") from None
         t_now = iso_now()
         ids = []
         with db_lock, db() as c:
@@ -1687,7 +1686,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         try:
             date.fromisoformat(c_date)
         except ValueError:
-            raise HTTPException(422, "Geçersiz kapanış tarihi")
+            raise HTTPException(422, "Geçersiz kapanış tarihi") from None
         if q1("SELECT id FROM cash_closings WHERE clinic_id=? AND closing_date=?", cid, c_date):
             raise HTTPException(409, f"{c_date} tarihi için günlük kasa kapanışı zaten yapılmıştır")
         pays = q(
@@ -1802,7 +1801,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             try:
                 fdi_num = int(fdi_str)
             except (ValueError, TypeError):
-                raise HTTPException(400, f"Geçersiz FDI diş numarası: {fdi_str}")
+                raise HTTPException(400, f"Geçersiz FDI diş numarası: {fdi_str}") from None
             if fdi_num not in VALID_FDI_NUMBERS:
                 raise HTTPException(400, f"Geçersiz FDI diş numarası: {fdi_num}")
             cal_vals = [int(p) + int(g) for p, g in zip(tm.pd, tm.gm, strict=False)]
@@ -1860,7 +1859,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             try:
                 tot_k = sum(kurus(Decimal(str(x.get("amount") or 0))) for x in items)
             except Exception:
-                raise HTTPException(422, "Tedavi kalemlerinde geçersiz tutar değeri")
+                raise HTTPException(422, "Tedavi kalemlerinde geçersiz tutar değeri") from None
             if tot_k < 0:
                 raise HTTPException(422, "Tedavi planı toplam tutarı negatif olamaz")
         else:
@@ -1963,7 +1962,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             except HTTPException:
                 raise
             except Exception:
-                raise HTTPException(410, "Geçersiz veya süresi dolmuş onam bağlantısı")
+                raise HTTPException(410, "Geçersiz veya süresi dolmuş onam bağlantısı") from None
         form = dict(await request.form())
         if not _verify_form_csrf(token, str(form.get("csrf_token") or "")):
             raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş; lütfen sayfayı yenileyin")
@@ -2180,14 +2179,13 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         row = q1("SELECT * FROM patient_media WHERE id=? AND patient_id=? AND clinic_id=?", mid, pid, cid)
         if not row:
             raise HTTPException(404, "dosya kaydı bulunamadı")
-        try:
+        import contextlib
+        with contextlib.suppress(OSError):
             enc_fn = Path(row["encrypted_path"]).name
             for d_cand in (_media_dir(), root_dir / "encrypted_media"):
                 fp = d_cand / enc_fn
                 if fp.is_file():
                     fp.unlink(missing_ok=True)
-        except OSError as exc:
-            log.debug("Medya dosyası silinirken uyarı: %s", exc)
         ex("DELETE FROM patient_media WHERE id=? AND clinic_id=?", mid, cid)
         write_audit(u["id"], u["email"], "patient.media_delete", f"patient:{pid}:media:{mid}", u["ip_h"], clinic_id=cid)
         return {"ok": True}
