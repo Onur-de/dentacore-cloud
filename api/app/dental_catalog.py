@@ -131,7 +131,9 @@ VALID_PATIENT_SOURCES: frozenset[str] = frozenset(PATIENT_SOURCE_LABELS.keys())
 
 _SOURCE_ALIASES = {
     "wa": "whatsapp",
+    "whatsapp_direct": "whatsapp",
     "ig": "instagram",
+    "instagram_dm": "instagram",
     "fb": "facebook",
     "meta": "instagram",
     "meta_ads": "instagram",
@@ -140,11 +142,15 @@ _SOURCE_ALIASES = {
     "organik": "google",
     "google_organic": "google",
     "web": "website",
+    "campaign_form": "website",
     "telefon": "phone",
     "tavsiye": "referral",
     "referans": "referral",
+    "doctor_referral": "referral",
+    "returning": "referral",
     "hasta_yonlendirmesi": "patient_referral",
     "klinik": "walk_in",
+    "corporate": "other",
     "diger": "other",
 }
 
