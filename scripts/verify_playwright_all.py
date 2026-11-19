@@ -51,7 +51,8 @@ def _wait_http(url: str, timeout: float = 15.0) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=2) as r:  # noqa: S310
+            # URL şeması yukarıda yalnızca yerel http ile sınırlandı; file:/ ve özel şema mümkün değil.
+            with urllib.request.urlopen(url, timeout=2) as r:  # nosec B310  # noqa: S310
                 if r.status == 200:
                     return
         except Exception:
