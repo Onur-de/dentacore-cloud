@@ -387,11 +387,18 @@ async def list_appts(start: datetime, end: datetime, u: dict = Depends(ANY)):
     if end - start > timedelta(days=62):
         raise HTTPException(400, "aralık en fazla 62 gün")
     cid = u["clinic_id"]
-    rows = await q("""SELECT a.id, a.starts_at, a.duration_min, a.treatment, a.chair, a.status, a.source, a.patient_id,
-                             p.display_name AS patient, d.full_name AS doctor,
-                             EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=a.patient_id AND cardinality(x.red_flags) > 0) AS red_flag
-                      FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
-                      WHERE a.clinic_id=%s AND a.starts_at >= %s AND a.starts_at < %s ORDER BY a.starts_at""", cid, start, end)
+    perms = u.get("permissions") or {}
+    sql_a = """SELECT a.id, a.starts_at, a.duration_min, a.treatment, a.chair, a.status, a.source, a.patient_id,
+                      p.display_name AS patient, d.full_name AS doctor,
+                      EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=a.patient_id AND cardinality(x.red_flags) > 0) AS red_flag
+               FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
+               WHERE a.clinic_id=%s AND a.starts_at >= %s AND a.starts_at < %s"""
+    args_a: list = [cid, start, end]
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        sql_a += " AND (a.doctor_id=%s OR p.primary_doctor_id=%s)"
+        args_a.extend([u["id"], u["id"]])
+    sql_a += " ORDER BY a.starts_at"
+    rows = await q(sql_a, *args_a)
     for r in rows:
         r["google_cal_url"] = cal.google_calendar_url(r, u.get("clinic_name") or S.clinic, u.get("clinic_address") or "")
     return rows
@@ -399,12 +406,14 @@ async def list_appts(start: datetime, end: datetime, u: dict = Depends(ANY)):
 
 @router.get("/app/api/appointments/{aid}/ics")
 async def appt_ics(aid: int, u: dict = Depends(ANY)):
-    r = await q1("""SELECT a.id, a.starts_at, a.duration_min, a.treatment, a.chair, a.status,
+    r = await q1("""SELECT a.id, a.patient_id, a.starts_at, a.duration_min, a.treatment, a.chair, a.status,
                            p.display_name AS patient, d.full_name AS doctor
                     FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
                     WHERE a.id=%s AND a.clinic_id=%s""", aid, u["clinic_id"])
     if not r:
         raise HTTPException(404, "randevu yok")
+    if r.get("patient_id"):
+        await _enforce_doc_own_patient_pg(u["clinic_id"], int(r["patient_id"]), u)
     body = cal.appointment_ics(r, u.get("clinic_name") or S.clinic, u.get("clinic_address") or "")
     return PlainTextResponse(body, media_type="text/calendar; charset=utf-8",
                              headers={"content-disposition": f'attachment; filename="randevu-{aid}.ics"'})
@@ -446,11 +455,17 @@ async def calendar_links_rotate(request: Request, u: dict = Depends(OWNER)):
 @router.get("/app/api/calendar/all.ics")
 async def calendar_all_ics(u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    rows = await q("""SELECT a.id, a.starts_at, a.duration_min, a.treatment, a.chair, a.status,
-                             p.display_name AS patient, d.full_name AS doctor
-                      FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
-                      WHERE a.clinic_id=%s AND a.status IN ('booked','confirmed')
-                      ORDER BY a.starts_at LIMIT 500""", cid)
+    perms = u.get("permissions") or {}
+    sql_ics = """SELECT a.id, a.starts_at, a.duration_min, a.treatment, a.chair, a.status,
+                        p.display_name AS patient, d.full_name AS doctor
+                 FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
+                 WHERE a.clinic_id=%s AND a.status IN ('booked','confirmed')"""
+    args_ics: list = [cid]
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        sql_ics += " AND (a.doctor_id=%s OR p.primary_doctor_id=%s)"
+        args_ics.extend([u["id"], u["id"]])
+    sql_ics += " ORDER BY a.starts_at LIMIT 500"
+    rows = await q(sql_ics, *args_ics)
     body = cal.feed_ics(rows, u.get("clinic_name") or S.clinic, u.get("clinic_address") or "")
     return PlainTextResponse(body, media_type="text/calendar; charset=utf-8",
                              headers={"content-disposition": f'attachment; filename="dentacore-klinik-{cid}-takvim.ics"'})
@@ -618,6 +633,7 @@ async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
             raise HTTPException(404, "hekim yok")
     pid = b.patient_id
     if pid is not None:
+        await _enforce_doc_own_patient_pg(cid, pid, u)
         await _require_active_patient(pid, cid)
     else:
         if not b.phone or len(norm_phone(b.phone)) < 10:
@@ -678,6 +694,8 @@ async def update_appt(aid: int, b: ApptUpdate, u: dict = Depends(ANY)):
         cur_row = await t.q1("SELECT * FROM appointments WHERE id=%s AND clinic_id=%s", aid, cid)
         if not cur_row:
             raise HTTPException(404, "randevu yok")
+        if cur_row.get("patient_id"):
+            await _enforce_doc_own_patient_pg(cid, int(cur_row["patient_id"]), u)
         chair = str(b.chair if b.chair is not None else cur_row["chair"])
         if not chair.isdigit() or not (1 <= int(chair) <= max_chairs):
             raise HTTPException(400, f"Geçersiz koltuk numarası (bu şubede {max_chairs} koltuk var)")
@@ -727,6 +745,8 @@ async def appt_status(aid: int, b: StatusIn, u: dict = Depends(require_perm("edi
     a = await q1("SELECT id, patient_id, status, starts_at, duration_min, chair, doctor_id, treatment, satisfaction_sent_at FROM appointments WHERE id=%s AND clinic_id=%s", aid, cid)
     if not a:
         raise HTTPException(404, "randevu yok")
+    if a.get("patient_id"):
+        await _enforce_doc_own_patient_pg(cid, int(a["patient_id"]), u)
     prev_status = a["status"]
     if b.status in ("booked", "confirmed") and prev_status not in ("booked", "confirmed"):
         cinfo = await q1("SELECT buffer_min FROM clinics WHERE id=%s", cid)
@@ -774,8 +794,10 @@ BAL_SQL = """(SELECT coalesce(sum(amount_kurus),0) FROM charges c WHERE c.patien
 
 
 @router.get("/app/api/patients")
-async def list_patients(search: str = "", include_archived: bool = False, u: dict = Depends(ANY)):
+async def list_patients(search: str = "", include_archived: bool = False, u: dict = Depends(require_perm("patient_view"))):
     cid = u["clinic_id"]
+    perms = u.get("permissions") or {}
+    can_fin_view = bool(perms.get("finance_view", False))
     search = search.strip()[:60]
     act_clause = "" if include_archived else " AND p.active"
     if search and len(re.sub(r"\D", "", search)) >= 10:
@@ -784,17 +806,22 @@ async def list_patients(search: str = "", include_archived: bool = False, u: dic
         where, args = f"p.clinic_id=%s{act_clause} AND p.display_name ILIKE %s", [cid, f"%{search}%"]
     else:
         where, args = f"p.clinic_id=%s{act_clause}", [cid]
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        where += """ AND (p.primary_doctor_id=%s OR p.created_by=%s
+                         OR EXISTS (SELECT 1 FROM appointments ap WHERE ap.patient_id=p.id AND ap.doctor_id=%s)
+                         OR EXISTS (SELECT 1 FROM tooth_records tr WHERE tr.patient_id=p.id AND tr.doctor_id=%s))"""
+        args.extend([u["id"], u["id"], u["id"], u["id"]])
     rows = await q(f"""SELECT p.id, p.display_name, p.lang, p.channel, p.active, p.created_at, {BAL_SQL} AS balance,
                               EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=p.id AND cardinality(x.red_flags) > 0) AS red_flag,
                               (SELECT max(starts_at) FROM appointments a WHERE a.patient_id=p.id) AS last_appt
                        FROM patients p WHERE {where} ORDER BY p.created_at DESC LIMIT 200""", *args)  # nosec B608
     for r in rows:
-        r["balance"] = tl(r["balance"])
+        r["balance"] = tl(r["balance"]) if can_fin_view else 0.0
     return rows
 
 
 @router.post("/app/api/patients")
-async def create_patient(b: PatientIn, u: dict = Depends(ANY)):
+async def create_patient(b: PatientIn, u: dict = Depends(require_perm("patient_edit", "create"))):
     if len(norm_phone(b.phone)) < 10:
         raise HTTPException(400, "Geçerli telefon girin")
     pid = await upsert_patient(b.phone, lang=b.lang, name=b.name, clinic_id=u["clinic_id"])
@@ -985,8 +1012,9 @@ class OdontogramUpdateIn(BaseModel):
 
 
 @router.get("/app/api/patients/{pid}/odontogram")
-async def get_odontogram(pid: int, u: dict = Depends(ANY)):
+async def get_odontogram(pid: int, u: dict = Depends(require_perm("patient_view"))):
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
     p = await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
     if not p:
         raise HTTPException(404, "hasta yok")
@@ -1036,6 +1064,7 @@ async def _odo_linked_charges(t, cid: int, pid: int, rec: dict) -> list:
 @router.post("/app/api/patients/{pid}/odontogram")
 async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
     await _require_active_patient(pid, cid)
     if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
         raise HTTPException(404, "hekim yok")
@@ -1073,6 +1102,7 @@ async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLI
 @router.patch("/app/api/patients/{pid}/odontogram/{rid}")
 async def update_odontogram_record(pid: int, rid: int, b: OdontogramUpdateIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
     rec = await q1("SELECT * FROM tooth_records WHERE id=%s AND patient_id=%s AND clinic_id=%s", rid, pid, cid)
     if not rec:
         raise HTTPException(404, "diş kaydı yok")
@@ -1115,6 +1145,7 @@ async def update_odontogram_record(pid: int, rid: int, b: OdontogramUpdateIn, u:
 @router.delete("/app/api/patients/{pid}/odontogram/{rid}")
 async def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
     rec = await q1("SELECT * FROM tooth_records WHERE id=%s AND patient_id=%s AND clinic_id=%s", rid, pid, cid)
     if not rec:
         raise HTTPException(404, "diş kaydı yok")
@@ -1129,7 +1160,8 @@ async def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICA
 
 
 @router.post("/app/api/patients/{pid}/anamnesis")
-async def send_anam(pid: int, u: dict = Depends(ANY)):
+async def send_anam(pid: int, u: dict = Depends(require_perm("patient_edit"))):
+    await _enforce_doc_own_patient_pg(u["clinic_id"], pid, u)
     await _require_active_patient(pid, u["clinic_id"])
     link = await modules.send_anamnesis(pid)
     await log(u, "anamnesis.send", f"patient:{pid}")
@@ -1143,8 +1175,9 @@ class PatientUpdateIn(BaseModel):
 
 
 @router.patch("/app/api/patients/{pid}")
-async def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(ANY)):
+async def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(require_perm("patient_edit", "edit"))):
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
     p = await q1("SELECT * FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
     if not p:
         raise HTTPException(404, "hasta yok")
@@ -1166,6 +1199,7 @@ async def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(ANY)):
 
 @router.post("/app/api/patients/{pid}/archive")
 async def archive_patient(pid: int, u: dict = Depends(CLINICAL)):
+    await _enforce_doc_own_patient_pg(u["clinic_id"], pid, u)
     r = await q1("UPDATE patients SET active=false WHERE id=%s AND clinic_id=%s RETURNING id", pid, u["clinic_id"])
     if not r:
         raise HTTPException(404, "hasta yok")
@@ -1175,6 +1209,7 @@ async def archive_patient(pid: int, u: dict = Depends(CLINICAL)):
 
 @router.post("/app/api/patients/{pid}/unarchive")
 async def unarchive_patient(pid: int, u: dict = Depends(CLINICAL)):
+    await _enforce_doc_own_patient_pg(u["clinic_id"], pid, u)
     r = await q1("UPDATE patients SET active=true WHERE id=%s AND clinic_id=%s RETURNING id", pid, u["clinic_id"])
     if not r:
         raise HTTPException(404, "hasta yok")
@@ -1433,6 +1468,7 @@ async def add_charge(b: ChargeIn, u: dict = Depends(require_perm("finance_edit")
     if not await limiter.hit(f"chg:{u['id']}", 60, 60):
         raise HTTPException(429, "Çok fazla hizmet ekleme isteği")
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, b.patient_id, u)
     await _require_active_patient(b.patient_id, cid)
     if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
         raise HTTPException(404, "hekim yok")
@@ -1474,6 +1510,7 @@ async def add_payment(b: PaymentIn, u: dict = Depends(require_perm("finance_edit
     if not await limiter.hit(f"pay:{u['id']}", 60, 60):
         raise HTTPException(429, "Çok fazla tahsilat isteği")
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, b.patient_id, u)
     await _require_active_patient(b.patient_id, cid)
     amt_k = kurus(b.amount)
     try:
@@ -1559,34 +1596,38 @@ async def kasa(start: datetime, end: datetime, u: dict = Depends(require_perm("f
 class StaffIn(BaseModel):
     email: str = Field(max_length=200)
     full_name: str = Field(min_length=2, max_length=80)
-    role: Literal["owner", "doctor", "secretary"]
+    role: Literal["owner", "doctor", "secretary", "accounting", "clinical_support", "lab_tech", "warehouse", "no_access"] = "secretary"
+    job_title: str | None = Field(default=None, max_length=60)
     password: str = Field(min_length=12, max_length=200)
     phone: str | None = Field(default=None, max_length=30)
     share_pct: Decimal = Field(Decimal(0), ge=0, le=100)
+    permissions: dict[str, bool] | None = None
 
 
 @router.get("/app/api/staff")
 async def staff(u: dict = Depends(ANY)):
-    rows = await q("SELECT id, email, full_name, role, share_pct, totp_enabled, active, (phone_hmac IS NOT NULL) AS whatsapp FROM staff_users WHERE clinic_id=%s ORDER BY id", u["clinic_id"])
+    rows = await q("SELECT id, email, full_name, role, job_title, share_pct, totp_enabled, active, (phone_hmac IS NOT NULL) AS whatsapp FROM staff_users WHERE clinic_id=%s ORDER BY id", u["clinic_id"])
     if u["role"] != "owner":
         for r in rows:
-            r.pop("email"), r.pop("share_pct")
+            r.pop("email", None), r.pop("share_pct", None)
     return rows
 
 
 @router.post("/app/api/staff")
-async def add_staff(b: StaffIn, u: dict = Depends(OWNER)):
+async def add_staff(b: StaffIn, u: dict = Depends(require_perm("staff_manage"))):
     email = b.email.strip().lower()
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(400, "Geçerli e-posta girin")
     h = await _hash_pw(b.password)
+    jt = (b.job_title or b.role).strip().lower()
+    p_json = json.dumps(b.permissions or {}, ensure_ascii=False)
     try:
-        r = await q1("""INSERT INTO staff_users (clinic_id, email, full_name, role, pw_hash, phone_hmac, share_pct)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                     u["clinic_id"], email, b.full_name, b.role, h, phone_hmac(b.phone) if b.phone else None, b.share_pct)
+        r = await q1("""INSERT INTO staff_users (clinic_id, email, full_name, role, job_title, permissions_json, pw_hash, phone_hmac, share_pct)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                     u["clinic_id"], email, b.full_name, b.role, jt, p_json, h, phone_hmac(b.phone) if b.phone else None, b.share_pct)
     except Exception:
         raise HTTPException(409, "Bu e-posta veya telefon zaten kayıtlı")
-    await log(u, "staff.create", f"staff:{r['id']}", {"role": b.role})
+    await log(u, "staff.create", f"staff:{r['id']}", {"role": b.role, "job_title": jt})
     return {"id": r["id"]}
 
 
@@ -1684,21 +1725,29 @@ async def switch_clinic(cid: int, u: dict = Depends(OWNER)):
 
 
 @router.get("/app/api/conversations")
-async def list_conversations(u: dict = Depends(ANY)):
+async def list_conversations(u: dict = Depends(require_perm("patient_view"))):
     cid = u["clinic_id"]
+    perms = u.get("permissions") or {}
+    where_c = "p.clinic_id=%s AND p.active"
+    args_c: list = [cid]
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        where_c += """ AND (p.primary_doctor_id=%s OR p.created_by=%s
+                            OR EXISTS (SELECT 1 FROM appointments ap WHERE ap.patient_id=p.id AND ap.doctor_id=%s)
+                            OR EXISTS (SELECT 1 FROM tooth_records tr WHERE tr.patient_id=p.id AND tr.doctor_id=%s))"""
+        args_c.extend([u["id"], u["id"], u["id"], u["id"]])
     rows = await q(
-        """SELECT p.id, p.display_name, p.channel, p.lang,
-                  (SELECT max(m.created_at) FROM message_log m WHERE m.patient_id=p.id) AS last_at,
-                  (SELECT m.layer FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_layer,
-                  (SELECT m.intent FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_intent,
-                  (SELECT m.body FROM message_log m WHERE m.patient_id=p.id AND m.body IS NOT NULL AND m.body <> '' ORDER BY m.id DESC LIMIT 1) AS last_body_raw,
-                  (SELECT m.direction FROM message_log m WHERE m.patient_id=p.id AND m.body IS NOT NULL AND m.body <> '' ORDER BY m.id DESC LIMIT 1) AS last_dir_body,
-                  (SELECT m.direction FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_dir_any,
-                  (SELECT m.delivery_status FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_delivery_status,
-                  (SELECT m.delivery_error FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_delivery_error,
-                  (SELECT count(*) FROM message_log m WHERE m.patient_id=p.id) AS msg_count
-           FROM patients p WHERE p.clinic_id=%s AND p.active ORDER BY last_at DESC NULLS LAST, p.id DESC LIMIT 100""",
-        cid,
+        f"""SELECT p.id, p.display_name, p.channel, p.lang,
+                   (SELECT max(m.created_at) FROM message_log m WHERE m.patient_id=p.id) AS last_at,
+                   (SELECT m.layer FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_layer,
+                   (SELECT m.intent FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_intent,
+                   (SELECT m.body FROM message_log m WHERE m.patient_id=p.id AND m.body IS NOT NULL AND m.body <> '' ORDER BY m.id DESC LIMIT 1) AS last_body_raw,
+                   (SELECT m.direction FROM message_log m WHERE m.patient_id=p.id AND m.body IS NOT NULL AND m.body <> '' ORDER BY m.id DESC LIMIT 1) AS last_dir_body,
+                   (SELECT m.direction FROM message_log m WHERE m.patient_id=p.id ORDER BY m.id DESC LIMIT 1) AS last_dir_any,
+                   (SELECT m.delivery_status FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_delivery_status,
+                   (SELECT m.delivery_error FROM message_log m WHERE m.patient_id=p.id AND m.direction='out' ORDER BY m.id DESC LIMIT 1) AS last_delivery_error,
+                   (SELECT count(*) FROM message_log m WHERE m.patient_id=p.id) AS msg_count
+            FROM patients p WHERE {where_c} ORDER BY last_at DESC NULLS LAST, p.id DESC LIMIT 100""",  # nosec B608
+        *args_c,
     )
     for r in rows:
         raw_b = r.pop("last_body_raw", None)
@@ -1710,8 +1759,9 @@ async def list_conversations(u: dict = Depends(ANY)):
 
 
 @router.get("/app/api/conversations/{pid}/messages")
-async def list_conv_messages(pid: int, u: dict = Depends(ANY)):
+async def list_conv_messages(pid: int, u: dict = Depends(require_perm("patient_view"))):
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
     if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid):
         raise HTTPException(404, "hasta yok")
     rows = await q(
@@ -1729,9 +1779,10 @@ class ReplyIn(BaseModel):
 
 
 @router.post("/app/api/conversations/{pid}/send")
-async def send_conversation(pid: int, b: ReplyIn, u: dict = Depends(ANY)):
+async def send_conversation(pid: int, b: ReplyIn, u: dict = Depends(require_perm("patient_edit"))):
     if not await limiter.hit(f"conv_send:{u['id']}", 30, 60):
         raise HTTPException(429, "Çok fazla mesaj gönderildi; lütfen 1 dakika bekleyin")
+    await _enforce_doc_own_patient_pg(u["clinic_id"], pid, u)
     p = await _require_active_patient(pid, u["clinic_id"])
     from . import wa
     wa_res = await wa.send_text(dec(p["phone_enc"]), b.text)
@@ -1808,20 +1859,42 @@ async def analytics(u: dict = Depends(ANY)):
 
 
 class CampaignIn(BaseModel):
-    name: str = Field(min_length=2, max_length=100)
+    name: str = Field(min_length=2, max_length=120)
     source: str = Field("meta_ads", max_length=40)
-    clicks: int = Field(0, ge=0)
-    conversations: int = Field(0, ge=0)
-    appointments_booked: int = Field(0, ge=0)
-    revenue_try: Decimal = Field(Decimal(0), ge=0)
+    code: str | None = Field(default=None, max_length=60)
+    utm_source: str = Field("", max_length=60)
+    utm_medium: str = Field("cpc", max_length=60)
+    utm_campaign: str = Field("", max_length=80)
+    target_url: str = Field("/", max_length=300)
+    clicks: int = Field(0, ge=0, le=10_000_000)
+    conversations: int = Field(0, ge=0, le=10_000_000)
+    appointments_booked: int = Field(0, ge=0, le=1_000_000)
+    revenue_try: Decimal = Field(Decimal(0), ge=0, le=1_000_000_000)
 
 
 @router.post("/app/api/campaigns")
-async def add_campaign(b: CampaignIn, u: dict = Depends(OWNER)):
-    r = await q1("""INSERT INTO campaigns (clinic_id, name, source, clicks, conversations, appointments_booked, revenue_kurus)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                 u["clinic_id"], b.name, b.source, b.clicks, b.conversations, b.appointments_booked, kurus(b.revenue_try))
-    return {"id": r["id"]}
+async def add_campaign(b: CampaignIn, request: Request, u: dict = Depends(OWNER)):
+    from .dental_catalog import normalize_source
+    norm_s = normalize_source(b.source)
+    legacy_s = "meta_ads" if norm_s in ("instagram", "meta_ads") else ("google_ads" if norm_s == "google_ads" else "organik")
+    if b.code and b.code.strip():
+        code = re.sub(r"[^a-z0-9_-]+", "-", b.code.strip().lower()).strip("-")[:48]
+        if await q1("SELECT id FROM campaigns WHERE code=%s AND clinic_id<>%s", code, u["clinic_id"]):
+            code = f"{code}-c{u['clinic_id']}"
+    else:
+        raw_code = re.sub(r"[^a-z0-9]+", "-", b.name.lower()).strip("-")[:32] or "kampanya"
+        code = f"{raw_code}-{secrets.token_hex(2)}"
+    utm_s = b.utm_source.strip() or norm_s
+    utm_c = b.utm_campaign.strip() or code
+    r = await q1(
+        """INSERT INTO campaigns
+           (clinic_id, name, source, code, channel, utm_source, utm_medium, utm_campaign, target_url, is_sample, clicks, conversations, appointments_booked, revenue_kurus)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s,%s) RETURNING id""",
+        u["clinic_id"], b.name.strip(), legacy_s, code, norm_s, utm_s, b.utm_medium.strip(), utm_c,
+        b.target_url.strip() or "/", b.clicks, b.conversations, b.appointments_booked, kurus(b.revenue_try),
+    )
+    base = str(request.base_url).rstrip("/")
+    return {"id": r["id"], "code": code, "channel": norm_s, "tracking_url": f"{base}/c/{code}"}
 
 
 class SettingsIn(BaseModel):
@@ -1975,9 +2048,9 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
                 await q(
                     """UPDATE patients
                        SET last_source=%s, campaign_id=COALESCE(campaign_id, %s),
-                           utm_source=CASE WHEN %s<>'' THEN %s ELSE utm_source END,
-                           utm_medium=CASE WHEN %s<>'' THEN %s ELSE utm_medium END,
-                           utm_campaign=CASE WHEN %s<>'' THEN %s ELSE utm_campaign END
+                           utm_source=CASE WHEN COALESCE(utm_source,'')='' AND %s<>'' THEN %s ELSE utm_source END,
+                           utm_medium=CASE WHEN COALESCE(utm_medium,'')='' AND %s<>'' THEN %s ELSE utm_medium END,
+                           utm_campaign=CASE WHEN COALESCE(utm_campaign,'')='' AND %s<>'' THEN %s ELSE utm_campaign END
                        WHERE id=%s AND clinic_id=%s""",
                     det_s, cp_id_sim, us_sim, us_sim, um_sim, um_sim, uc_sim, uc_sim, b.patient_id, cid,
                 )

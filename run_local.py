@@ -2226,6 +2226,7 @@ async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
             pid = b.patient_id
             new_patient_data: tuple[str, str, str | None] | None = None
             if pid is not None:
+                _enforce_doc_own_patient(cid, pid, u)
                 p_row = _require_active_patient_row(c, pid, cid)
                 p_phone_enc = p_row["phone_enc"]
                 p_name = p_row["display_name"]
@@ -2308,6 +2309,8 @@ def update_appt(aid: int, b: ApptUpdate, u: dict = Depends(require_perm("edit"))
         cur_row = c.execute("SELECT * FROM appointments WHERE id=? AND clinic_id=?", (aid, cid)).fetchone()
         if not cur_row:
             raise HTTPException(404, "randevu yok")
+        if cur_row["patient_id"]:
+            _enforce_doc_own_patient(cid, int(cur_row["patient_id"]), u)
         if cur_row["status"] == "cancelled" and b.status not in ("booked", "confirmed"):
             raise HTTPException(409, "İptal edilmiş randevu düzenlenemez")
         cinfo = c.execute("SELECT chairs, working_hours_json, buffer_min FROM clinics WHERE id=?", (cid,)).fetchone()
@@ -2359,6 +2362,8 @@ async def appt_status(aid: int, b: StatusIn, request: Request, u: dict = Depends
         a = c.execute("SELECT * FROM appointments WHERE id=? AND clinic_id=?", (aid, cid)).fetchone()
         if not a:
             raise HTTPException(404, "randevu yok")
+        if a["patient_id"]:
+            _enforce_doc_own_patient(cid, int(a["patient_id"]), u)
         prev_status = a["status"]
         if b.status in ("booked", "confirmed") and prev_status not in ("booked", "confirmed"):
             cinfo = c.execute("SELECT buffer_min FROM clinics WHERE id=?", (cid,)).fetchone()
@@ -2424,6 +2429,8 @@ def appt_ics(aid: int, u: dict = Depends(ANY)):
     )
     if not r:
         raise HTTPException(404, "randevu yok")
+    if r.get("patient_id"):
+        _enforce_doc_own_patient(u["clinic_id"], int(r["patient_id"]), u)
     return PlainTextResponse(cal.appointment_ics(r, u["clinic_name"], u["clinic_address"]),
                              media_type="text/calendar; charset=utf-8",
                              headers={"content-disposition": f'attachment; filename="randevu-{aid}.ics"'})
@@ -2474,12 +2481,16 @@ def calendar_links_rotate(request: Request, u: dict = Depends(OWNER)):
 @app.get("/app/api/calendar/all.ics")
 def calendar_all_ics(u: dict = Depends(ANY)):
     cid = u["clinic_id"]
-    rows = q(
-        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor
-           FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
-           WHERE a.clinic_id=? AND a.status IN ('booked','confirmed') ORDER BY a.starts_at LIMIT 500""",
-        cid,
-    )
+    perms = u.get("permissions") or {}
+    sql_ics = """SELECT a.*, p.display_name AS patient, d.full_name AS doctor
+                 FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
+                 WHERE a.clinic_id=? AND a.status IN ('booked','confirmed')"""
+    args_ics: list = [cid]
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        sql_ics += " AND (a.doctor_id=? OR p.primary_doctor_id=?)"
+        args_ics.extend([u["id"], u["id"]])
+    sql_ics += " ORDER BY a.starts_at LIMIT 500"
+    rows = q(sql_ics, *args_ics)
     return PlainTextResponse(
         cal.feed_ics(rows, u["clinic_name"], u["clinic_address"]),
         media_type="text/calendar; charset=utf-8",
@@ -2571,6 +2582,7 @@ def list_patients(
 
     s = search.strip().lower()
     s_hmac = phone_hmac(s) if s else ""
+    can_fin_view = bool(perms.get("finance_view", False))
     out = []
     for p in rows:
         if s and s not in (p["display_name"] or "").lower() and s_hmac != p["phone_hmac"]:
@@ -2595,11 +2607,11 @@ def list_patients(
             "bank_agreement_id": p.get("bank_agreement_id"),
             "bank_agreement_name": p.get("bank_agreement_name"),
             "groups": groups_by_pid.get(int(p["id"]), []),
-            "planned_total": tl(int(p.get("planned_k") or 0)),
-            "completed_net_debt": tl(billed_k),
-            "collected_paid": tl(net_paid_k),
-            "net_remaining_debt": tl(rem_debt_k),
-            "balance": tl(billed_k - net_paid_k),
+            "planned_total": tl(int(p.get("planned_k") or 0)) if can_fin_view else 0.0,
+            "completed_net_debt": tl(billed_k) if can_fin_view else 0.0,
+            "collected_paid": tl(net_paid_k) if can_fin_view else 0.0,
+            "net_remaining_debt": tl(rem_debt_k) if can_fin_view else 0.0,
+            "balance": tl(billed_k - net_paid_k) if can_fin_view else 0.0,
             "red_flag": bool(p["rf"]),
             "last_appt": p["last_appt"],
             "created_at": p.get("created_at"),
@@ -3649,8 +3661,9 @@ def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICAL)):
 
 
 @app.post("/app/api/patients/{pid}/anamnesis")
-async def send_anam(pid: int, request: Request, u: dict = Depends(ANY)):
+async def send_anam(pid: int, request: Request, u: dict = Depends(require_perm("patient_edit"))):
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, pid, u)
     with _DB_LOCK:
         p_row = _require_active_patient_row(db(), pid, cid)
         p_phone = dec(p_row["phone_enc"])
@@ -4549,6 +4562,7 @@ async def add_charge(b: ChargeIn, u: dict = Depends(require_perm("finance_edit")
     if not await _LIMITER.hit(f"chg:{u['id']}", 60, 60):
         raise HTTPException(429, "Çok fazla hizmet ekleme isteği")
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, b.patient_id, u)
     with _DB_LOCK:
         c = db()
         p_row = _require_active_patient_row(c, b.patient_id, cid)
@@ -4637,6 +4651,7 @@ async def add_payment(b: PaymentIn, u: dict = Depends(require_perm("finance_edit
     if not await _LIMITER.hit(f"pay:{u['id']}", 60, 60):
         raise HTTPException(429, "Çok fazla tahsilat isteği")
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, b.patient_id, u)
     amt_k = kurus(b.amount)
     with _DB_LOCK:
         c = db()
@@ -4681,7 +4696,7 @@ class VoidIn(BaseModel):
 
 
 @app.post("/app/api/{kind}/{eid}/void")
-def void_entry(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dict = Depends(CLINICAL)):
+def void_entry(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dict = Depends(require_perm("finance_view", "finance_edit", "delete_cancel"))):
     cid = u["clinic_id"]
     sel_sql = (
         "SELECT id FROM charges WHERE id=? AND clinic_id=? AND voided_at IS NULL"

@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS staff_users (
   clinic_id       BIGINT NOT NULL DEFAULT 1,
   email           TEXT UNIQUE NOT NULL,
   full_name       TEXT NOT NULL,
-  role            TEXT NOT NULL CHECK (role IN ('owner','doctor','secretary')),
+  role            TEXT NOT NULL CHECK (role IN ('owner','doctor','secretary','accounting','clinical_support','lab_tech','warehouse','no_access')),
   pw_hash         TEXT NOT NULL,
   phone_hmac      TEXT UNIQUE,
   share_pct       NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (share_pct BETWEEN 0 AND 100),
@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS staff_users (
   active          BOOLEAN NOT NULL DEFAULT true,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE staff_users DROP CONSTRAINT IF EXISTS staff_users_role_check;
 
 -- Oturum kimliğinin kendisi değil SHA-256 özeti saklanır: veritabanı sızsa bile oturum çalınamaz.
 CREATE TABLE IF NOT EXISTS sessions (
@@ -355,8 +356,10 @@ CREATE TABLE IF NOT EXISTS patient_group_members (
   added_by_name TEXT NOT NULL DEFAULT '',
   added_at      TEXT NOT NULL DEFAULT (now()::text),
   created_at    TEXT NOT NULL DEFAULT (now()::text),
+  UNIQUE(patient_id, group_id),
   UNIQUE(clinic_id, patient_id, group_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS pgm_patient_group_uq ON patient_group_members(patient_id, group_id);
 
 CREATE TABLE IF NOT EXISTS payment_installments (
   id                 BIGSERIAL PRIMARY KEY,
@@ -409,14 +412,44 @@ CREATE TABLE IF NOT EXISTS treatment_consents (
   content_sha256     TEXT NOT NULL DEFAULT '',
   signer_name        TEXT NOT NULL DEFAULT '',
   signature_text     TEXT NOT NULL DEFAULT '',
+  signature_svg_enc  TEXT NOT NULL DEFAULT '',
   consent_type       TEXT NOT NULL DEFAULT 'electronic_form_approval',
   status             TEXT NOT NULL DEFAULT 'pending',
   signed_ip_hash     TEXT NOT NULL DEFAULT '',
   signed_user_agent  TEXT NOT NULL DEFAULT '',
   signed_at          TEXT,
   expires_at         TEXT,
+  created_by         BIGINT,
   created_at         TEXT NOT NULL DEFAULT (now()::text)
 );
+ALTER TABLE treatment_consents ADD COLUMN IF NOT EXISTS signature_svg_enc TEXT NOT NULL DEFAULT '';
+ALTER TABLE treatment_consents ADD COLUMN IF NOT EXISTS created_by BIGINT;
+ALTER TABLE periodontal_exams ADD COLUMN IF NOT EXISTS measurements_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE periodontal_exams ADD COLUMN IF NOT EXISTS bop_pct NUMERIC(5,2) NOT NULL DEFAULT 0;
+ALTER TABLE periodontal_exams ADD COLUMN IF NOT EXISTS plaque_pct NUMERIC(5,2) NOT NULL DEFAULT 0;
+ALTER TABLE periodontal_exams ADD COLUMN IF NOT EXISTS doctor_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE periodontal_exams ADD COLUMN IF NOT EXISTS created_by BIGINT;
+ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS procedure_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS shade_color TEXT NOT NULL DEFAULT 'A2';
+ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS sent_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS delivered_date TEXT;
+ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS created_by BIGINT;
+ALTER TABLE implant_records ADD COLUMN IF NOT EXISTS expiry_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE implant_records ADD COLUMN IF NOT EXISTS used_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE implant_records ADD COLUMN IF NOT EXISTS supplier TEXT NOT NULL DEFAULT '';
+ALTER TABLE implant_records ADD COLUMN IF NOT EXISTS document_ref TEXT NOT NULL DEFAULT '';
+ALTER TABLE implant_records ADD COLUMN IF NOT EXISTS uts_barcode TEXT NOT NULL DEFAULT '';
+ALTER TABLE implant_records ADD COLUMN IF NOT EXISTS created_by BIGINT;
+ALTER TABLE patient_media ADD COLUMN IF NOT EXISTS appointment_id BIGINT;
+ALTER TABLE patient_media ADD COLUMN IF NOT EXISTS tooth_record_id BIGINT;
+ALTER TABLE patient_media ADD COLUMN IF NOT EXISTS original_filename TEXT NOT NULL DEFAULT '';
+ALTER TABLE patient_media ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE patient_media ADD COLUMN IF NOT EXISTS sha256_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE patient_media ADD COLUMN IF NOT EXISTS encrypted_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS contact_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS balance_kurus BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE treatment_catalog ADD COLUMN IF NOT EXISTS default_price_kurus BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE treatment_catalog ADD COLUMN IF NOT EXISTS default_status TEXT NOT NULL DEFAULT 'treated';
 
 CREATE TABLE IF NOT EXISTS lab_orders (
   id              BIGSERIAL PRIMARY KEY,

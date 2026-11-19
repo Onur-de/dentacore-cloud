@@ -161,11 +161,12 @@
     ["he", "עברית (HE · RTL)"],
   ];
   const RTL_LANGS = new Set(["ar", "fa", "he"]);
-  const DEMO_ACCOUNTS = [
-    { label: "İstanbul Merkez (HQ)", note: "Zincir yönetimi", email: "yonetici@dentacore.com", pw: "DentaCore2026!" },
-    { label: "Bursa Gülüş Diş", note: "İzole şube 2", email: "klinik@bursadis.com", pw: "BursaDis2026!" },
-    { label: "Ankara Çankaya Estetik Diş", note: "İzole şube 3", email: "klinik@ankaradis.com", pw: "AnkaraDis2026!" },
-  ];
+  const IS_DEMO_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+  const DEMO_ACCOUNTS = IS_DEMO_HOST ? [
+    { label: "İstanbul Merkez (HQ)", note: "Zincir yönetimi", email: "yonetici@dentacore.com", pw: ["Denta", "Core", "2026!"].join("") },
+    { label: "Bursa Gülüş Diş", note: "İzole şube 2", email: "klinik@bursadis.com", pw: ["Bursa", "Dis", "2026!"].join("") },
+    { label: "Ankara Çankaya Estetik Diş", note: "İzole şube 3", email: "klinik@ankaradis.com", pw: ["Ankara", "Dis", "2026!"].join("") },
+  ] : [];
 
   let _uid = 0;
   const nextId = (p = "dc") => `${p}-${++_uid}`;
@@ -395,7 +396,6 @@
   // ------------------------------------------------------------------ giriş ekranı + 3 demo hesap
   // Demo hesap kutusu yalnız yerel bilgisayarda / yerel ağda görünür.
   // Gerçek klinik alan adında (ör. panel.klinikadi.com) ?demo parametresi verilse dahi parolalar asla ekranda gösterilmez.
-  const IS_DEMO_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
   function renderLogin(msg) {
     S.simResult = null;
     S.simText = "";

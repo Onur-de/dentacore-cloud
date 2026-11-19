@@ -31,9 +31,11 @@ MIGRATION = Path(env("MIGRATION_FILE", str(HERE / "migrations" / "002_platform.s
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from .core import assert_no_compromised_secrets
     for k in ("DATA_ENCRYPTION_KEY", "PHONE_HMAC_KEY", "ADMIN_TOKEN", "DATABASE_URL"):
         if not env(k):
             raise RuntimeError(f"{k} tanımlı değil")
+    assert_no_compromised_secrets()
     await db_open()
     await run_migrations(str(MIGRATION))
     await panel.bootstrap_owner()

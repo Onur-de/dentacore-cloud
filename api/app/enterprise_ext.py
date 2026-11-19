@@ -1070,6 +1070,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/patients/{pid}/groups")
     def assign_patient_group(pid: int, b: AssignGroupIn, u: dict = Depends(require_perm("patient_edit"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(pid, u)
         if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
             raise HTTPException(404, "hasta yok")
         grp = q1("SELECT * FROM patient_groups WHERE id=? AND clinic_id=?", b.group_id, cid)
@@ -1098,6 +1099,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.delete("/app/api/patients/{pid}/groups/{gid}")
     def remove_patient_group(pid: int, gid: int, u: dict = Depends(require_perm("patient_edit"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(pid, u)
         ex("DELETE FROM patient_group_members WHERE clinic_id=? AND patient_id=? AND group_id=?", cid, pid, gid)
         write_audit(u["id"], u["email"], "patient.group_remove", f"patient:{pid}:group:{gid}", u["ip_h"], clinic_id=cid)
         return {"ok": True}
@@ -1396,6 +1398,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/patients/{pid}/settle-advance")
     def settle_patient_advance(pid: int, b: AdvanceSettleIn, u: dict = Depends(require_perm("finance_edit"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(pid, u)
         with db_lock:
             c = db()
             if b.charge_id is not None:
@@ -1503,6 +1506,9 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/installments/{iid}/pay")
     def pay_installment(iid: int, b: InstallmentPayIn, u: dict = Depends(require_perm("finance_edit"))):
         cid = u["clinic_id"]
+        inst_chk = q1("SELECT patient_id FROM payment_installments WHERE id=? AND clinic_id=?", iid, cid)
+        if inst_chk and inst_chk.get("patient_id"):
+            _check_doc_own_patient(int(inst_chk["patient_id"]), u)
         with db_lock:
             c = db()
             inst = c.execute("SELECT * FROM payment_installments WHERE id=? AND clinic_id=?", (iid, cid)).fetchone()
@@ -1948,6 +1954,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/lab-orders")
     def create_lab_order(b: LabOrderIn, u: dict = Depends(require_perm("create"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(b.patient_id, u)
         if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
             raise HTTPException(404, "hasta yok")
         if b.doctor_id is not None and not q1("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", b.doctor_id, cid):
@@ -1979,6 +1986,8 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         row = q1("SELECT * FROM lab_orders WHERE id=? AND clinic_id=?", lid, cid)
         if not row:
             raise HTTPException(404, "laboratuvar iş emri yok")
+        if row.get("patient_id"):
+            _check_doc_own_patient(int(row["patient_id"]), u)
         deliv_d = (b.delivered_date or (date.today().isoformat() if b.status == "delivered" else row["delivered_date"]))
         new_note = b.note if b.note is not None else row["note"]
         ex("UPDATE lab_orders SET status=?, delivered_date=?, note=? WHERE id=? AND clinic_id=?",
@@ -2025,6 +2034,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/implants")
     def create_implant_record(b: ImplantRecordIn, u: dict = Depends(require_perm("patient_edit"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(b.patient_id, u)
         if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
             raise HTTPException(404, "hasta yok")
         if b.doctor_id is not None and not q1("SELECT id FROM staff_users WHERE id=? AND clinic_id=?", b.doctor_id, cid):
@@ -2281,7 +2291,8 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                 for ex_a in busy:
                     if str(ex_a["chair"]) != ch_str:
                         continue
-                    ex_s = datetime.fromisoformat(ex_a["starts_at"].replace("Z", "+00:00"))
+                    raw_st = ex_a["starts_at"]
+                    ex_s = raw_st if isinstance(raw_st, datetime) else datetime.fromisoformat(str(raw_st).replace("Z", "+00:00"))
                     if ex_s.tzinfo is None:
                         ex_s = ex_s.replace(tzinfo=TZ)
                     ex_s_utc = ex_s.astimezone(timezone.utc)
@@ -2370,7 +2381,8 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                     (cid, day_prefix),
                 ).fetchall()
                 for ex_row in existing:
-                    ex_s = datetime.fromisoformat(ex_row["starts_at"])
+                    raw_st = ex_row["starts_at"]
+                    ex_s = raw_st if isinstance(raw_st, datetime) else datetime.fromisoformat(str(raw_st).replace("Z", "+00:00"))
                     if ex_s.tzinfo is None:
                         ex_s = ex_s.replace(tzinfo=timezone.utc)
                     else:
@@ -2471,6 +2483,12 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
             s = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", s, flags=re.IGNORECASE)
             if "ON CONFLICT" not in s.upper():
                 s = s.rstrip(";") + " ON CONFLICT DO NOTHING"
+        s_low = s.lower()
+        if any(tbl in s_low for tbl in ("patients", "staff_users", "clinics", "inventory_items")):
+            s = re.sub(r"\bactive\s*=\s*1\b", "active=TRUE", s)
+            s = re.sub(r"\bactive\s*=\s*0\b", "active=FALSE", s)
+            if "insert into patients" in s_low and ",1,?)" in s:
+                s = s.replace(",1,?)", ",TRUE,?)")
         s = s.replace("?", "%s")
         is_ins = s.upper().startswith("INSERT ") and "RETURNING" not in s.upper() and not had_or_ignore
         return s, is_ins
@@ -2553,13 +2571,19 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
             return int(cur.lastrowid or 0)
 
     def _write_audit(actor_id: Any, actor: str, action: str, target: str = "", ip_h: str = "", meta: dict | None = None, clinic_id: int = 1) -> None:
-        try:
-            with _pg_lock, _get_conn() as c:
-                if c._is_pg:
-                    core.write_audit(c._raw, int(actor_id) if str(actor_id or "").isdigit() else None, str(actor), action, target, ip_h, meta, clinic_id=clinic_id)
-                    c.commit()
-        except Exception:
-            pass
+        from . import security as sec_mod
+        ts = datetime.now(TZ).isoformat(timespec="seconds")
+        m_json = json.dumps(meta or {}, ensure_ascii=False, sort_keys=True)
+        act_id = int(actor_id) if str(actor_id or "").isdigit() else None
+        with _pg_lock, _get_conn() as c:
+            prev_row = c.execute("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
+            prev_h = (prev_row["hash"] if prev_row and prev_row["hash"] else "0" * 64)
+            h = sec_mod.chain_hash(prev_h, ts, str(actor), action, target, m_json)
+            c.execute(
+                "INSERT INTO audit_log (clinic_id,ts,actor_id,actor,action,target,ip_hash,meta,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (clinic_id, ts, act_id, str(actor), action, target, ip_h, m_json, prev_h, h),
+            )
+            c.commit()
 
     register_enterprise_routes(
         app,
