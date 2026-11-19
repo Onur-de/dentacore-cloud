@@ -17,8 +17,14 @@ import os
 import tempfile
 from pathlib import Path
 
+import hashlib
 import httpx
 from PIL import Image, ImageFilter, ImageOps, ImageStat
+
+# Decompression bomb saldırılarına karşı piksel üst sınırı (25 MP)
+Image.MAX_IMAGE_PIXELS = 25_000_000
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+QC_DISCLAIMER_TR = "Bu sistem yalnızca teknik görüntü ve dosya kalitesini (netlik, pozlama, çözünürlük, bütünlük) kontrol eder; tıbbi teşhis koymaz."
 
 
 def env(k: str, d: str = "") -> str:
@@ -72,7 +78,74 @@ def assess_image(data: bytes) -> dict:
         verdict = "dark"
     elif bright > 225:
         verdict = "bright"
-    return {"verdict": verdict, "w": w, "h": h, "sharpness": round(sharp, 1), "brightness": round(bright, 1), "possible_opg": wide}
+    return {
+        "verdict": verdict,
+        "w": w,
+        "h": h,
+        "sharpness": round(sharp, 1),
+        "brightness": round(bright, 1),
+        "possible_opg": wide,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "file_size_bytes": len(data),
+        "is_dicom": False,
+        "disclaimer": QC_DISCLAIMER_TR,
+    }
+
+
+def assess_media_file(data: bytes, filename: str = "", mime: str = "") -> dict:
+    """Röntgen (JPEG/PNG/WebP/DICOM), ağız içi fotoğraf ve PDF belge bütünlük + kalite kontrolü.
+    Tıbbi teşhis koymaz; yalnızca dosya bütünlüğünü ve teknik görüntü kalitesini denetler.
+    """
+    if not data:
+        raise ValueError("Boş dosya yüklenemez")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Dosya boyutu çok büyük (maksimum {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+    sha = hashlib.sha256(data).hexdigest()
+    fn_low = (filename or "").strip().lower()
+    mime_low = (mime or "").strip().lower()
+
+    # 1) DICOM Part 10 kontrolü (128-byte preamble + 'DICM' magic header veya .dcm uzantısı)
+    is_dcm = (len(data) >= 132 and data[128:132] == b"DICM") or fn_low.endswith(".dcm") or "dicom" in mime_low
+    if is_dcm:
+        if len(data) < 132 or data[128:132] != b"DICM":
+            raise ValueError("Bozuk veya geçersiz DICOM (.dcm) dosya başlığı (DICM imzası bulunamadı)")
+        return {
+            "verdict": "dicom_ok",
+            "w": 0,
+            "h": 0,
+            "sharpness": 0.0,
+            "brightness": 0.0,
+            "possible_opg": True,
+            "sha256": sha,
+            "file_size_bytes": len(data),
+            "is_dicom": True,
+            "mime_type": "application/dicom",
+            "disclaimer": QC_DISCLAIMER_TR,
+        }
+
+    # 2) PDF Belge kontrolü (%PDF- magic header)
+    if data[:5] == b"%PDF-" or fn_low.endswith(".pdf") or mime_low == "application/pdf":
+        if data[:5] != b"%PDF-":
+            raise ValueError("Bozuk veya geçersiz PDF dosya başlığı")
+        return {
+            "verdict": "document_ok",
+            "w": 0,
+            "h": 0,
+            "sharpness": 0.0,
+            "brightness": 0.0,
+            "possible_opg": False,
+            "sha256": sha,
+            "file_size_bytes": len(data),
+            "is_dicom": False,
+            "mime_type": "application/pdf",
+            "disclaimer": QC_DISCLAIMER_TR,
+        }
+
+    # 3) Standart görsel (JPEG/PNG/WebP) kalite kontrolü
+    res = assess_image(data)
+    det_mime = "image/jpeg" if data[:3] == b"\xff\xd8\xff" else ("image/png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "image/webp")
+    res["mime_type"] = det_mime
+    return res
 
 
 def qc_reply(result: dict, lang: str) -> str:

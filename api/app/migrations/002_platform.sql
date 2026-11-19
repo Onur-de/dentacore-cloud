@@ -208,9 +208,318 @@ CREATE TABLE IF NOT EXISTS campaigns (
   clinic_id           BIGINT NOT NULL DEFAULT 1,
   name                TEXT NOT NULL,
   source              TEXT NOT NULL DEFAULT 'meta_ads',
+  code                TEXT NOT NULL DEFAULT '',
+  channel             TEXT NOT NULL DEFAULT 'instagram',
+  utm_source          TEXT NOT NULL DEFAULT 'instagram',
+  utm_medium          TEXT NOT NULL DEFAULT 'cpc',
+  utm_campaign        TEXT NOT NULL DEFAULT '',
+  target_url          TEXT NOT NULL DEFAULT '/',
+  is_sample           BOOLEAN NOT NULL DEFAULT false,
   clicks              INT NOT NULL DEFAULT 0,
   conversations       INT NOT NULL DEFAULT 0,
   appointments_booked INT NOT NULL DEFAULT 0,
   revenue_kurus       BIGINT NOT NULL DEFAULT 0,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Kurumsal genişletmeler (Bölüm 3-25): PostgreSQL ve SQLite şema eşitliği
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS first_source       TEXT NOT NULL DEFAULT 'whatsapp';
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS last_source        TEXT NOT NULL DEFAULT 'whatsapp';
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS campaign_id        BIGINT;
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS utm_source         TEXT NOT NULL DEFAULT '';
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS utm_medium         TEXT NOT NULL DEFAULT '';
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS utm_campaign       TEXT NOT NULL DEFAULT '';
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS click_id           TEXT NOT NULL DEFAULT '';
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS primary_doctor_id  BIGINT;
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS bank_agreement_id  BIGINT;
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS created_by         BIGINT;
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS notes              TEXT NOT NULL DEFAULT '';
+ALTER TABLE patients     ADD COLUMN IF NOT EXISTS birth_date         TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE tooth_records ADD COLUMN IF NOT EXISTS gross_amount_kurus BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE tooth_records ADD COLUMN IF NOT EXISTS discount_kurus     BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE tooth_records ADD COLUMN IF NOT EXISTS bank_agreement_id  BIGINT;
+ALTER TABLE tooth_records ADD COLUMN IF NOT EXISTS discount_reason    TEXT NOT NULL DEFAULT '';
+ALTER TABLE tooth_records ADD COLUMN IF NOT EXISTS created_by         BIGINT;
+
+ALTER TABLE charges      ADD COLUMN IF NOT EXISTS gross_amount_kurus BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE charges      ADD COLUMN IF NOT EXISTS discount_kurus     BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE charges      ADD COLUMN IF NOT EXISTS bank_agreement_id  BIGINT;
+ALTER TABLE charges      ADD COLUMN IF NOT EXISTS discount_reason    TEXT NOT NULL DEFAULT '';
+ALTER TABLE charges      ADD COLUMN IF NOT EXISTS tooth_record_id    BIGINT;
+
+ALTER TABLE payments     ADD COLUMN IF NOT EXISTS status             TEXT NOT NULL DEFAULT 'completed';
+ALTER TABLE payments     ADD COLUMN IF NOT EXISTS doctor_id          BIGINT;
+ALTER TABLE payments     ADD COLUMN IF NOT EXISTS is_advance         BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE payments     ADD COLUMN IF NOT EXISTS applied_charge_id  BIGINT;
+ALTER TABLE payments     ADD COLUMN IF NOT EXISTS refund_of_id       BIGINT;
+ALTER TABLE payments     ADD COLUMN IF NOT EXISTS note               TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS confirmed_at           TIMESTAMPTZ;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS cancelled_at           TIMESTAMPTZ;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS cancel_reason          TEXT NOT NULL DEFAULT '';
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS satisfaction_sent_at   TIMESTAMPTZ;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS satisfaction_reply     TEXT;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS satisfaction_replied_at TIMESTAMPTZ;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS series_id              TEXT;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS sequence               INT NOT NULL DEFAULT 0;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS updated_at             TIMESTAMPTZ;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS campaign_id            BIGINT;
+
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS ai_monthly_token_limit BIGINT NOT NULL DEFAULT 1500000;
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS ai_monthly_budget_try  NUMERIC(12,2) NOT NULL DEFAULT 250.00;
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS ai_hard_stop           BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS max_reminders          INT NOT NULL DEFAULT 1;
+ALTER TABLE clinics      ADD COLUMN IF NOT EXISTS reminder_hours_before  INT NOT NULL DEFAULT 24;
+
+ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS category    TEXT NOT NULL DEFAULT 'Sarf Malzeme';
+ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS supplier    TEXT NOT NULL DEFAULT '';
+ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS expiry_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS lot_number  TEXT NOT NULL DEFAULT '';
+ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS warehouse   TEXT NOT NULL DEFAULT 'Ana Depo';
+
+ALTER TABLE stock_moves  ADD COLUMN IF NOT EXISTS move_type  TEXT NOT NULL DEFAULT 'in';
+ALTER TABLE stock_moves  ADD COLUMN IF NOT EXISTS lot_number TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE staff_users  ADD COLUMN IF NOT EXISTS job_title             TEXT NOT NULL DEFAULT '';
+ALTER TABLE staff_users  ADD COLUMN IF NOT EXISTS permissions_json      TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE staff_users  ADD COLUMN IF NOT EXISTS working_schedule_json TEXT NOT NULL DEFAULT '{}';
+
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS code         TEXT NOT NULL DEFAULT '';
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS channel      TEXT NOT NULL DEFAULT 'instagram';
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS utm_source   TEXT NOT NULL DEFAULT 'instagram';
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS utm_medium   TEXT NOT NULL DEFAULT 'cpc';
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS utm_campaign TEXT NOT NULL DEFAULT '';
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS target_url   TEXT NOT NULL DEFAULT '/';
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS is_sample    BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS campaign_events (
+  id                 BIGSERIAL PRIMARY KEY,
+  clinic_id          BIGINT NOT NULL DEFAULT 1,
+  campaign_id        BIGINT,
+  event_type         TEXT NOT NULL,
+  source             TEXT NOT NULL DEFAULT 'website',
+  utm_source         TEXT NOT NULL DEFAULT '',
+  utm_medium         TEXT NOT NULL DEFAULT '',
+  utm_campaign       TEXT NOT NULL DEFAULT '',
+  click_id           TEXT NOT NULL DEFAULT '',
+  visitor_hash       TEXT NOT NULL DEFAULT '',
+  is_bot             BOOLEAN NOT NULL DEFAULT false,
+  is_unique          BOOLEAN NOT NULL DEFAULT false,
+  patient_id         BIGINT,
+  appointment_id     BIGINT,
+  idempotency_key    TEXT,
+  user_agent_summary TEXT NOT NULL DEFAULT '',
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS bank_agreements (
+  id                    BIGSERIAL PRIMARY KEY,
+  clinic_id             BIGINT NOT NULL DEFAULT 1,
+  bank_name             TEXT NOT NULL,
+  start_date            TEXT NOT NULL DEFAULT '',
+  end_date              TEXT NOT NULL DEFAULT '',
+  discount_pct          NUMERIC(6,2) NOT NULL DEFAULT 0,
+  discount_type         TEXT NOT NULL DEFAULT 'percentage',
+  fixed_discount_kurus  BIGINT NOT NULL DEFAULT 0,
+  applicable_treatments TEXT NOT NULL DEFAULT 'all',
+  max_discount_kurus    BIGINT NOT NULL DEFAULT 0,
+  combinable            BOOLEAN NOT NULL DEFAULT false,
+  eligibility_notes     TEXT NOT NULL DEFAULT '',
+  active                BOOLEAN NOT NULL DEFAULT true,
+  created_by            BIGINT,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS patient_groups (
+  id            BIGSERIAL PRIMARY KEY,
+  clinic_id     BIGINT NOT NULL DEFAULT 1,
+  name          TEXT NOT NULL,
+  color         TEXT NOT NULL DEFAULT 'teal',
+  is_restricted BOOLEAN NOT NULL DEFAULT false,
+  description   TEXT NOT NULL DEFAULT '',
+  created_by    BIGINT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(clinic_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS patient_group_members (
+  id            BIGSERIAL PRIMARY KEY,
+  clinic_id     BIGINT NOT NULL DEFAULT 1,
+  patient_id    BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  group_id      BIGINT NOT NULL REFERENCES patient_groups(id) ON DELETE CASCADE,
+  reason        TEXT NOT NULL DEFAULT '',
+  added_by      BIGINT,
+  added_by_name TEXT NOT NULL DEFAULT '',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(clinic_id, patient_id, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS payment_installments (
+  id          BIGSERIAL PRIMARY KEY,
+  clinic_id   BIGINT NOT NULL DEFAULT 1,
+  patient_id  BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  charge_id   BIGINT,
+  title       TEXT NOT NULL DEFAULT 'Taksit',
+  due_date    TEXT NOT NULL,
+  amount_kurus BIGINT NOT NULL CHECK (amount_kurus > 0),
+  paid_kurus  BIGINT NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  paid_at     TIMESTAMPTZ,
+  note        TEXT NOT NULL DEFAULT '',
+  created_by  BIGINT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS periodontal_exams (
+  id                 BIGSERIAL PRIMARY KEY,
+  clinic_id          BIGINT NOT NULL DEFAULT 1,
+  patient_id         BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id          BIGINT,
+  measurements_json  TEXT NOT NULL DEFAULT '{}',
+  plaque_index_pct   NUMERIC(5,2) NOT NULL DEFAULT 0,
+  bleeding_index_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+  note               TEXT NOT NULL DEFAULT '',
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS treatment_consents (
+  id              BIGSERIAL PRIMARY KEY,
+  clinic_id       BIGINT NOT NULL DEFAULT 1,
+  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id       BIGINT,
+  treatment_name  TEXT NOT NULL,
+  tooth_fdi       TEXT NOT NULL DEFAULT '',
+  risks_text      TEXT NOT NULL DEFAULT '',
+  body_text       TEXT NOT NULL,
+  text_sha256     TEXT NOT NULL,
+  token           TEXT UNIQUE NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  signer_name     TEXT NOT NULL DEFAULT '',
+  signed_at       TIMESTAMPTZ,
+  signer_ip_hash  TEXT NOT NULL DEFAULT '',
+  approval_type   TEXT NOT NULL DEFAULT 'electronic_form_approval',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS lab_orders (
+  id              BIGSERIAL PRIMARY KEY,
+  clinic_id       BIGINT NOT NULL DEFAULT 1,
+  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id       BIGINT,
+  lab_name        TEXT NOT NULL,
+  work_type       TEXT NOT NULL,
+  tooth_fdi       TEXT NOT NULL DEFAULT '',
+  shade           TEXT NOT NULL DEFAULT 'A2',
+  sent_at         TEXT NOT NULL,
+  due_date        TEXT NOT NULL,
+  received_at     TEXT,
+  delivered_at    TEXT,
+  cost_kurus      BIGINT NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'ordered',
+  note            TEXT NOT NULL DEFAULT '',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS implant_records (
+  id              BIGSERIAL PRIMARY KEY,
+  clinic_id       BIGINT NOT NULL DEFAULT 1,
+  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  tooth_fdi       INT NOT NULL,
+  brand           TEXT NOT NULL,
+  model           TEXT NOT NULL DEFAULT '',
+  diameter_mm     NUMERIC(5,2) NOT NULL DEFAULT 4.0,
+  length_mm       NUMERIC(5,2) NOT NULL DEFAULT 10.0,
+  lot_number      TEXT NOT NULL,
+  serial_number   TEXT NOT NULL DEFAULT '',
+  barcode_udi     TEXT NOT NULL DEFAULT '',
+  supplier        TEXT NOT NULL DEFAULT '',
+  doctor_id       BIGINT,
+  placed_at       TEXT NOT NULL,
+  torque_ncm      NUMERIC(5,2) NOT NULL DEFAULT 35.0,
+  note            TEXT NOT NULL DEFAULT '',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS patient_media (
+  id               BIGSERIAL PRIMARY KEY,
+  clinic_id        BIGINT NOT NULL DEFAULT 1,
+  patient_id       BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  appointment_id   BIGINT,
+  tooth_record_id  BIGINT,
+  category         TEXT NOT NULL DEFAULT 'photo',
+  stage            TEXT NOT NULL DEFAULT 'general',
+  filename         TEXT NOT NULL,
+  mime_type        TEXT NOT NULL,
+  size_bytes       BIGINT NOT NULL,
+  width            INT NOT NULL DEFAULT 0,
+  height           INT NOT NULL DEFAULT 0,
+  sha256           TEXT NOT NULL,
+  encrypted_file   TEXT NOT NULL,
+  qc_verdict       TEXT NOT NULL DEFAULT 'ok',
+  qc_metrics_json  TEXT NOT NULL DEFAULT '{}',
+  note             TEXT NOT NULL DEFAULT '',
+  uploaded_by      BIGINT,
+  deleted_at       TIMESTAMPTZ,
+  delete_reason    TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS suppliers (
+  id             BIGSERIAL PRIMARY KEY,
+  clinic_id      BIGINT NOT NULL DEFAULT 1,
+  name           TEXT NOT NULL,
+  category       TEXT NOT NULL DEFAULT 'Genel',
+  contact_person TEXT NOT NULL DEFAULT '',
+  phone          TEXT NOT NULL DEFAULT '',
+  email          TEXT NOT NULL DEFAULT '',
+  tax_no         TEXT NOT NULL DEFAULT '',
+  balance_kurus  BIGINT NOT NULL DEFAULT 0,
+  active         BOOLEAN NOT NULL DEFAULT true,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id             BIGSERIAL PRIMARY KEY,
+  clinic_id      BIGINT NOT NULL DEFAULT 1,
+  supplier_id    BIGINT,
+  category       TEXT NOT NULL DEFAULT 'İşletme Gideri',
+  description    TEXT NOT NULL,
+  amount_kurus   BIGINT NOT NULL CHECK (amount_kurus > 0),
+  method         TEXT NOT NULL DEFAULT 'havale',
+  invoice_no     TEXT NOT NULL DEFAULT '',
+  paid_at        TEXT NOT NULL,
+  created_by     BIGINT,
+  voided_at      TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS cash_closings (
+  id                     BIGSERIAL PRIMARY KEY,
+  clinic_id              BIGINT NOT NULL DEFAULT 1,
+  closing_date           TEXT NOT NULL,
+  opening_balance_kurus  BIGINT NOT NULL DEFAULT 0,
+  total_in_kurus         BIGINT NOT NULL DEFAULT 0,
+  total_out_kurus        BIGINT NOT NULL DEFAULT 0,
+  cash_in_kurus          BIGINT NOT NULL DEFAULT 0,
+  card_in_kurus          BIGINT NOT NULL DEFAULT 0,
+  bank_in_kurus          BIGINT NOT NULL DEFAULT 0,
+  closing_balance_kurus  BIGINT NOT NULL DEFAULT 0,
+  physical_counted_kurus BIGINT NOT NULL DEFAULT 0,
+  diff_kurus             BIGINT NOT NULL DEFAULT 0,
+  note                   TEXT NOT NULL DEFAULT '',
+  closed_by              BIGINT,
+  closed_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS treatment_catalog (
+  id                  BIGSERIAL PRIMARY KEY,
+  clinic_id           BIGINT NOT NULL DEFAULT 1,
+  code                TEXT NOT NULL,
+  name                TEXT NOT NULL,
+  category            TEXT NOT NULL DEFAULT 'Genel',
+  default_price_kurus BIGINT NOT NULL DEFAULT 0,
+  default_status      TEXT NOT NULL DEFAULT 'treated',
+  active              BOOLEAN NOT NULL DEFAULT true,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );

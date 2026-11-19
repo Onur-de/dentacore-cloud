@@ -63,10 +63,15 @@ def _event_lines(appt: dict, clinic_name: str, address: str = "") -> list[str]:
     desc_parts = [f"Klinik: {clinic_name}", f"Hasta: {patient_label}", "İşlem: Diş Randevusu", f"Koltuk: {chair}"]
     if doctor:
         desc_parts.append(f"Hekim: {doctor}")
+    seq = int(appt.get("sequence") or 0)
+    last_mod_raw = appt.get("updated_at") or appt.get("created_at")
+    last_mod = _dt_utc(last_mod_raw) if last_mod_raw else datetime.now(timezone.utc)
     lines = [
         "BEGIN:VEVENT",
         f"UID:dentacore-{appt.get('id', 0)}@dentacore.local",
+        f"SEQUENCE:{seq}",
         f"DTSTAMP:{_fmt_utc(datetime.now(timezone.utc))}",
+        f"LAST-MODIFIED:{_fmt_utc(last_mod)}",
         f"DTSTART:{_fmt_utc(start)}",
         f"DTEND:{_fmt_utc(end)}",
         f"SUMMARY:{ics_escape(summary)}",

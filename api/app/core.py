@@ -38,11 +38,28 @@ class S:
 _fernet: Fernet | None = None
 
 
+COMPROMISED_SECRETS_DENYLIST = frozenset({
+    "Tet8XeZ17zgbFNprLrV7y-W8hnfGvpk4D-25FMXF2y8=",
+    "112ebe88d9b687f7b3fca9a6d2be2008d84864e61c518604f7b140894c842493",
+    "cbcf8564524ac511c47bc9b4a43383c9258086a1f173532807b385166c4f1a90",
+    "bdb9da38d70a587792bee84a2325986ed118af25d92f40cc",
+    "f20c9368ab6fe62e31b297c30d01ee9c99b66d74f8a7764c",
+    "cb32c4870441f2432e6bd4c58fea77e1",
+    "e1858736338792a95f809dc4ea3b094a",
+})
+
+
+def is_compromised_secret(val: str | None) -> bool:
+    return bool(val and val.strip() in COMPROMISED_SECRETS_DENYLIST)
+
+
 def fernet() -> Fernet:
     global _fernet
     if _fernet is None:
         if not S.data_key:
             raise RuntimeError("DATA_ENCRYPTION_KEY tanımlı değil")
+        if is_compromised_secret(S.data_key):
+            raise RuntimeError("Güvenlik ihlali: c4d6a2f sızıntı DATA_ENCRYPTION_KEY anahtarı kullanılamaz")
         _fernet = Fernet(S.data_key.encode())
     return _fernet
 
@@ -59,6 +76,8 @@ def norm_phone(p: str) -> str:
     d = re.sub(r"\D", "", p or "")
     if d.startswith("00"):
         d = d[2:]
+    if d.startswith("900") and len(d) == 13:  # P0-2: "+90 0532 ..." yazımı
+        d = "90" + d[3:]
     if d.startswith("0") and len(d) == 11:
         d = "90" + d[1:]
     if len(d) == 10 and d.startswith("5"):

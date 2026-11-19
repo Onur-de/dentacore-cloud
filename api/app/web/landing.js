@@ -192,11 +192,43 @@
   });
   calc();
 
-  // Demo formu (POST /lead)
+  // Kampanya ve UTM kaynak yakalama + Demo formu (POST /lead)
+  const urlParams = new URLSearchParams(window.location.search || "");
+  const utmSource = urlParams.get("utm_source") || "";
+  const utmMedium = urlParams.get("utm_medium") || "";
+  const utmCampaign = urlParams.get("utm_campaign") || "";
+  const campaignCode = urlParams.get("dc_code") || utmCampaign || "";
+  const clickId = urlParams.get("gclid")
+    ? "gclid:" + urlParams.get("gclid")
+    : urlParams.get("fbclid")
+      ? "fbclid:" + urlParams.get("fbclid")
+      : urlParams.get("ttclid")
+        ? "ttclid:" + urlParams.get("ttclid")
+        : "";
+
   const form = $("lead");
   const msg = $("lead-msg");
   const submitBtn = $("lead-submit");
+  let formStartTracked = false;
+
   if (form && msg) {
+    form.addEventListener("focusin", () => {
+      if (formStartTracked || (!campaignCode && !utmSource && !clickId)) return;
+      formStartTracked = true;
+      fetch("/api/campaigns/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_type: "form_start",
+          campaign_code: campaignCode,
+          utm_source: utmSource,
+          utm_medium: utmMedium,
+          utm_campaign: utmCampaign,
+          click_id: clickId
+        })
+      }).catch(() => {});
+    });
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       msg.classList.remove("err");
@@ -221,6 +253,11 @@
         contact,
         city: String(f.get("city") || "").trim() || null,
         chairs: f.get("chairs") ? Number(f.get("chairs")) : null,
+        utm_source: utmSource,
+        utm_medium: utmMedium,
+        utm_campaign: utmCampaign,
+        click_id: clickId,
+        campaign_code: campaignCode,
         kvkk_aydinlatma: kvkkOk,
         yurt_disi_riza: yurtDisiOk,
         website: f.get("website") || null
@@ -232,12 +269,14 @@
           headers: { "Content-Type": "application/json", "Accept": "application/json" },
           body: JSON.stringify(body)
         });
-        if (!r.ok) throw new Error("Lütfen bilgileri kontrol edip tekrar deneyin.");
+        if (!r.ok) {
+          throw new Error("Sunucu yanıt vermedi veya statik önizleme ortamındasınız. Lütfen canlı sunucu üzerinden tekrar deneyin.");
+        }
         form.reset();
         msg.textContent = "Talebiniz alındı. Ekibimiz en kısa sürede sizinle iletişime geçecek.";
       } catch (err) {
         msg.classList.add("err");
-        msg.textContent = err && err.message ? err.message : "Gönderim sırasında hata oluştu.";
+        msg.textContent = err && err.message ? err.message : "Gönderim sırasında sunucu bağlantısı kurulamadı.";
       } finally {
         if (submitBtn) submitBtn.disabled = false;
       }

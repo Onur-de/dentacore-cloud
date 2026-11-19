@@ -31,8 +31,8 @@ limiter = sec.RateLimiter()          # main.py açılışta Redis bağlar
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def kurus(v: Decimal) -> int:
-    return int((v * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+def kurus(v: Decimal | float | int | str) -> int:
+    return int((Decimal(str(v if v is not None else 0)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def tl(k: int | None) -> float:
@@ -956,14 +956,38 @@ async def get_odontogram(pid: int, u: dict = Depends(ANY)):
     }
 
 
+ODO_BILLABLE_STATUSES = frozenset({"treated", "implant", "crown", "root_canal"})
+
+
+def _odo_charge_key(rid: int, client_key: str | None = None) -> str:
+    return f"odo:{int(rid)}:{(client_key or '')[:60]}"[:80]
+
+
+def _odo_charge_desc(fdi: int, surface: str, name: str) -> str:
+    return f"Diş #{fdi} ({surface}) - {name}"[:120]
+
+
+async def _odo_linked_charges(t, cid: int, pid: int, rec: dict) -> list:
+    rows = await t.q("SELECT id FROM charges WHERE clinic_id=%s AND patient_id=%s AND voided_at IS NULL AND idempotency_key LIKE %s",
+                     cid, pid, f"odo:{int(rec['id'])}:%")
+    if rows:
+        return [r["id"] for r in rows]
+    rows = await t.q(
+        """SELECT id FROM charges WHERE clinic_id=%s AND patient_id=%s AND voided_at IS NULL AND description=%s AND amount_kurus=%s
+           AND (idempotency_key IS NULL OR idempotency_key NOT LIKE 'odo:%%') ORDER BY id LIMIT 1""",
+        cid, pid, _odo_charge_desc(rec["tooth_fdi"], rec["surface"], rec["procedure_name"]), rec["amount_kurus"])
+    return [r["id"] for r in rows]
+
+
 @router.post("/app/api/patients/{pid}/odontogram")
-async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY)):
+async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
     await _require_active_patient(pid, cid)
     if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
         raise HTTPException(404, "hekim yok")
     amt_k = kurus(b.amount)
     charge_id = None
+    charge_skipped = None
     async with tx() as t:
         rec = await t.q1(
             """INSERT INTO tooth_records
@@ -971,20 +995,25 @@ async def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(ANY
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             cid, pid, b.tooth_fdi, b.surface, b.status, b.procedure_code, b.procedure_name, amt_k, b.doctor_id or u["id"], b.note,
         )
-        if b.auto_charge and amt_k > 0:
+        if b.auto_charge and amt_k > 0 and b.status not in ODO_BILLABLE_STATUSES:
+            charge_skipped = "planned_not_billable"  # P0-1: plan borç değildir
+        elif b.auto_charge and amt_k > 0:
             if b.idempotency_key:
-                dup = await t.q1("SELECT id FROM charges WHERE clinic_id=%s AND idempotency_key=%s", cid, b.idempotency_key)
+                dup = await t.q1("SELECT id FROM charges WHERE clinic_id=%s AND (idempotency_key=%s OR idempotency_key LIKE %s)",
+                                 cid, b.idempotency_key, f"odo:%:{b.idempotency_key[:60]}")
                 if dup:
                     raise HTTPException(409, "Bu odontogram hizmet borçlandırması zaten işlendi")
-            desc = f"Diş #{b.tooth_fdi} ({b.surface}) - {b.procedure_name}"[:120]
             ch = await t.q1(
                 """INSERT INTO charges (clinic_id, patient_id, description, amount_kurus, doctor_id, created_by, idempotency_key)
                    VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                cid, pid, desc, amt_k, b.doctor_id or u["id"], u["id"], b.idempotency_key,
+                cid, pid, _odo_charge_desc(b.tooth_fdi, b.surface, b.procedure_name), amt_k, b.doctor_id or u["id"], u["id"],
+                _odo_charge_key(rec["id"], b.idempotency_key),
             )
             charge_id = ch["id"]
-    await log(u, "odontogram.create", f"patient:{pid}:tooth:{b.tooth_fdi}", {"surface": b.surface, "status": b.status, "charge_id": charge_id})
-    return {"id": rec["id"], "tooth_fdi": b.tooth_fdi, "surface": b.surface, "status": b.status, "charge_id": charge_id}
+    await log(u, "odontogram.create", f"patient:{pid}:tooth:{b.tooth_fdi}",
+              {"surface": b.surface, "status": b.status, "charge_id": charge_id, "charge_skipped": charge_skipped})
+    return {"id": rec["id"], "tooth_fdi": b.tooth_fdi, "surface": b.surface, "status": b.status, "charge_id": charge_id,
+            "charge_skipped": charge_skipped}
 
 
 @router.patch("/app/api/patients/{pid}/odontogram/{rid}")
@@ -1000,23 +1029,49 @@ async def update_odontogram_record(pid: int, rid: int, b: OdontogramUpdateIn, u:
     new_amt = kurus(b.amount) if b.amount is not None else rec["amount_kurus"]
     new_doc = b.doctor_id if b.doctor_id is not None else rec["doctor_id"]
     new_note = b.note if b.note is not None else rec["note"]
-    await q(
-        """UPDATE tooth_records SET surface=%s, status=%s, procedure_code=%s, procedure_name=%s, amount_kurus=%s, doctor_id=%s, note=%s
-           WHERE id=%s AND patient_id=%s AND clinic_id=%s""",
-        new_surface, new_status, new_code, new_name, new_amt, new_doc, new_note, rid, pid, cid,
-    )
-    await log(u, "odontogram.update", f"tooth_record:{rid}", {"status": new_status})
-    return {"ok": True, "id": rid}
+    voided: list = []
+    new_charge_id = None
+    async with tx() as t:
+        linked = await _odo_linked_charges(t, cid, pid, rec)
+        await t.q(
+            """UPDATE tooth_records SET surface=%s, status=%s, procedure_code=%s, procedure_name=%s, amount_kurus=%s, doctor_id=%s, note=%s
+               WHERE id=%s AND patient_id=%s AND clinic_id=%s""",
+            new_surface, new_status, new_code, new_name, new_amt, new_doc, new_note, rid, pid, cid,
+        )
+        billable = new_status in ODO_BILLABLE_STATUSES and new_amt > 0
+        changed = new_amt != rec["amount_kurus"] or new_surface != rec["surface"] or new_name != rec["procedure_name"]
+        if linked and (not billable or changed):
+            reason = "Diş kaydı tamamlanmadı/plana döndü" if not billable else "Diş kaydı tutarı/bilgisi güncellendi"
+            for ch_id in linked:
+                await t.q("UPDATE charges SET voided_at=now(), void_reason=%s WHERE id=%s AND clinic_id=%s AND voided_at IS NULL",
+                          reason, ch_id, cid)
+            voided, linked = list(linked), []
+        if billable and not linked:
+            ch = await t.q1(
+                """INSERT INTO charges (clinic_id, patient_id, description, amount_kurus, doctor_id, created_by, idempotency_key)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                cid, pid, _odo_charge_desc(rec["tooth_fdi"], new_surface, new_name), new_amt, new_doc or u["id"], u["id"],
+                _odo_charge_key(rid, f"u{secrets.token_hex(6)}"),
+            )
+            new_charge_id = ch["id"]
+    await log(u, "odontogram.update", f"tooth_record:{rid}", {"status": new_status, "voided_charges": voided, "charge_id": new_charge_id})
+    return {"ok": True, "id": rid, "voided_charges": voided, "charge_id": new_charge_id}
 
 
 @router.delete("/app/api/patients/{pid}/odontogram/{rid}")
 async def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
-    r = await q1("DELETE FROM tooth_records WHERE id=%s AND patient_id=%s AND clinic_id=%s RETURNING id", rid, pid, cid)
-    if not r:
+    rec = await q1("SELECT * FROM tooth_records WHERE id=%s AND patient_id=%s AND clinic_id=%s", rid, pid, cid)
+    if not rec:
         raise HTTPException(404, "diş kaydı yok")
-    await log(u, "odontogram.delete", f"tooth_record:{rid}")
-    return {"ok": True}
+    async with tx() as t:
+        linked = await _odo_linked_charges(t, cid, pid, rec)
+        for ch_id in linked:
+            await t.q("UPDATE charges SET voided_at=now(), void_reason=%s WHERE id=%s AND clinic_id=%s AND voided_at IS NULL",
+                      "Diş kaydı silindi", ch_id, cid)
+        await t.q("DELETE FROM tooth_records WHERE id=%s AND patient_id=%s AND clinic_id=%s", rid, pid, cid)
+    await log(u, "odontogram.delete", f"tooth_record:{rid}", {"voided_charges": linked})
+    return {"ok": True, "voided_charges": linked}
 
 
 @router.post("/app/api/patients/{pid}/anamnesis")

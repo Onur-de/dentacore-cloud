@@ -2806,6 +2806,7 @@ textarea.input { min-height: 84px; }
     const titleId = nextId("m-title");
     const form = h("form", {
       class: "modal",
+      autocomplete: "off",
       noValidate: true,
       on: {
         submit: async (e) => {
@@ -3229,7 +3230,7 @@ textarea.input { min-height: 84px; }
       h("div", { class: "grid g4" },
         occ,
         kpi("Son 30 gün gelmeme", `%${o.attendance_30d.noshow_rate}`, `${o.attendance_30d.noshow} gelmeyen / ${o.attendance_30d.done} gelen`),
-        kpi("Gelmeyenlerden kayıp", fmtTL(o.loss.noshow_30d_try), `Ortalama işlem ${fmtTL(o.loss.avg_ticket_try)} üzerinden`, "loss"),
+        kpi("Gelmeyenlerden kayıp", o.loss ? fmtTL(o.loss.noshow_30d_try) : "-", o.loss ? `Ortalama işlem ${fmtTL(o.loss.avg_ticket_try)} üzerinden` : "Finans yetkisi gerektirir", "loss"),
         kpi("LLM'siz cevap oranı", o.tokens_30d.llm_free_pct === null ? "-" : `%${o.tokens_30d.llm_free_pct}`, `${o.tokens_30d.replies} otomatik cevap, ${o.tokens_30d.tokens} token`, "good")
       ),
       h("div", { class: "grid g3", style: "margin-top:14px" },
@@ -3244,7 +3245,7 @@ textarea.input { min-height: 84px; }
         ),
         h("div", { class: "card" },
           h("h3", { text: "Bu ay kasa" }),
-          h("div", { class: "kv" }, h("span", { text: "Hizmet" }), h("b", { text: fmtTL(o.month.billed_try) }), h("span", { text: "Tahsilat" }), h("b", { text: fmtTL(o.month.paid_try) })),
+          h("div", { class: "kv" }, h("span", { text: "Hizmet" }), h("b", { text: o.month ? fmtTL(o.month.billed_try) : "-" }), h("span", { text: "Tahsilat" }), h("b", { text: o.month ? fmtTL(o.month.paid_try) : "-" })),
           h("div", { class: "section-t", text: "Dikkat isteyenler" }),
           h("div", { class: "kv" },
             h("span", { text: "Okunmamış uyarı" }), h("a", { href: "#/alerts", text: String(c.alerts || 0) }),
@@ -3573,12 +3574,45 @@ textarea.input { min-height: 84px; }
     }, "Değişikliği Kaydet");
   }
 
-  async function newAppt() {
-    const patients = await api("/app/api/patients");
-    const staff = await api("/app/api/staff");
+  const PATIENT_SOURCES = [
+    ["instagram", "Instagram"],
+    ["instagram_dm", "Instagram DM"],
+    ["facebook", "Facebook"],
+    ["tiktok", "TikTok"],
+    ["google", "Google Arama"],
+    ["google_ads", "Google Ads"],
+    ["whatsapp", "WhatsApp"],
+    ["whatsapp_direct", "WhatsApp Direkt"],
+    ["website", "Web Sitesi"],
+    ["campaign_form", "Kampanya Formu"],
+    ["phone", "Telefon"],
+    ["referral", "Referans / Tavsiye"],
+    ["patient_referral", "Hasta Yönlendirmesi"],
+    ["doctor_referral", "Hekim Yönlendirmesi"],
+    ["walk_in", "Klinik Önünden Geçerken"],
+    ["returning", "Eski / Tekrar Gelen Hasta"],
+    ["corporate", "Kurumsal Anlaşma"],
+    ["qr", "QR / Form"],
+    ["other", "Diğer"],
+  ];
+
+  async function newAppt(preselectedPatientId) {
+    const [patients, staff] = await Promise.all([
+      api("/app/api/patients"),
+      api("/app/api/staff"),
+    ]);
     const doctors = staff.filter((s) => s.active && (s.role === "doctor" || s.role === "owner"));
-    const newBox = h("div", { class: "row" }, fld("Telefon", inp("phone", { placeholder: "05xx xxx xx xx" })), fld("Ad Soyad", inp("name")));
-    const pSel = sel("patient_id", [["", "+ Yeni hasta"], ...patients.map((p) => [String(p.id), p.display_name || `Hasta #${p.id}`])], patients[0] ? String(patients[0].id) : "");
+    const newBox = h("div", null,
+      h("div", { class: "row" },
+        fld("Ad Soyad", inp("name", { placeholder: "Hasta adını giriniz", autocomplete: "off" })),
+        fld("Telefon", inp("phone", { placeholder: "05xx xxx xx xx", autocomplete: "off" }))
+      ),
+      fld("Geliş Kaynağı", sel("source", PATIENT_SOURCES, "phone"))
+    );
+    const defaultPid = preselectedPatientId
+      ? String(preselectedPatientId)
+      : (patients[0] ? String(patients[0].id) : "");
+    const pSel = sel("patient_id", [["", "+ Yeni hasta oluştur ve randevu bağla"], ...patients.map((p) => [String(p.id), p.display_name || `Hasta #${p.id}`])], defaultPid);
     const toggle = () => newBox.classList.toggle("hidden", pSel.value !== "");
     pSel.addEventListener("change", toggle);
     toggle();
@@ -3594,17 +3628,51 @@ textarea.input { min-height: 84px; }
       slotPicker,
       h("div", { class: "row" }, fld("Süre (dk)", durIn), fld("Koltuk", chairIn)),
       fld("İşlem", inp("treatment", { required: true, minLength: 2, maxLength: 80, placeholder: "Muayene, implant, dolgu..." })),
-      fld("Hekim", sel("doctor_id", [["", "Seçilmedi"], ...doctors.map((d) => [String(d.id), d.full_name])], "")),
+      h("div", { class: "row" },
+        fld("Hekim", sel("doctor_id", [["", "Seçilmedi"], ...doctors.map((d) => [String(d.id), d.full_name])], "")),
+        fld("Tekrarlama (Seri Seans)", sel("repeat_freq", [
+          ["none", "Tek Seferlik"],
+          ["weekly", "Haftalık (3 Seans)"],
+          ["biweekly", "2 Haftada Bir (3 Seans)"],
+          ["monthly", "Aylık Kontrol (3 Seans)"],
+        ], "none"))
+      ),
     ], async (f) => {
+      const startsIso = new Date(`${f.get("date")}T${f.get("time")}`).toISOString();
+      const freq = f.get("repeat_freq") || "none";
+      if (freq !== "none" && f.get("patient_id")) {
+        const recRes = await api("/app/api/appointments/recurring", {
+          method: "POST",
+          body: {
+            patient_id: Number(f.get("patient_id")),
+            starts_at: startsIso,
+            duration_min: Number(f.get("duration")),
+            treatment: f.get("treatment"),
+            chair: String(f.get("chair") || "1"),
+            doctor_id: f.get("doctor_id") ? Number(f.get("doctor_id")) : null,
+            frequency: freq,
+            occurrences: 3,
+          },
+        });
+        toast(`${recRes.created_count} seanslık tekrarlayan randevu serisi oluşturuldu`);
+        S.day = sod(new Date(startsIso));
+        route();
+        return;
+      }
       const body = {
-        starts_at: new Date(`${f.get("date")}T${f.get("time")}`).toISOString(),
+        starts_at: startsIso,
         duration_min: Number(f.get("duration")),
         treatment: f.get("treatment"),
         chair: f.get("chair"),
         doctor_id: f.get("doctor_id") ? Number(f.get("doctor_id")) : null,
       };
-      if (f.get("patient_id")) body.patient_id = Number(f.get("patient_id"));
-      else { body.phone = f.get("phone"); body.name = f.get("name"); }
+      if (f.get("patient_id")) {
+        body.patient_id = Number(f.get("patient_id"));
+      } else {
+        body.phone = f.get("phone");
+        body.name = f.get("name");
+        body.source = f.get("source") || "phone";
+      }
       await api("/app/api/appointments", { method: "POST", body });
       toast("Randevu oluşturuldu");
       S.day = sod(new Date(body.starts_at));
@@ -3612,44 +3680,193 @@ textarea.input { min-height: 84px; }
     }, "Randevu oluştur");
   }
 
-  // ---------------- hastalar (16 dil)
+  // ---------------- hastalar (13 geliş kaynağı, hızlı sekreter kaydı, grup filtresi, CSV içe/dışa aktarım)
   VIEWS.patients = async () => {
-    const q = new URLSearchParams(location.hash.split("?")[1] || "").get("q") || "";
-    const rows = await api(`/app/api/patients?search=${encodeURIComponent(q)}`);
+    const params = new URLSearchParams(location.hash.split("?")[1] || "");
+    const q = params.get("q") || "";
+    const gid = params.get("group_id") || "";
+    const src = params.get("source") || "";
+    const qs = new URLSearchParams();
+    if (q) qs.set("search", q);
+    if (gid) qs.set("group_id", gid);
+    if (src) qs.set("source", src);
+    const [rows, groups, staff, banks] = await Promise.all([
+      api(`/app/api/patients?${qs.toString()}`),
+      api("/app/api/patient-groups").catch(() => []),
+      api("/app/api/staff").catch(() => []),
+      api("/app/api/bank-agreements").catch(() => []),
+    ]);
+    const doctors = staff.filter((s) => s.active && (s.role === "doctor" || s.role === "owner"));
     const search = inp("q", { class: "input search", placeholder: "Ad veya telefon ile ara", value: q, "aria-label": "Hasta ara" });
-    const doSearch = () => { location.hash = `#/patients?q=${encodeURIComponent(search.value)}`; };
+    const grpSel = sel("group_id", [["", "Tüm Gruplar"], ...groups.map((g) => [String(g.id), g.name])], gid);
+    const srcSel = sel("source", [["", "Tüm Geliş Kaynakları"], ...PATIENT_SOURCES], src);
+    const doSearch = () => {
+      const nq = new URLSearchParams();
+      if (search.value.trim()) nq.set("q", search.value.trim());
+      if (grpSel.value) nq.set("group_id", grpSel.value);
+      if (srcSel.value) nq.set("source", srcSel.value);
+      location.hash = `#/patients${nq.toString() ? "?" + nq.toString() : ""}`;
+    };
     search.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
-    setMain(
-      header("Hastalar", "Telefon numaraları şifreli saklanır; tam numarayı görmek denetim kaydına yazılır.",
-        search,
-        h("button", { class: "btn btn-ghost", type: "button", on: { click: doSearch } }, "Ara"),
-        h("button", {
-          class: "btn btn-cta",
+    grpSel.addEventListener("change", doSearch);
+    srcSel.addEventListener("change", doSearch);
+
+    function openFastCreatePatientModal() {
+      const nameIn = inp("name", { required: true, minLength: 2, placeholder: "Hasta adını giriniz", value: "", autocomplete: "off" });
+      const phoneIn = inp("phone", { required: true, placeholder: "Telefon numarası giriniz (05xx xxx xx xx)", value: "", autocomplete: "off" });
+      const dupBanner = h("div", { class: "cal-box hidden", role: "status", style: "border-color:var(--amber);background:#FFFBEB" });
+      let dupTimer = null;
+      phoneIn.addEventListener("input", () => {
+        clearTimeout(dupTimer);
+        const raw = phoneIn.value.trim();
+        if (raw.replace(/\D/g, "").length < 10) {
+          dupBanner.classList.add("hidden");
+          dupBanner.replaceChildren();
+          return;
+        }
+        dupTimer = setTimeout(async () => {
+          try {
+            const res = await api(`/app/api/patients/check-duplicate?phone=${encodeURIComponent(raw)}`);
+            if (res && res.duplicate && res.patient) {
+              dupBanner.classList.remove("hidden");
+              dupBanner.replaceChildren(
+                h("strong", { text: `Mükerrer Kayıt Uyarısı: Bu numara ${res.patient.display_name} (#${res.patient.id}) adına kayıtlı.` }),
+                h("div", { class: "actions", style: "margin-top:6px" },
+                  h("button", {
+                    type: "button",
+                    class: "btn btn-sm btn-primary",
+                    on: {
+                      click: () => {
+                        document.querySelectorAll(".overlay .modal").forEach((m) => m.closest(".overlay")?.remove());
+                        openPatient(res.patient.id);
+                      },
+                    },
+                  }, "Mevcut Hasta Kartını Aç")
+                )
+              );
+            } else {
+              dupBanner.classList.add("hidden");
+              dupBanner.replaceChildren();
+            }
+          } catch (_) { /* sessiz */ }
+        }, 250);
+      });
+
+      let openApptAfterSave = false;
+      const ov = modal("Hızlı Hasta Kaydı (Sekreter & Klinik Akışı)", [
+        h("p", { style: "margin:0 0 8px;font-size:13px;color:var(--muted)", text: "Zorunlu alanlar: Ad Soyad, Telefon ve Geliş Kaynağı. Diğer detayları şimdi veya daha sonra hasta kartından ekleyebilirsiniz." }),
+        h("div", { class: "row" },
+          fld("Ad Soyad *", nameIn),
+          fld("Telefon *", phoneIn)
+        ),
+        dupBanner,
+        h("div", { class: "row" },
+          fld("İlk Geliş Kaynağı *", sel("first_source", PATIENT_SOURCES, "phone")),
+          fld("Sorumlu Doktor (Opsiyonel)", sel("primary_doctor_id", [["", "Seçilmedi"], ...doctors.map((d) => [String(d.id), d.full_name])], ""))
+        ),
+        h("div", { class: "row" },
+          fld("Banka / Kurum Anlaşması (Opsiyonel)", sel("bank_agreement_id", [["", "Yok"], ...banks.filter((b) => b.active).map((b) => [String(b.id), `${b.bank_name} (%${b.discount_pct})`])], "")),
+          fld("İletişim Dili (16 Dil)", sel("lang", LANG_OPTIONS, "tr"))
+        ),
+        h("div", { class: "row" },
+          fld("Hasta Grubu / Etiket (Opsiyonel)", sel("group_id", [["", "Seçilmedi"], ...groups.map((g) => [String(g.id), `${g.name}${g.is_restricted ? " (Gerekçe zorunlu)" : ""}`])], "")),
+          fld("Grup Gerekçesi / Kısa Not", inp("group_reason", { placeholder: "Özel takip veya etiket nedeni giriniz", value: "", autocomplete: "off" }))
+        ),
+        fld("Klinik Notu (Opsiyonel)", inp("notes", { placeholder: "Ek hasta bilgisi giriniz", value: "", autocomplete: "off" })),
+      ], async (f) => {
+        const body = {
+          name: f.get("name"),
+          phone: f.get("phone"),
+          first_source: f.get("first_source") || "phone",
+          lang: f.get("lang") || "tr",
+          primary_doctor_id: f.get("primary_doctor_id") ? Number(f.get("primary_doctor_id")) : null,
+          bank_agreement_id: f.get("bank_agreement_id") ? Number(f.get("bank_agreement_id")) : null,
+          group_id: f.get("group_id") ? Number(f.get("group_id")) : null,
+          group_reason: f.get("group_reason") || "",
+          notes: f.get("notes") || "",
+        };
+        const r = await api("/app/api/patients", { method: "POST", body });
+        if (r.duplicate) {
+          toast(`Telefon numarası zaten kayıtlı (${r.existing_name || "#" + r.id}); mevcut hasta kartı açılıyor.`);
+        } else {
+          toast("Hasta kaydedildi");
+        }
+        await route();
+        if (openApptAfterSave) {
+          newAppt(r.id);
+        } else {
+          openPatient(r.id);
+        }
+      }, "Kaydet");
+
+      const foot = ov.querySelector(".foot");
+      if (foot) {
+        const saveAndBookBtn = h("button", {
           type: "button",
+          class: "btn btn-teal",
           on: {
-            click: () => modal("Yeni hasta", [
-              fld("Ad Soyad", inp("name", { required: true, minLength: 2 })),
-              fld("Telefon", inp("phone", { required: true, placeholder: "05xx xxx xx xx" })),
-              fld("İletişim dili (16 dil)", sel("lang", LANG_OPTIONS, "tr")),
-            ], async (f) => {
-              const r = await api("/app/api/patients", { method: "POST", body: { name: f.get("name"), phone: f.get("phone"), lang: f.get("lang") } });
-              toast("Hasta kaydedildi");
-              route();
-              openPatient(r.id);
-            }),
+            click: () => {
+              openApptAfterSave = true;
+              ov.querySelector("form")?.requestSubmit();
+            },
           },
-        }, icon("plus"), "Hasta ekle")
+        }, "Kaydet ve Randevu Oluştur");
+        foot.insertBefore(saveAndBookBtn, foot.lastElementChild);
+      }
+    }
+
+    function openCsvImportModal() {
+      const csvArea = h("textarea", {
+        class: "input",
+        name: "csv_text",
+        rows: 6,
+        required: true,
+        placeholder: "ad,telefon,kaynak,dil\nAyşe Demir,05321112233,instagram,tr\nMehmet Kaya,05334445566,referral,tr",
+      });
+      modal("CSV ile Toplu Hasta İçe Aktar", [
+        h("p", { style: "margin:0 0 8px;font-size:13px;color:var(--muted)", text: "Başlık satırı (ad,telefon,kaynak,dil) içeren CSV metnini yapıştırın. Mükerrer telefon numaraları otomatik atlanır." }),
+        fld("CSV Verisi", csvArea),
+      ], async (f) => {
+        const res = await api("/app/api/patients/import-csv", {
+          method: "POST",
+          body: { csv_text: f.get("csv_text"), default_source: "other" },
+        });
+        toast(`İçe aktarma tamamlandı: ${res.imported} yeni, ${res.duplicates} mükerrer, ${res.errors_count || 0} hatalı`);
+        route();
+      }, "İçe Aktar");
+    }
+
+    setMain(
+      header("Hastalar", "13 geliş kanalı, değiştirilemez ilk kaynak, sorumlu doktor, özel hasta grupları ve 10 kalem finans takibi.",
+        search,
+        grpSel,
+        srcSel,
+        h("button", { class: "btn btn-ghost", type: "button", on: { click: doSearch } }, "Filtrele"),
+        h("button", { class: "btn btn-ghost", type: "button", on: { click: openCsvImportModal } }, "CSV İçe Aktar"),
+        h("a", { class: "btn btn-ghost", href: "/app/api/export/patients.csv", download: "dentacore-hastalar.csv" }, "CSV İndir"),
+        h("button", { class: "btn btn-cta", type: "button", on: { click: openFastCreatePatientModal } }, icon("plus"), "Hasta ekle")
       ),
       h("div", { class: "card card-flush" }, tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Hasta", "Kanal", "Dil", "Son randevu", "Bakiye", "İşlemler"].map((t, i) => h("th", { class: i === 4 ? "num" : "", text: t })))),
+        h("thead", null, h("tr", null, ["Hasta & Gruplar", "İlk / Son Kaynak", "Sorumlu Doktor", "Dil", "Son randevu", "Kalan Borç / Bakiye", "İşlemler"].map((t, i) => h("th", { class: i === 5 ? "num" : "", text: t })))),
         h("tbody", null, rows.length ? rows.map((p) => h("tr", { class: "click", on: { click: () => openPatient(p.id) } },
-          h("td", null, h("b", { text: p.display_name || `Hasta #${p.id}` }), " ", p.red_flag ? tag("Kırmızı bayrak", "red") : null),
-          h("td", null, tag(p.channel === "ig" ? "Instagram" : "WhatsApp", p.channel === "ig" ? "amber" : "teal")),
+          h("td", null,
+            h("b", { text: p.display_name || `Hasta #${p.id}` }), " ",
+            p.red_flag ? tag("Kırmızı bayrak", "red") : null,
+            (p.groups || []).map((g) => tag(g.name, g.color || "teal"))
+          ),
+          h("td", null,
+            tag(p.first_source_label || p.first_source || "WhatsApp", p.first_source === "instagram" ? "amber" : "teal"),
+            p.last_source && p.last_source !== p.first_source ? h("small", { style: "display:block;color:var(--muted)", text: `Son: ${p.last_source_label || p.last_source}` }) : null
+          ),
+          h("td", { text: p.primary_doctor_name || "-" }),
           h("td", { text: (p.lang || "tr").toUpperCase() }),
           h("td", { text: p.last_appt ? fmtD(p.last_appt) : "-" }),
-          h("td", { class: "num" }, p.balance > 0 ? h("b", { style: "color:var(--amber-hover)", text: fmtTL(p.balance) }) : fmtTL(p.balance)),
+          h("td", { class: "num" },
+            p.balance > 0 ? h("b", { style: "color:var(--amber-hover)", text: fmtTL(p.balance) }) : fmtTL(p.balance),
+            p.planned_total > 0 ? h("small", { style: "display:block;color:var(--muted)", text: `Plan: ${fmtTL(p.planned_total)}` }) : null
+          ),
           h("td", null, h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": `${p.display_name || "Hasta"} kartını aç`, on: { click: (ev) => { ev.stopPropagation(); openPatient(p.id); } } }, "Aç"))
-        )) : h("tr", null, h("td", { colSpan: 6, class: "empty", text: "Hasta kaydı bulunamadı." })))
+        )) : h("tr", null, h("td", { colSpan: 7, class: "empty", text: "Hasta kaydı bulunamadı." })))
       ), "Hastalar tablosu"))
     );
   };
@@ -3661,12 +3878,23 @@ textarea.input { min-height: 84px; }
     if (!activeDrawerCleanup) activeDrawerOpener = document.activeElement;
     else activeDrawerCleanup(false);
     document.querySelectorAll(".drawer-wrap").forEach((el) => el.remove());
-    const [p, odo] = await Promise.all([
+    const [p, odo, staffList, bankList, groupList, catalogList] = await Promise.all([
       run(() => api(`/app/api/patients/${pid}${reveal ? "?reveal=true" : ""}`)),
       api(`/app/api/patients/${pid}/odontogram`).catch(() => ({ records: [], summary: {} })),
+      api("/app/api/staff").catch(() => []),
+      api("/app/api/bank-agreements").catch(() => []),
+      api("/app/api/patient-groups").catch(() => []),
+      api("/app/api/treatment-catalog").catch(() => []),
     ]);
     if (!p) return;
     if (activeDrawerCleanup) activeDrawerCleanup(false);
+    const doctors = staffList.filter((s) => s.active && (s.role === "doctor" || s.role === "owner"));
+    const fin = p.finance_summary || {
+      planned_total: 0, completed_gross: 0, discount_total: 0, completed_net_debt: 0,
+      collected_paid: 0, pending_payment: 0, failed_payment: 0, refunded_total: 0,
+      available_advance: 0, net_remaining_debt: Math.max(0, p.balance || 0),
+    };
+
     const onKey = (ev) => {
       if (document.querySelector(".modal")) return;
       if (ev.key === "Escape") {
@@ -3690,22 +3918,28 @@ textarea.input { min-height: 84px; }
     document.addEventListener("keydown", onKey);
 
     const consentNames = { kvkk_aydinlatma: "KVKK aydınlatma", saglik_verisi_acik_riza: "Sağlık verisi açık rıza", iletisim: "İletişim izni", yurt_disi_aktarim: "Yurt dışı aktarım" };
-    const ledger = [...p.charges.map((c) => ({ ...c, t: "Hizmet", info: c.description })), ...p.payments.map((c) => ({ ...c, t: "Tahsilat", info: c.method }))]
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const ledger = [
+      ...p.charges.map((c) => ({ ...c, t: "Hizmet", info: `${c.description}${c.doctor_name ? " (" + c.doctor_name + ")" : ""}${c.discount > 0 ? " [İndirim: " + fmtTL(c.discount) + "]" : ""}` })),
+      ...p.payments.map((c) => ({ ...c, t: c.status === "refunded" ? "İade" : "Tahsilat", info: `${c.method} (${c.status || "completed"})${c.is_advance ? " · Avans" : ""}` })),
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const genIdem = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-    // --- FDI Odontogram (32 Daimi Diş 11-48 + 20 Süt Dişi 51-85, 5 Yüzey M/D/O/B/L) ---
+    // --- FDI 52 Diş Anatomik Odontogram (32 Daimi 11-48 + 20 Süt 51-85, 5 Yüzey + Kuron/Kök Silüeti) ---
     const ODO_STATUS_META = {
       healthy: ["Sağlıklı", "#0F766E"],
       caries: ["Çürük", "#B91C1C"],
-      planned: ["Planlanan", "#C2410C"],
-      treated: ["Tedavi Edildi", "#15803D"],
+      planned: ["Planlanan Tedavi", "#C2410C"],
+      treated: ["Tamamlandı", "#15803D"],
+      filling: ["Dolgu (Tamamlandı)", "#0284C7"],
       implant: ["İmplant", "#0A2540"],
       crown: ["Zirkonyum / Kron", "#0D9488"],
+      bridge: ["Köprü Restorasyonu", "#7C3AED"],
       root_canal: ["Kanal Tedavisi", "#854D0E"],
       extraction: ["Çekim Planı", "#9A3412"],
       missing: ["Eksik Diş", "#64748B"],
+      postponed: ["Ertelendi", "#475569"],
+      cancelled: ["İptal Edildi", "#94A3B8"],
     };
     const odoByTooth = {};
     (odo.records || []).forEach((r) => {
@@ -3715,35 +3949,69 @@ textarea.input { min-height: 84px; }
     function openToothModal(fdiNum, preSurface) {
       const existing = odoByTooth[fdiNum] || [];
       const idemKey = genIdem("odo");
-      modal(`Diş #${fdiNum} (FDI) · Klinik İşlem & Yüzey Kaydı`, [
+      const procIn = inp("procedure_name", { required: true, minLength: 2, placeholder: "İşlem adını giriniz (örn. Kompozit Dolgu, İmplant, Köprü)", value: "" });
+      const codeIn = inp("procedure_code", { placeholder: "İşlem kodu (örn. DOL-101)", value: "" });
+      const amtIn = inp("amount", { type: "number", step: "0.01", min: "0", placeholder: "Brüt tutar giriniz (örn. 3000)", value: "" });
+      const discIn = inp("discount", { type: "number", step: "0.01", min: "0", placeholder: "Özel indirim (TL)", value: "" });
+      const statusSel = sel("status", Object.entries(ODO_STATUS_META).map(([k, [lbl]]) => [k, lbl]), "planned");
+      const activeBanks = bankList.filter((b) => b.active);
+      const bankSel = sel("bank_agreement_id", [["", "Anlaşma yok"], ...activeBanks.map((b) => [String(b.id), `${b.bank_name} (%${b.discount_pct})`])], p.bank_agreement_id ? String(p.bank_agreement_id) : "");
+      const catSel = sel("catalog_pick", [["", "Katalogdan hazır tedavi seçin..."], ...catalogList.map((c) => [c.code, `${c.name} (${fmtTL(c.default_price)})`])], "");
+      catSel.addEventListener("change", () => {
+        const found = catalogList.find((c) => c.code === catSel.value);
+        if (found) {
+          procIn.value = found.name;
+          codeIn.value = found.code;
+          amtIn.value = String(found.default_price || 0);
+          if (found.default_status && ODO_STATUS_META[found.default_status]) statusSel.value = found.default_status;
+        }
+      });
+
+      modal(`Diş #${fdiNum} (FDI) · Adım Adım Tedavi, Hekim ve Fiyat Kaydı`, [
+        p.primary_doctor_name ? h("p", { style: "margin:0 0 8px;font-size:12.5px;color:var(--teal)", text: `Hastanın Sorumlu Doktoru: ${p.primary_doctor_name} (Bu işlemde farklı bir 'Tedaviyi Yapan Doktor' seçseniz bile sorumlu doktor değişmez.)` }) : null,
         existing.length ? h("div", { class: "cal-box" },
           h("b", { text: `Diş #${fdiNum} Mevcut Kayıtlar (${existing.length})` }),
-          existing.map((er) => h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;font-size:13px" },
-            h("span", { text: `[${er.surface}] ${er.procedure_name} (${(ODO_STATUS_META[er.status] || [er.status])[0]}) · ${fmtTL(er.amount_try || 0)}` }),
-            S.user.role !== "secretary" ? h("button", {
-              class: "btn btn-sm btn-danger",
-              type: "button",
-              "aria-label": `Diş #${fdiNum} ${er.procedure_name} kaydını sil`,
-              on: {
-                click: () => {
-                  confirmModal(
-                    "Diş kaydını sil",
-                    `Diş #${fdiNum} (${er.surface} · ${er.procedure_name}) kaydı kalıcı olarak silinsin mi?`,
-                    async () => {
-                      await api(`/app/api/patients/${pid}/odontogram/${er.id}`, { method: "DELETE" });
-                      toast("Diş kaydı silindi");
-                      document.querySelectorAll(".overlay .modal").forEach((m) => m.closest(".overlay")?.remove());
-                      openPatient(pid, reveal);
-                    },
-                    "Sil"
-                  );
+          existing.map((er) => h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;font-size:13px;flex-wrap:wrap" },
+            h("span", { text: `[${er.surface}] ${er.procedure_name} (${(ODO_STATUS_META[er.status] || [er.status])[0]}) · Hekim: ${er.doctor_name || "-"} · Brüt: ${fmtTL(er.gross_amount_try || er.amount_try || 0)}${er.discount_try > 0 ? " / İndirim: " + fmtTL(er.discount_try) : ""} · Net: ${fmtTL(er.amount_try || 0)}` }),
+            S.user.role !== "secretary" ? h("div", { class: "actions" },
+              er.status === "planned" ? h("button", {
+                class: "btn btn-sm btn-teal",
+                type: "button",
+                on: {
+                  click: async () => {
+                    await api(`/app/api/patients/${pid}/odontogram/${er.id}`, { method: "PATCH", body: { status: "treated" } });
+                    toast("Tedavi tamamlandı olarak güncellendi ve hasta borcuna işlendi");
+                    document.querySelectorAll(".overlay .modal").forEach((m) => m.closest(".overlay")?.remove());
+                    openPatient(pid, reveal);
+                  },
                 },
-              },
-            }, "Sil") : null
+              }, "Tamamlandı Yap") : null,
+              h("button", {
+                class: "btn btn-sm btn-danger",
+                type: "button",
+                "aria-label": `Diş #${fdiNum} ${er.procedure_name} kaydını sil`,
+                on: {
+                  click: () => {
+                    confirmModal(
+                      "Diş kaydını sil",
+                      `Diş #${fdiNum} (${er.surface} · ${er.procedure_name}) kaydı silinsin mi? Bu kayda bağlı hizmet borcu varsa silinmez, gerekçesiyle iptal edilir.`,
+                      async () => {
+                        await api(`/app/api/patients/${pid}/odontogram/${er.id}`, { method: "DELETE" });
+                        toast("Diş kaydı silindi");
+                        document.querySelectorAll(".overlay .modal").forEach((m) => m.closest(".overlay")?.remove());
+                        openPatient(pid, reveal);
+                      },
+                      "Sil"
+                    );
+                  },
+                },
+              }, "Sil")
+            ) : null
           ))
         ) : null,
+        fld("Hazır Tedavi Kataloğu (Hızlı Seçim)", catSel),
         h("div", { class: "row" },
-          fld("Diş Yüzeyi (5 Yüzey)", sel("surface", [
+          fld("1. Diş Yüzeyi (5 Yüzey)", sel("surface", [
             ["FULL", "Tüm Diş (FULL)"],
             ["O", "Oklüzal / İnsizal (O)"],
             ["M", "Mezial (M)"],
@@ -3751,20 +4019,28 @@ textarea.input { min-height: 84px; }
             ["B", "Bukkal / Vestibül (B)"],
             ["L", "Lingual / Palatinal (L)"],
           ], preSurface || "FULL")),
-          fld("Klinik Durum", sel("status", Object.entries(ODO_STATUS_META).map(([k, [lbl]]) => [k, lbl]), "planned"))
+          fld("2. Klinik Durum", statusSel)
         ),
-        fld("İşlem / Tedavi Adı", inp("procedure_name", { required: true, minLength: 2, placeholder: "Kompozit Dolgu, İmplant, Zirkonyum Kron..." })),
         h("div", { class: "row" },
-          fld("İşlem Kodu (Opsiyonel)", inp("procedure_code", { placeholder: "FDI-204" })),
-          fld("Tutar (TL)", inp("amount", { type: "number", step: "0.01", min: "0", value: "0" }))
+          fld("3. İşlem / Tedavi Adı *", procIn),
+          fld("4. Tedaviyi Yapan Doktor", sel("doctor_id", doctors.map((d) => [String(d.id), d.full_name]), String(S.user.id)))
         ),
-        fld("Klinik Not", inp("note", { placeholder: "Periapikal lezyon izlendi..." })),
+        activeBanks.length ? h("div", { class: "row" },
+          fld("Brüt Tutar (TL)", amtIn),
+          fld("Kurum / Banka İndirimi", bankSel)
+        ) : null,
+        h("div", { class: "row" },
+          !activeBanks.length ? fld("Brüt Tutar (TL)", amtIn) : null,
+          fld("Özel İndirim (TL)", discIn),
+          fld("İşlem Kodu", codeIn)
+        ),
+        fld("Klinik Not", inp("note", { placeholder: "Tedavi notu giriniz...", value: "" })),
         h("label", { class: "odo-check-row" },
           h("input", { type: "checkbox", name: "auto_charge", value: "1", checked: true }),
-          h("span", { text: "Tutar > 0 ise kasaya otomatik hizmet borcu olarak aktar" })
+          h("span", { text: "Gerçekleşen (Tamamlandı/Dolgu/İmplant/Kron/Köprü/Kanal) işlemleri net tutarıyla hasta borcuna yaz. Planlanan/Ertelenen/İptal kayıtları borç oluşturmaz." })
         ),
       ], async (f) => {
-        await api(`/app/api/patients/${pid}/odontogram`, {
+        const odoRes = await api(`/app/api/patients/${pid}/odontogram`, {
           method: "POST",
           body: {
             tooth_fdi: fdiNum,
@@ -3773,12 +4049,16 @@ textarea.input { min-height: 84px; }
             procedure_code: f.get("procedure_code") || "",
             procedure_name: f.get("procedure_name"),
             amount: f.get("amount") || "0",
+            discount: f.get("discount") || "0",
+            bank_agreement_id: f.get("bank_agreement_id") ? Number(f.get("bank_agreement_id")) : null,
+            use_patient_bank_agreement: Boolean(f.get("bank_agreement_id")),
+            doctor_id: f.get("doctor_id") ? Number(f.get("doctor_id")) : null,
             note: f.get("note") || "",
             auto_charge: f.get("auto_charge") === "1",
             idempotency_key: idemKey,
           },
         });
-        toast(`Diş #${fdiNum} işlemi kaydedildi`);
+        toast(odoRes && odoRes.charge_skipped ? `Diş #${fdiNum} tedavi planına eklendi (borç yazılmadı)` : `Diş #${fdiNum} işlemi kaydedildi (Net: ${fmtTL(odoRes.net_amount || 0)})`);
         openPatient(pid, reveal);
       }, "Kaydet");
     }
@@ -3790,29 +4070,39 @@ textarea.input { min-height: 84px; }
       const surfMap = {};
       recs.forEach((r) => { surfMap[r.surface] = (ODO_STATUS_META[r.status] || ["", "#0F766E"])[1]; });
       const fullCol = surfMap.FULL || "";
+      const isUpper = Math.floor(fdiNum / 10) in { 1: 1, 2: 1, 5: 1, 6: 1 };
 
       const svg = document.createElementNS(SVG, "svg");
-      svg.setAttribute("viewBox", "0 0 36 36");
+      svg.setAttribute("viewBox", "0 0 36 46");
       svg.setAttribute("class", "odo-svg");
       svg.setAttribute("aria-hidden", "true");
 
+      // Anatomik kök silüeti
+      const rootPath = document.createElementNS(SVG, "path");
+      rootPath.setAttribute("d", isUpper ? "M11,10 L14,1 L18,7 L22,1 L25,10 Z" : "M11,36 L14,45 L18,39 L22,45 L25,36 Z");
+      rootPath.setAttribute("fill", topRec && ["implant", "root_canal"].includes(topRec.status) ? stColor : "#E2E8F0");
+      rootPath.setAttribute("stroke", recs.length ? stColor : "#94A3B8");
+      rootPath.setAttribute("stroke-width", "1.1");
+      svg.appendChild(rootPath);
+
+      const yOff = isUpper ? 9 : 1;
       const addSurf = (tagN, attrs, sCode) => {
         const el = document.createElementNS(SVG, tagN);
         for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
         el.setAttribute("fill", surfMap[sCode] || fullCol || "#F8FAFC");
         el.setAttribute("stroke", recs.length ? stColor : "#64748B");
         el.setAttribute("stroke-width", "1.4");
+        if (topRec && topRec.status === "planned") el.setAttribute("stroke-dasharray", "2,1");
         svg.appendChild(el);
       };
-      // 5 yüzey: Üst(B), Alt(L), Sol(M), Sağ(D), Merkez(O)
-      addSurf("polygon", { points: "3,3 33,3 24,12 12,12" }, "B");
-      addSurf("polygon", { points: "3,33 33,33 24,24 12,24" }, "L");
-      addSurf("polygon", { points: "3,3 12,12 12,24 3,33" }, "M");
-      addSurf("polygon", { points: "33,3 24,12 24,24 33,33" }, "D");
-      addSurf("rect", { x: "12", y: "12", width: "12", height: "12", rx: "2" }, "O");
+      addSurf("polygon", { points: `3,${3 + yOff} 33,${3 + yOff} 24,${12 + yOff} 12,${12 + yOff}` }, "B");
+      addSurf("polygon", { points: `3,${33 + yOff} 33,${33 + yOff} 24,${24 + yOff} 12,${24 + yOff}` }, "L");
+      addSurf("polygon", { points: `3,${3 + yOff} 12,${12 + yOff} 12,${24 + yOff} 3,${33 + yOff}` }, "M");
+      addSurf("polygon", { points: `33,${3 + yOff} 24,${12 + yOff} 24,${24 + yOff} 33,${33 + yOff}` }, "D");
+      addSurf("rect", { x: "12", y: String(12 + yOff), width: "12", height: "12", rx: "2" }, "O");
 
       const toothLabel = recs.length
-        ? `Diş #${fdiNum}: ${recs.map((x) => `${x.surface} ${x.procedure_name}`).join(", ")}`
+        ? `Diş #${fdiNum}: ${recs.map((x) => `${x.surface} ${x.procedure_name} (${x.status})`).join(", ")}`
         : `Diş #${fdiNum} işlem ekle`;
       return h("button", {
         type: "button",
@@ -3869,8 +4159,8 @@ textarea.input { min-height: 84px; }
     const odoSection = h("div", { class: "odo-box", id: "patient-odontogram" },
       h("div", { class: "odo-head" },
         h("div", null,
-          h("strong", { text: "FDI İnteraktif Odontogram (5 Yüzey M/D/O/B/L)" }),
-          h("small", { text: `Toplam ${odo.summary?.total_records || 0} diş kaydı · Dişe tıklayarak yüzey ve işlem girin` })
+          h("strong", { text: "ISO 3950 FDI 52 Diş Anatomik Odontogram (Kuron + Kök & 5 Yüzey M/D/O/B/L)" }),
+          h("small", { text: `Tamamlanan: ${odo.summary?.treated_count || 0} · Planlanan: ${odo.summary?.planned_count || 0} · Ertelenen: ${odo.summary?.postponed_count || 0}` })
         ),
         h("div", { class: "actions" }, btnPerm, btnPedo)
       ),
@@ -3878,13 +4168,161 @@ textarea.input { min-height: 84px; }
       pedoGrid
     );
 
+    // Dosya / Röntgen / DICOM / Fotoğraf (Öncesi-Sonrası) / PDF yükleme modalı (XHR ilerleme çubuğu + iptal + tekrar dene)
+    function openMediaUploadModal() {
+      const fileIn = h("input", { class: "input", type: "file", name: "file", required: true, accept: ".jpg,.jpeg,.png,.webp,.pdf,.dcm,image/*,application/pdf,application/dicom" });
+      const progBar = h("i", { style: "width:0%;display:block;height:8px;background:var(--teal);border-radius:4px" });
+      const progWrap = h("div", { class: "bar hidden", style: "margin:8px 0" }, progBar);
+      const progText = h("div", { style: "font-size:12.5px;color:var(--muted)" });
+      let activeXhr = null;
+      const cancelUploadBtn = h("button", {
+        type: "button",
+        class: "btn btn-sm btn-danger hidden",
+        on: {
+          click: () => {
+            if (activeXhr) {
+              activeXhr.abort();
+              activeXhr = null;
+              progText.textContent = "Yükleme kullanıcı tarafından iptal edildi. Tekrar deneyebilirsiniz.";
+              cancelUploadBtn.classList.add("hidden");
+            }
+          },
+        },
+      }, "Yüklemeyi İptal Et");
+
+      modal("Röntgen / DICOM / Fotoğraf (Öncesi-Sonrası) / PDF Yükle", [
+        h("p", { style: "margin:0 0 8px;font-size:12.5px;color:var(--muted)", text: "Desteklenen türler: JPEG, PNG, WebP, PDF ve DICOM (.dcm). Maksimum boyut: 15 MB. Otomatik kalite kontrolü tıbbi teşhis koymaz; yalnızca teknik netlik/parlaklık ölçer." }),
+        fld("Dosya Seçin *", fileIn),
+        h("div", { class: "row" },
+          fld("Kategori", sel("category", [["xray", "Röntgen / Panoramik / DICOM"], ["photo", "Ağız İçi / Klinik Fotoğraf"], ["document", "PDF / Onam / Belge"]], "xray")),
+          fld("Aşama (Öncesi / Sonrası)", sel("stage", [["general", "Genel"], ["before", "Tedavi Öncesi (Before)"], ["after", "Tedavi Sonrası (After)"]], "general"))
+        ),
+        fld("Açıklama / Not", inp("note", { placeholder: "Dosya notu giriniz...", value: "" })),
+        progWrap,
+        progText,
+        cancelUploadBtn,
+      ], async (f) => {
+        const fileObj = fileIn.files && fileIn.files[0];
+        if (!fileObj) throw new Error("Lütfen yüklenecek dosyayı seçin.");
+        if (fileObj.size > 15 * 1024 * 1024) throw new Error("Dosya boyutu 15 MB sınırını aşıyor.");
+        const fd = new FormData();
+        fd.append("file", fileObj);
+        fd.append("category", f.get("category") || "xray");
+        fd.append("stage", f.get("stage") || "general");
+        fd.append("note", f.get("note") || "");
+        progWrap.classList.remove("hidden");
+        cancelUploadBtn.classList.remove("hidden");
+        progBar.style.width = "5%";
+        progText.textContent = "Yükleniyor (%0)...";
+
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          activeXhr = xhr;
+          xhr.open("POST", `/app/api/patients/${pid}/media`);
+          xhr.setRequestHeader("X-CSRF-Token", S.csrf);
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const pct = Math.round((ev.loaded / ev.total) * 100);
+              progBar.style.width = `${pct}%`;
+              progText.textContent = `Yükleniyor (%${pct})...`;
+            }
+          };
+          xhr.onload = () => {
+            activeXhr = null;
+            cancelUploadBtn.classList.add("hidden");
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(JSON.parse(xhr.responseText || "{}"));
+            } else {
+              let errMsg = "Dosya yüklenemedi";
+              try { errMsg = JSON.parse(xhr.responseText).detail || errMsg; } catch (_) {}
+              reject(new Error(errMsg));
+            }
+          };
+          xhr.onerror = () => {
+            activeXhr = null;
+            cancelUploadBtn.classList.add("hidden");
+            reject(new Error("Ağ hatası oluştu; lütfen tekrar deneyin."));
+          };
+          xhr.onabort = () => {
+            activeXhr = null;
+            reject(new Error("Yükleme iptal edildi."));
+          };
+          xhr.send(fd);
+        });
+        toast("Dosya şifrelenerek hasta kartına kaydedildi");
+        openPatient(pid, reveal);
+      }, "Yükle");
+    }
+
+    // Hasta Bilgisi / Sorumlu Doktor / İlk Kaynak Düzenleme Modalı
+    const activeBanksForPatient = bankList.filter((b) => b.active);
+    function openEditPatientModal() {
+      const manualChk = h("input", { type: "checkbox", name: "manual_first_source_change", value: "1" });
+      modal("Hasta Bilgileri, Sorumlu Doktor & İlk Kaynak Düzenle", [
+        h("div", { class: "row" },
+          fld("Ad Soyad", inp("name", { required: true, minLength: 2, value: p.display_name || p.name || "" })),
+          fld("İletişim Dili", sel("lang", LANG_OPTIONS, p.lang || "tr"))
+        ),
+        h("div", { class: "row" },
+          fld("Sorumlu Doktor (Hasta Sahibi Hekim)", sel("primary_doctor_id", [["", "Seçilmedi"], ...doctors.map((d) => [String(d.id), d.full_name])], p.primary_doctor_id ? String(p.primary_doctor_id) : "")),
+          activeBanksForPatient.length ? fld("Kurum / Banka Anlaşması", sel("bank_agreement_id", [["", "Yok"], ...activeBanksForPatient.map((b) => [String(b.id), `${b.bank_name} (%${b.discount_pct})`])], p.bank_agreement_id ? String(p.bank_agreement_id) : "")) : null
+        ),
+        h("div", { class: "row" },
+          fld("Son Temas Kaynağı", sel("last_source", PATIENT_SOURCES, p.last_source || p.first_source || "whatsapp")),
+          fld("İlk Geliş Kaynağı (Değiştirilemez / Loglu)", sel("first_source", PATIENT_SOURCES, p.first_source || "whatsapp"))
+        ),
+        h("label", { class: "odo-check-row" },
+          manualChk,
+          h("span", { text: "İlk geliş kaynağını manuel olarak değiştirmeyi onayla (eski değer, yeni değer ve kullanıcı denetim izine kaydedilir)" })
+        ),
+        fld("İlk Kaynak Değişiklik Gerekçesi", inp("first_source_reason", { placeholder: "Yalnız ilk kaynak değiştiriliyorsa gerekçe giriniz", value: "" })),
+        fld("Notlar", inp("notes", { value: p.notes || "", placeholder: "Hasta notu giriniz" })),
+      ], async (f) => {
+        await api(`/app/api/patients/${pid}`, {
+          method: "PATCH",
+          body: {
+            name: f.get("name"),
+            lang: f.get("lang"),
+            primary_doctor_id: f.get("primary_doctor_id") ? Number(f.get("primary_doctor_id")) : null,
+            clear_primary_doctor: !f.get("primary_doctor_id"),
+            bank_agreement_id: f.get("bank_agreement_id") ? Number(f.get("bank_agreement_id")) : null,
+            clear_bank_agreement: !f.get("bank_agreement_id"),
+            last_source: f.get("last_source"),
+            first_source: f.get("first_source"),
+            manual_first_source_change: f.get("manual_first_source_change") === "1",
+            first_source_reason: f.get("first_source_reason") || "",
+            notes: f.get("notes") || "",
+          },
+        });
+        toast("Hasta bilgileri güncellendi");
+        route();
+        openPatient(pid, reveal);
+      }, "Güncelle");
+    }
+
+    function openAddGroupModal() {
+      modal("Hastaya Grup / Özel Takip Etiketi Ekle", [
+        h("p", { style: "margin:0 0 8px;font-size:12.5px;color:var(--muted)", text: "Etik kural: Küçük düşürücü veya ayrımcı ifadeler sistem tarafından engellenir. Özel dikkat / ödeme takibi gruplarında nesnel gerekçe zorunludur." }),
+        fld("Grup Seçin", sel("group_id", groupList.map((g) => [String(g.id), `${g.name}${g.is_restricted ? " (Gerekçe zorunlu)" : ""}`]), groupList[0] ? String(groupList[0].id) : "")),
+        fld("Atama Gerekçesi / Açıklama", inp("reason", { required: true, minLength: 3, placeholder: "Örn: 2 kez habersiz randevuya gelmedi, randevu öncesi teyit alınmalı", value: "" })),
+      ], async (f) => {
+        await api(`/app/api/patients/${pid}/groups`, {
+          method: "POST",
+          body: { group_id: Number(f.get("group_id")), reason: f.get("reason") || "" },
+        });
+        toast("Hasta grubu eklendi");
+        openPatient(pid, reveal);
+      }, "Gruba Ekle");
+    }
+
     const drawer = h("div", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-label": p.name || `Hasta #${p.id}` },
       h("div", { class: "top" },
         h("div", null,
           h("h2", { text: p.name || `Hasta #${p.id}` }),
-          h("p", { text: `#${p.id} · ${p.channel === "ig" ? "Instagram" : "WhatsApp"} · ${(p.lang || "tr").toUpperCase()}${p.active === false ? " · ARŞİVLİ" : ""}` })
+          h("p", { text: `#${p.id} · İlk Kaynak: ${p.first_source_label || p.first_source || "WhatsApp"} · Son Kaynak: ${p.last_source_label || p.last_source || "-"} · ${(p.lang || "tr").toUpperCase()}${p.active === false ? " · ARŞİVLİ" : ""}` })
         ),
         h("div", { class: "actions" },
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openEditPatientModal } }, "Bilgileri Düzenle"),
           S.user.role !== "secretary" ? h("button", {
             class: `btn btn-sm ${p.active === false ? "btn-ghost" : "btn-danger"}`,
             type: "button",
@@ -3914,11 +4352,52 @@ textarea.input { min-height: 84px; }
       ),
       h("div", { class: "kv" },
         h("span", { text: "Telefon" }),
-        h("div", null, h("b", { class: "mono", text: p.phone }), " ", !reveal && p.channel !== "ig" ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient(pid, true) } }, "Göster") : null),
-        h("span", { text: "Bakiye" }),
-        h("b", { style: p.balance > 0 ? "color:var(--amber-hover)" : "", text: fmtTL(p.balance) })
+        h("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:wrap" },
+          h("b", { class: "mono", text: p.phone }),
+          !reveal && p.channel !== "ig" ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient(pid, true) } }, "Göster") : null,
+          p.tel_href ? h("a", { class: "btn btn-sm btn-teal", href: p.tel_href }, "Telefonla Ara") : null
+        ),
+        h("span", { text: "Sorumlu Doktor" }),
+        h("b", { text: p.primary_doctor_name || "Atanmadı" }),
+        p.bank_agreement_name || activeBanksForPatient.length ? h("span", { text: "Kurum / Banka Anlaşması" }) : null,
+        p.bank_agreement_name || activeBanksForPatient.length ? h("b", { text: p.bank_agreement_name ? `${p.bank_agreement_name} (%${p.bank_discount_pct || 0})` : "Yok" }) : null,
+        h("span", { text: "Kayıt Tarihi / Kaydeden" }),
+        h("span", { text: `${p.created_at ? fmtDT(p.created_at) : "-"} · ${p.created_by_name || "Sistem"}` }),
+        h("span", { text: "Gruplar & Özel Etiketler" }),
+        h("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:wrap" },
+          (p.groups || []).length ? (p.groups || []).map((g) => tag(`${g.name}${g.reason ? ": " + g.reason : ""}`, g.color || "teal")) : h("span", { style: "color:var(--muted)", text: "Grup yok" }),
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openAddGroupModal } }, "+ Grup Ekle")
+        )
       ),
-      h("div", { class: "actions" },
+      // 10 Kalemlik Finansal Özet Kutusu (Bölüm 11)
+      h("div", { class: "cal-box", style: "margin:10px 0" },
+        h("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px" },
+          h("b", { text: "10 Kalem Hasta Finans & Muhasebe Özeti (Kuruş Kesinliğinde)" }),
+          fin.available_advance > 0 && fin.net_remaining_debt > 0 ? h("button", {
+            class: "btn btn-sm btn-teal",
+            type: "button",
+            on: {
+              click: async () => {
+                const r = await run(() => api(`/app/api/patients/${pid}/settle-advance`, { method: "POST", body: {} }), "Avans açık borca mahsup edildi");
+                if (r) openPatient(pid, reveal);
+              },
+            },
+          }, "Avansı Borca Mahsup Et") : null
+        ),
+        h("div", { class: "kv", style: "font-size:13px" },
+          h("span", { text: "1. Planlanan Tedavi (Borç Oluşturmaz)" }), h("b", { text: fmtTL(fin.planned_total) }),
+          h("span", { text: "2. Gerçekleşen Brüt Hizmet" }), h("b", { text: fmtTL(fin.completed_gross) }),
+          h("span", { text: "3. Toplam İndirim" }), h("b", { text: fmtTL(fin.discount_total) }),
+          h("span", { text: "4. Gerçekleşen Net Hizmet Borcu" }), h("b", { text: fmtTL(fin.completed_net_debt) }),
+          h("span", { text: "5. Başarılı Tahsilat" }), h("b", { style: "color:var(--green)", text: fmtTL(fin.collected_paid) }),
+          h("span", { text: "6. Bekleyen Ödeme (Borçtan Düşülmez)" }), h("span", { text: fmtTL(fin.pending_payment) }),
+          h("span", { text: "7. Başarısız Ödeme (Borçtan Düşülmez)" }), h("span", { text: fmtTL(fin.failed_payment) }),
+          h("span", { text: "8. İade Toplamı" }), h("span", { text: fmtTL(fin.refunded_total) }),
+          h("span", { text: "9. Kullanılabilir Avans" }), h("b", { style: "color:var(--teal)", text: fmtTL(fin.available_advance) }),
+          h("span", { text: "10. Net Kalan Borç" }), h("b", { style: fin.net_remaining_debt > 0 ? "color:var(--amber-hover)" : "", text: fmtTL(fin.net_remaining_debt) })
+        )
+      ),
+      h("div", { class: "actions", style: "flex-wrap:wrap" },
         h("button", {
           class: "btn btn-sm btn-primary",
           type: "button",
@@ -3926,12 +4405,27 @@ textarea.input { min-height: 84px; }
             click: () => {
               const chgIdem = genIdem("chg");
               modal("Hizmet ekle", [
-                fld("Açıklama", inp("description", { required: true, minLength: 2, placeholder: "Zirkonyum kron x2" })),
-                fld("Tutar (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", required: true })),
+                fld("Açıklama", inp("description", { required: true, minLength: 2, placeholder: "Zirkonyum kron x2", value: "" })),
+                h("div", { class: "row" },
+                  fld("Brüt Tutar (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", required: true, placeholder: "Örn. 10000", value: "" })),
+                  fld("Tedaviyi Yapan Doktor", sel("doctor_id", [["", "Seçilmedi"], ...doctors.map((d) => [String(d.id), d.full_name])], String(S.user.id)))
+                ),
+                h("div", { class: "row" },
+                  activeBanksForPatient.length ? fld("Kurum / Banka Anlaşması", sel("bank_agreement_id", [["", "Yok"], ...activeBanksForPatient.map((b) => [String(b.id), `${b.bank_name} (%${b.discount_pct})`])], p.bank_agreement_id ? String(p.bank_agreement_id) : "")) : null,
+                  fld("Özel İndirim (TL)", inp("discount", { type: "number", step: "0.01", min: "0", placeholder: "0", value: "" }))
+                ),
               ], async (f) => {
                 await api("/app/api/charges", {
                   method: "POST",
-                  body: { patient_id: pid, description: f.get("description"), amount: f.get("amount"), idempotency_key: chgIdem },
+                  body: {
+                    patient_id: pid,
+                    description: f.get("description"),
+                    amount: f.get("amount"),
+                    discount: f.get("discount") || "0",
+                    bank_agreement_id: f.get("bank_agreement_id") ? Number(f.get("bank_agreement_id")) : null,
+                    doctor_id: f.get("doctor_id") ? Number(f.get("doctor_id")) : null,
+                    idempotency_key: chgIdem,
+                  },
                 });
                 toast("Hizmet eklendi");
                 openPatient(pid, reveal);
@@ -3945,15 +4439,31 @@ textarea.input { min-height: 84px; }
           on: {
             click: () => {
               const payIdem = genIdem("pay");
-              const amtIn = inp("amount", { type: "number", step: "0.01", min: "0.01", required: true, value: p.balance > 0 ? p.balance : "" });
-              const advCheck = h("input", { type: "checkbox", name: "allow_advance", value: "1", checked: p.balance <= 0 });
+              const remDebt = Number(fin.net_remaining_debt || Math.max(0, p.balance || 0));
+              const amtIn = inp("amount", { type: "number", step: "0.01", min: "0.01", required: true, value: remDebt > 0 ? remDebt : "", placeholder: "Tahsilat tutarı giriniz" });
+              const advCheck = h("input", { type: "checkbox", name: "allow_advance", value: "1", checked: remDebt <= 0 });
               const advBox = h("label", { class: "odo-check-row" },
                 advCheck,
-                h("span", { text: `Bakiye üstü / Avans (Ön Ödeme) tahsilatı olarak onayla (Açık bakiye: ${fmtTL(Math.max(0, p.balance))})` })
+                h("span", { text: `Bakiye üstü / Avans (Ön Ödeme) tahsilatı olarak onayla (Net Kalan Borç: ${fmtTL(remDebt)})` })
               );
               modal("Tahsilat al", [
                 fld("Tutar (TL)", amtIn),
-                fld("Yöntem", sel("method", [["kart", "Kart"], ["nakit", "Nakit"], ["havale", "Havale/EFT"], ["diger", "Diğer"]], "kart")),
+                h("div", { class: "row" },
+                  fld("Yöntem", sel("method", [
+                    ["kart", "Kart"],
+                    ["kredi_karti", "Kredi Kartı"],
+                    ["banka_karti", "Banka Kartı"],
+                    ["nakit", "Nakit"],
+                    ["havale", "Havale / EFT"],
+                    ["taksitli", "Taksitli Ödeme"],
+                    ["diger", "Diğer"],
+                  ], "kart")),
+                  fld("Ödeme Durumu", sel("status", [
+                    ["completed", "Tamamlandı (Borçtan Düşer)"],
+                    ["pending", "Bekleyen (Borçtan Düşülmez)"],
+                    ["failed", "Başarısız (Borçtan Düşülmez)"],
+                  ], "completed"))
+                ),
                 advBox,
               ], async (f) => {
                 await api("/app/api/payments", {
@@ -3962,16 +4472,38 @@ textarea.input { min-height: 84px; }
                     patient_id: pid,
                     amount: f.get("amount"),
                     method: f.get("method"),
+                    status: f.get("status") || "completed",
                     idempotency_key: payIdem,
                     allow_advance: f.get("allow_advance") === "1",
                   },
                 });
-                toast("Tahsilat kaydedildi");
+                toast("Ödeme kaydı işlendi");
                 openPatient(pid, reveal);
               });
             },
           },
         }, "Tahsilat al"),
+        h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: openMediaUploadModal } }, "Röntgen / Görsel Yükle"),
+        h("button", {
+          class: "btn btn-sm btn-ghost",
+          type: "button",
+          on: {
+            click: async () => {
+              const r = await run(() => api(`/app/api/patients/${pid}/treatment-consents`, { method: "POST", body: {} }), "Dijital tedavi planı onam bağlantısı oluşturuldu");
+              if (r && r.url) {
+                openPatient(pid, reveal);
+                modal("Dijital Tedavi Planı Onayı Bağlantısı", [
+                  h("p", { style: "margin:0 0 8px;font-size:13px;color:var(--muted)", text: r.legal_notice_tr || "Bu onay 5070 sayılı Nitelikli Elektronik İmza değildir; zaman damgalı dijital form onayıdır." }),
+                  h("code", { style: "display:block;word-break:break-all;padding:10px;background:#f1f5f9;border-radius:8px;margin-bottom:10px", text: r.url }),
+                  h("div", { class: "actions" },
+                    h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: () => copyText(r.url, "Tedavi onam bağlantısı kopyalandı") } }, icon("copy"), "Kopyala"),
+                    h("a", { class: "btn btn-sm btn-ghost", href: r.url, target: "_blank", rel: "noopener noreferrer" }, "Onam Sayfasını Aç")
+                  ),
+                ], async () => true, "Tamam");
+              }
+            },
+          },
+        }, "Tedavi Onamı Oluştur"),
         h("button", {
           class: "btn btn-sm btn-ghost",
           type: "button",
@@ -4010,32 +4542,216 @@ textarea.input { min-height: 84px; }
               toast("Bekleme listesine eklendi");
             }),
           },
-        }, "Bekleme listesi")
+        }, "Bekleme listesi"),
+        h("button", {
+          class: "btn btn-sm btn-ghost",
+          type: "button",
+          on: {
+            click: () => modal("Periodontal Ölçüm Kaydı (6 Nokta PD / BOP)", [
+              h("div", { class: "row" },
+                fld("Diş Numarası (FDI)", inp("fdi", { type: "number", min: 11, max: 85, value: "16", required: true })),
+                fld("Cep Derinlikleri (6 nokta mm, virgülle)", inp("pd", { value: "3,4,3,3,5,4", required: true }))
+              ),
+              h("div", { class: "row" },
+                fld("Diş Eti Çekilmesi (6 nokta mm)", inp("gm", { value: "0,1,0,0,1,0", required: true })),
+                fld("Mobilite (0-3) / Furkasyon (0-3)", inp("mob_furc", { value: "1,0", required: true }))
+              ),
+              fld("Kanamalı Nokta Sayısı (0-6)", inp("bop_cnt", { type: "number", min: 0, max: 6, value: "2", required: true })),
+              fld("Hekim Klinik Notu", inp("doctor_note", { placeholder: "Bölgesel derin cep ve BOP gözlendi", value: "" })),
+            ], async (f) => {
+              const fdi = String(f.get("fdi") || "16").trim();
+              const pdArr = String(f.get("pd") || "2,2,2,2,2,2").split(",").map((x) => Number(x.trim()) || 2).slice(0, 6);
+              while (pdArr.length < 6) pdArr.push(2);
+              const gmArr = String(f.get("gm") || "0,0,0,0,0,0").split(",").map((x) => Number(x.trim()) || 0).slice(0, 6);
+              while (gmArr.length < 6) gmArr.push(0);
+              const [mob, furc] = String(f.get("mob_furc") || "0,0").split(",").map((x) => Number(x.trim()) || 0);
+              const bopCnt = Math.min(6, Math.max(0, Number(f.get("bop_cnt") || 0)));
+              const bopArr = [0, 1, 2, 3, 4, 5].map((i) => i < bopCnt);
+              await api(`/app/api/patients/${pid}/periodontal`, {
+                method: "POST",
+                body: {
+                  teeth: { [fdi]: { pd: pdArr, gm: gmArr, bop: bopArr, plaque: bopArr, mobility: mob || 0, furcation: furc || 0 } },
+                  doctor_approved: true,
+                  doctor_note: f.get("doctor_note") || "",
+                },
+              });
+              toast("Periodontal ölçüm kaydedildi");
+              openPatient(pid, reveal);
+            }, "Kaydet"),
+          },
+        }, "Periodontal Ölçüm"),
+        h("button", {
+          class: "btn btn-sm btn-ghost",
+          type: "button",
+          on: {
+            click: () => modal("Laboratuvar İş Emri Oluştur", [
+              h("div", { class: "row" },
+                fld("Laboratuvar Adı *", inp("lab_name", { required: true, minLength: 2, placeholder: "Ege Dental Lab", value: "" })),
+                fld("İşlem / Protez Türü *", inp("procedure_type", { required: true, minLength: 2, placeholder: "Zirkonyum Üst Yapı", value: "" }))
+              ),
+              h("div", { class: "row" },
+                fld("Diş (FDI)", inp("tooth_fdi", { type: "number", min: 11, max: 85, value: "26" })),
+                fld("Renk (Vita)", inp("shade_color", { value: "A2" }))
+              ),
+              h("div", { class: "row" },
+                fld("Teslim Tarihi *", inp("due_date", { type: "date", required: true, value: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10) })),
+                fld("Lab Maliyeti (TL)", inp("cost", { type: "number", step: "0.01", min: "0", value: "0" }))
+              ),
+              fld("Not", inp("note", { placeholder: "Oklüzal temas kontrolü", value: "" })),
+            ], async (f) => {
+              await api("/app/api/lab-orders", {
+                method: "POST",
+                body: {
+                  patient_id: pid,
+                  tooth_fdi: f.get("tooth_fdi") ? Number(f.get("tooth_fdi")) : null,
+                  lab_name: f.get("lab_name"),
+                  procedure_type: f.get("procedure_type"),
+                  shade_color: f.get("shade_color") || "A2",
+                  due_date: f.get("due_date"),
+                  cost: f.get("cost") || "0",
+                  note: f.get("note") || "",
+                },
+              });
+              toast("Laboratuvar iş emri oluşturuldu");
+              openPatient(pid, reveal);
+            }, "Oluştur"),
+          },
+        }, "Lab Emri"),
+        h("button", {
+          class: "btn btn-sm btn-ghost",
+          type: "button",
+          on: {
+            click: () => modal("İmplant & Lot / Barkod Kaydı", [
+              h("div", { class: "row" },
+                fld("Diş (FDI) *", inp("tooth_fdi", { type: "number", min: 11, max: 85, value: "36", required: true })),
+                fld("Marka *", inp("brand", { required: true, placeholder: "Straumann / Nobel / Osstem", value: "" }))
+              ),
+              h("div", { class: "row" },
+                fld("Model *", inp("model", { required: true, placeholder: "BLT SLA", value: "" })),
+                fld("Çap × Boy (mm)", inp("dims", { value: "4.1x10", required: true }))
+              ),
+              h("div", { class: "row" },
+                fld("Lot Numarası *", inp("lot_number", { required: true, placeholder: "LOT-2026-991", value: "" })),
+                fld("Seri / ÜTS Barkod", inp("uts_barcode", { placeholder: "869...", value: "" }))
+              ),
+              h("div", { class: "row" },
+                fld("SKT", inp("expiry_date", { type: "date", value: "" })),
+                fld("Tedarikçi", inp("supplier", { placeholder: "Yetkili Distribütör", value: "" }))
+              ),
+            ], async (f) => {
+              const [dmm, lmm] = String(f.get("dims") || "4.1x10").toLowerCase().split("x").map((x) => Number(x.trim()) || 4.1);
+              await api("/app/api/implants", {
+                method: "POST",
+                body: {
+                  patient_id: pid,
+                  tooth_fdi: Number(f.get("tooth_fdi") || 36),
+                  brand: f.get("brand"),
+                  model: f.get("model"),
+                  diameter_mm: dmm || 4.1,
+                  length_mm: lmm || 10.0,
+                  lot_number: f.get("lot_number"),
+                  uts_barcode: f.get("uts_barcode") || "",
+                  expiry_date: f.get("expiry_date") || "",
+                  supplier: f.get("supplier") || "",
+                },
+              });
+              toast("İmplant ve Lot kaydı eklendi");
+              openPatient(pid, reveal);
+            }, "Kaydet"),
+          },
+        }, "İmplant / Lot")
       ),
       odoSection,
+      (p.periodontal_exams || []).length || (p.lab_orders || []).length || (p.implant_records || []).length ? h("div", { class: "cal-box", style: "margin:10px 0" },
+        (p.periodontal_exams || []).length ? [
+          h("div", { class: "section-t", style: "margin-top:0", text: `Periodontal Muayeneler (${p.periodontal_exams.length})` }),
+          ...p.periodontal_exams.map((pe) => h("div", { style: "font-size:13px;margin-bottom:4px" },
+            `Tarih: ${pe.exam_date} · Ort. Cep (PD): ${pe.mean_pd} mm · Maks PD: ${pe.max_pd} mm · BOP: %${pe.bleeding_index_pct} · Plak: %${pe.plaque_index_pct}${pe.note ? " · " + pe.note : ""}`
+          )),
+        ] : null,
+        (p.lab_orders || []).length ? [
+          h("div", { class: "section-t", text: `Laboratuvar İş Emirleri (${p.lab_orders.length})` }),
+          ...p.lab_orders.map((lo) => h("div", { style: "font-size:13px;margin-bottom:4px" },
+            `#${lo.id} ${lo.lab_name} · ${lo.work_type} (Diş #${lo.tooth_fdi || "-"}, Renk ${lo.shade || "A2"}) · Teslim: ${lo.due_date} · Durum: ${lo.status}`
+          )),
+        ] : null,
+        (p.implant_records || []).length ? [
+          h("div", { class: "section-t", text: `İmplant & Lot Pasaportu (${p.implant_records.length})` }),
+          ...p.implant_records.map((ir) => h("div", { style: "font-size:13px;margin-bottom:4px" },
+            `Diş #${ir.tooth_fdi} · ${ir.brand} ${ir.model} (${ir.diameter_mm}×${ir.length_mm}mm) · Lot: ${ir.lot_number}${ir.barcode_udi ? " · Barkod: " + ir.barcode_udi : ""} (ÜTS Hazır - Canlı Bağlı Değil)`
+          )),
+        ] : null
+      ) : null,
+      h("div", { class: "section-t", text: `Röntgen, DICOM, Fotoğraf (Öncesi/Sonrası) & Belgeler (${(p.media_files || []).length})` }),
+      (p.media_files || []).length ? tblWrap(h("table", { class: "table" },
+        h("thead", null, h("tr", null, ["Tür / Aşama", "Dosya", "Kalite Kontrol (Teşhissiz)", "Tarih", "İşlem"].map((t) => h("th", { text: t })))),
+        h("tbody", null, (p.media_files || []).map((mf) => h("tr", null,
+          h("td", null, tag(`${mf.category} · ${mf.stage}`, mf.category === "xray" ? "teal" : "green")),
+          h("td", { text: `${mf.filename} (${Math.round((mf.size_bytes || 0) / 1024)} KB)` }),
+          h("td", null, tag(mf.qc_verdict === "ok" ? "Teknik Kalite Uygun" : mf.qc_verdict, mf.qc_verdict === "ok" ? "green" : "amber")),
+          h("td", { text: fmtDT(mf.created_at) }),
+          h("td", null, h("button", {
+            class: "btn btn-sm btn-danger",
+            type: "button",
+            on: {
+              click: async () => {
+                await run(() => api(`/app/api/patients/${pid}/media/${mf.id}`, { method: "DELETE" }), "Dosya silindi");
+                openPatient(pid, reveal);
+              },
+            },
+          }, "Sil"))
+        )))
+      ), "Hasta dosyaları tablosu") : h("div", { class: "empty", text: "Henüz yüklenmiş röntgen veya fotoğraf yok." }),
       h("div", { class: "section-t", text: "Anamnez" }),
       p.anamnesis.length ? p.anamnesis.map((a) => h("div", { class: "alert-item" },
         h("div", { class: "k" }, a.red_flags.length ? tag(`${a.red_flags.length} kırmızı bayrak`, "red") : tag("Temiz", "green")),
         h("div", { class: "d" }, a.red_flags.join(", ") || "Risk işareti yok", h("small", { text: fmtDT(a.signed_at) })),
         p.anamnesis_links && p.anamnesis_links[a.id] ? h("a", { class: "btn btn-sm btn-ghost", href: p.anamnesis_links[a.id], target: "_blank", rel: "noopener noreferrer" }, "Aç") : null
       )) : h("div", { class: "empty", text: "Henüz anamnez yok." }),
-      h("div", { class: "section-t", text: "Onamlar (KVKK)" }),
-      p.consents.length ? p.consents.map((c) => h("div", { class: "alert-item" },
-        h("div", { class: "d" }, consentNames[c.kind] || c.kind, h("small", { text: `Sürüm ${c.text_version} · ${fmtDT(c.granted_at)}` })),
-        c.revoked_at ? tag("Geri alındı", "red") : tag("Geçerli", "green")
-      )) : h("div", { class: "empty", text: "Onam kaydı yok." }),
+      h("div", { class: "section-t", text: "Onamlar (KVKK & Dijital Tedavi Planı)" }),
+      p.consents.length || (p.treatment_consents || []).length ? [
+        ...p.consents.map((c) => h("div", { class: "alert-item" },
+          h("div", { class: "d" }, consentNames[c.kind] || c.kind, h("small", { text: `Sürüm ${c.text_version} · ${fmtDT(c.granted_at)}` })),
+          c.revoked_at ? tag("Geri alındı", "red") : tag("Geçerli", "green")
+        )),
+        ...(p.treatment_consents || []).map((tc) => h("div", { class: "alert-item" },
+          h("div", { class: "d" }, `Dijital Tedavi Planı Onamı (${tc.document_version})`, h("small", { text: tc.signed_at ? `Onaylayan: ${tc.signer_name} · ${fmtDT(tc.signed_at)}` : "Hasta onayı bekleniyor" })),
+          tag(tc.status === "signed" ? "İmzalandı" : "Bekliyor", tc.status === "signed" ? "green" : "yellow")
+        )),
+      ] : h("div", { class: "empty", text: "Onam kaydı yok." }),
       h("div", { class: "section-t", text: "Randevular" }),
       p.appointments.length ? tblWrap(h("table", { class: "table" }, h("tbody", null, p.appointments.map((a) =>
-        h("tr", null, h("td", { text: fmtDT(a.starts_at) }), h("td", { text: a.treatment }), h("td", null, tag(...(STATUS[a.status] || [a.status, ""]))))
+        h("tr", null, h("td", { text: fmtDT(a.starts_at) }), h("td", { text: `${a.treatment}${a.doctor_name ? " · " + a.doctor_name : ""}` }), h("td", null, tag(...(STATUS[a.status] || [a.status, ""]))))
       ))), "Hasta randevuları tablosu") : h("div", { class: "empty", text: "Randevu yok." }),
       h("div", { class: "section-t", text: "Hesap hareketleri" }),
       ledger.length ? tblWrap(h("table", { class: "table" }, h("tbody", null, ledger.map((e) =>
         h("tr", { style: e.voided_at ? "opacity:.45;text-decoration:line-through" : "" },
           h("td", { text: fmtD(e.created_at) }),
           h("td", { text: `${e.t}: ${e.info}` }),
-          h("td", { class: "num", text: (e.t === "Tahsilat" ? "-" : "") + fmtTL(e.amount) })
+          h("td", { class: "num", text: (e.t === "Tahsilat" ? "-" : "") + fmtTL(e.amount) }),
+          h("td", null, e.t === "Tahsilat" && !e.voided_at && e.status === "completed" && S.user.role !== "secretary" ? h("button", {
+            class: "btn btn-sm btn-ghost",
+            type: "button",
+            on: {
+              click: () => modal("Tahsilat İadesi", [
+                fld("İade Tutarı (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", max: String(e.amount), value: String(e.amount), required: true })),
+                fld("İade Gerekçesi *", inp("reason", { required: true, minLength: 3, placeholder: "İade nedenini giriniz", value: "" })),
+              ], async (f) => {
+                await api(`/app/api/payments/${e.id}/refund`, {
+                  method: "POST",
+                  body: { amount: f.get("amount"), reason: f.get("reason") },
+                });
+                toast("İade işlemi denetim kaydıyla tamamlandı");
+                openPatient(pid, reveal);
+              }, "İade Et"),
+            },
+          }, "İade") : null)
         )
-      ))), "Hasta hesap hareketleri tablosu") : h("div", { class: "empty", text: "Hareket yok." })
+      ))), "Hasta hesap hareketleri tablosu") : h("div", { class: "empty", text: "Hareket yok." }),
+      h("div", { class: "section-t", text: `Kronolojik Hasta Zaman Çizelgesi (${(p.timeline || []).length})` }),
+      (p.timeline || []).length ? h("div", null, (p.timeline || []).slice(0, 25).map((tlItem) => h("div", { class: "alert-item" },
+        h("div", { class: "d" }, h("strong", { text: tlItem.title }), " — ", tlItem.detail, h("small", { text: fmtDT(tlItem.ts) }))
+      ))) : h("div", { class: "empty", text: "Zaman çizelgesi kaydı yok." })
     );
     const wrap = h("div", { class: "drawer-wrap" },
       h("div", { class: "overlay", on: { click: () => close(true) } }),
@@ -4152,23 +4868,45 @@ textarea.input { min-height: 84px; }
     );
   };
 
-  // ---------------- envanter
+  // ---------------- envanter (Bölüm 14: 13 Alan + Lot + SKT + Depo + CSV)
   VIEWS.inventory = async () => {
     const rows = await api("/app/api/inventory");
     const total = rows.reduce((s, r) => s + Number(r.value || 0), 0);
     setMain(
-      header("Envanter", `Stok değeri: ${fmtTL(total)} · Kritik seviyeye inen ürün için otomatik uyarı oluşur.`,
+      header("Envanter & Sarf Takibi", `Stok değeri: ${fmtTL(total)} · Kritik seviye ve son kullanma tarihi (SKT) için otomatik uyarı oluşur.`,
+        h("a", { class: "btn btn-ghost", href: "/app/api/export/inventory.csv", download: "dentacore-envanter.csv" }, "CSV İndir"),
         h("button", {
           class: "btn btn-cta",
           type: "button",
           on: {
             click: () => modal("Ürün ekle", [
-              fld("Ürün adı", inp("name", { required: true, minLength: 2, placeholder: "Kompozit A2" })),
-              h("div", { class: "row" }, fld("Stok kodu", inp("sku")), fld("Birim", inp("unit", { value: "adet" }))),
-              h("div", { class: "row" }, fld("Mevcut miktar", inp("qty", { type: "number", step: "0.01", min: 0, value: 0 })), fld("Alt sınır", inp("min_qty", { type: "number", step: "0.01", min: 0, value: 0 }))),
-              fld("Birim maliyet (TL)", inp("unit_cost", { type: "number", step: "0.01", min: 0, value: 0 })),
+              fld("Ürün adı *", inp("name", { required: true, minLength: 2, placeholder: "Kompozit A2", value: "" })),
+              h("div", { class: "row" },
+                fld("Kategori", sel("category", [
+                  ["Sarf Malzeme", "Sarf Malzeme"],
+                  ["İmplant & Cerrahi", "İmplant & Cerrahi"],
+                  ["Endodonti", "Endodonti"],
+                  ["Protez & Ölçü", "Protez & Ölçü"],
+                  ["Sterilizasyon", "Sterilizasyon"],
+                ], "Sarf Malzeme")),
+                fld("Depo / Konum", inp("warehouse", { value: "Ana Depo" }))
+              ),
+              h("div", { class: "row" }, fld("Stok kodu", inp("sku", { value: "" })), fld("Birim", inp("unit", { value: "adet" }))),
+              h("div", { class: "row" }, fld("Mevcut miktar", inp("qty", { type: "number", step: "0.01", min: 0, value: "" })), fld("Alt sınır", inp("min_qty", { type: "number", step: "0.01", min: 0, value: "" }))),
+              h("div", { class: "row" },
+                fld("Birim maliyet (TL)", inp("unit_cost", { type: "number", step: "0.01", min: 0, value: "" })),
+                fld("Tedarikçi", inp("supplier", { placeholder: "Dental Medikal A.Ş.", value: "" }))
+              ),
+              h("div", { class: "row" },
+                fld("Lot / Parti No", inp("lot_number", { placeholder: "LOT-2026", value: "" })),
+                fld("Son Kullanma Tarihi (SKT)", inp("expiry_date", { type: "date", value: "" }))
+              ),
             ], async (f) => {
-              await api("/app/api/inventory", { method: "POST", body: Object.fromEntries(f) });
+              const body = Object.fromEntries(f);
+              body.qty = body.qty || "0";
+              body.min_qty = body.min_qty || "0";
+              body.unit_cost = body.unit_cost || "0";
+              await api("/app/api/inventory", { method: "POST", body });
               toast("Ürün eklendi");
               route();
             }),
@@ -4176,9 +4914,20 @@ textarea.input { min-height: 84px; }
         }, icon("plus"), "Ürün ekle")
       ),
       h("div", { class: "card card-flush" }, tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Ürün", "Stok", "Alt sınır", "Birim maliyet", "Değer", "İşlemler"].map((t, i) => h("th", { class: i && i < 5 ? "num" : "", text: t })))),
+        h("thead", null, h("tr", null, ["Ürün / Kategori", "Lot / SKT / Depo", "Stok", "Alt sınır", "Birim maliyet", "Değer", "İşlemler"].map((t, i) => h("th", { class: i >= 2 && i < 6 ? "num" : "", text: t })))),
         h("tbody", null, rows.length ? rows.map((r) => h("tr", null,
-          h("td", null, h("b", { text: r.name }), r.sku ? h("span", { class: "mono", style: "color:var(--muted)", text: `  ${r.sku}` }) : null, " ", r.low ? tag("Kritik", "red") : null),
+          h("td", null,
+            h("b", { text: r.name }),
+            r.sku ? h("span", { class: "mono", style: "color:var(--muted)", text: `  ${r.sku}` }) : null,
+            " ",
+            r.category ? tag(r.category, "teal") : null,
+            " ",
+            r.low ? tag("Kritik", "red") : null,
+            r.expired ? tag("SKT Geçmiş", "red") : (r.expiring_soon ? tag("SKT Yaklaşıyor", "amber") : null)
+          ),
+          h("td", { style: "font-size:12.5px;color:var(--ink-2)" },
+            `${r.warehouse || "Ana Depo"}${r.lot_number ? " · Lot: " + r.lot_number : ""}${r.expiry_date ? " · SKT: " + r.expiry_date : ""}${r.supplier ? " · " + r.supplier : ""}`
+          ),
           h("td", { class: "num", text: `${Number(r.qty)} ${r.unit}` }),
           h("td", { class: "num", text: Number(r.min_qty) }),
           h("td", { class: "num", text: fmtTL(r.unit_cost) }),
@@ -4188,7 +4937,7 @@ textarea.input { min-height: 84px; }
             h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => moveItem(r, -1) } }, "Çıkış"),
             h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => itemHistory(r) } }, "Geçmiş")
           ))
-        )) : h("tr", null, h("td", { colSpan: 6, class: "empty", text: "Henüz ürün yok." })))
+        )) : h("tr", null, h("td", { colSpan: 7, class: "empty", text: "Henüz ürün yok." })))
       ), "Envanter tablosu"))
     );
   };
@@ -4242,7 +4991,11 @@ textarea.input { min-height: 84px; }
     }
     const k = new URLSearchParams(location.hash.split("?")[1] || "").get("r") || "ay";
     const [s, e] = range(k);
-    const d = await api(`/app/api/kasa?start=${encodeURIComponent(s.toISOString())}&end=${encodeURIComponent(e.toISOString())}`);
+    const [d, banks, exps] = await Promise.all([
+      api(`/app/api/kasa?start=${encodeURIComponent(s.toISOString())}&end=${encodeURIComponent(e.toISOString())}`),
+      api("/app/api/bank-agreements").catch(() => []),
+      api("/app/api/expenses").catch(() => []),
+    ]);
     const canVoid = S.user.role !== "secretary";
     const voidBtn = (en) => h("button", {
       class: "btn btn-sm btn-danger",
@@ -4259,14 +5012,67 @@ textarea.input { min-height: 84px; }
       },
     }, "İptal");
     setMain(
-      header("Kasa", "Tutarlar kuruş hassasiyetinde tutulur; kayıt silinmez, gerekçeli iptal edilir.",
-        Object.entries(RANGES).map(([rk, t]) => h("a", { class: `btn ${rk === k ? "btn-primary" : "btn-ghost"}`, href: `#/kasa?r=${rk}`, text: t }))
+      header("Kasa & Kurumsal Muhasebe", "Tutarlar kuruş hassasiyetinde (Decimal) tutulur; planlanan işlem borç oluşturmaz, bekleyen/başarısız ödeme borçtan düşülmez.",
+        ...Object.entries(RANGES).map(([rk, t]) => h("a", { class: `btn ${rk === k ? "btn-primary" : "btn-ghost"}`, href: `#/kasa?r=${rk}`, text: t })),
+        h("a", { class: "btn btn-ghost", href: "/app/api/export/kasa.csv", download: "dentacore-kasa.csv" }, "CSV İndir"),
+        h("button", {
+          class: "btn btn-ghost",
+          type: "button",
+          on: {
+            click: () => modal("Klinik Gideri Kaydet", [
+              h("div", { class: "row" },
+                fld("Kategori", sel("category", [
+                  ["malzeme", "Sarf & Malzeme"],
+                  ["laboratuvar", "Laboratuvar"],
+                  ["kira", "Kira"],
+                  ["maas", "Personel / Maaş"],
+                  ["fatura", "Fatura / Vergi"],
+                  ["diger", "Diğer"],
+                ], "malzeme")),
+                fld("Ödeme Yöntemi", sel("method", [
+                  ["havale", "Havale / EFT"],
+                  ["kredi_karti", "Kredi Kartı"],
+                  ["nakit", "Nakit"],
+                ], "havale"))
+              ),
+              fld("Açıklama *", inp("description", { required: true, minLength: 2, placeholder: "Aylık sarf malzeme ödemesi", value: "" })),
+              fld("Tutar (TL) *", inp("amount", { type: "number", step: "0.01", min: "0.01", required: true, placeholder: "Örn. 4500", value: "" })),
+            ], async (f) => {
+              await api("/app/api/expenses", { method: "POST", body: Object.fromEntries(f) });
+              toast("Gider kaydedildi");
+              route();
+            }, "Kaydet"),
+          },
+        }, "+ Gider Ekle"),
+        h("button", {
+          class: "btn btn-cta",
+          type: "button",
+          on: {
+            click: () => modal("Günlük Kasa Kapanışı", [
+              fld("Açılış Bakiyesi (TL)", inp("opening_balance", { type: "number", step: "0.01", min: "0", value: "0" })),
+              fld("Sayılan Fiziksel Kasa / POS Toplamı (TL) *", inp("physical_counted", { type: "number", step: "0.01", min: "0", required: true, value: String(d.net_cash_flow || d.paid || 0) })),
+              fld("Kapanış Notu", inp("note", { placeholder: "Gün sonu mutabakatı tam", value: "" })),
+            ], async (f) => {
+              const res = await api("/app/api/kasa/closings", { method: "POST", body: Object.fromEntries(f) });
+              toast(`Gün sonu kasa kapanışı tamamlandı (Fark: ${fmtTL(res.diff)})`);
+              route();
+            }, "Kapanışı Onayla"),
+          },
+        }, "Gün Sonu Kapanış")
       ),
       h("div", { class: "grid g3" },
-        h("div", { class: "card kpi" }, h("div", { class: "label", text: "Toplam hizmet" }), h("div", { class: "value", text: fmtTL(d.billed) })),
-        h("div", { class: "card kpi good" }, h("div", { class: "label", text: "Toplam tahsilat" }), h("div", { class: "value", text: fmtTL(d.paid) }),
-          h("div", { class: "hint", text: d.methods.map((m) => `${m.method}: ${fmtTL(m.amount)}`).join(" · ") || "Tahsilat yok" })),
-        h("div", { class: "card kpi loss" }, h("div", { class: "label", text: "Kalan alacak (tüm zamanlar)" }), h("div", { class: "value", text: fmtTL(d.receivable) }))
+        h("div", { class: "card kpi" }, h("div", { class: "label", text: "Gerçekleşen Net Hizmet" }), h("div", { class: "value", text: fmtTL(d.billed) }),
+          h("div", { class: "hint", text: `Brüt: ${fmtTL(d.gross_billed || d.billed)} · İndirim: ${fmtTL(d.discount_total || 0)} · Planlanan: ${fmtTL(d.planned_total || 0)}` })),
+        h("div", { class: "card kpi good" }, h("div", { class: "label", text: "Başarılı Tahsilat" }), h("div", { class: "value", text: fmtTL(d.paid) }),
+          h("div", { class: "hint", text: (d.methods.map((m) => `${m.method}: ${fmtTL(m.amount)}`).join(" · ") || "Tahsilat yok") + (d.refunded_total ? ` · İade: ${fmtTL(d.refunded_total)}` : "") })),
+        h("div", { class: "card kpi loss" }, h("div", { class: "label", text: "Kalan Alacak (Tüm Zamanlar)" }), h("div", { class: "value", text: fmtTL(d.receivable) }),
+          h("div", { class: "hint", text: `Giderler: ${fmtTL(d.expenses_total || 0)} · Net Nakit Akışı: ${fmtTL(d.net_cash_flow !== undefined ? d.net_cash_flow : d.paid)}` }))
+      ),
+      banks.length ? h("div", { class: "cal-box", style: "margin-top:12px" },
+        h("b", { text: "Aktif Kurum / Banka İndirim Anlaşmaları: " }),
+        banks.map((b) => `${b.bank_name} (%${b.discount_pct}${b.max_discount ? ", üst sınır " + fmtTL(b.max_discount) : ""})`).join(" · ")
+      ) : h("div", { class: "cal-box", style: "margin-top:12px;font-size:12.5px;color:var(--muted)" },
+        "Şirket Ünvanı, Kurum/Banka Anlaşmaları ve Sanal POS şu an Taslak Modundadır. Bilgileriniz 3_BENIM_DOSYALARIM klasöründeki forma girildiğinde otomatik aktifleşir."
       ),
       d.shares && d.shares.length ? h("div", { class: "card", style: "margin-top:14px" },
         h("h3", { text: "Hekim payları" }),
@@ -4295,21 +5101,48 @@ textarea.input { min-height: 84px; }
   };
   VIEWS.billing = VIEWS.kasa;
 
-  // ---------------- maliyet
+  // ---------------- maliyet (Bölüm 13: 3.500 TL SaaS Brüt Kâr Analizi & Kota)
   VIEWS.costs = async () => {
-    const rows = await api("/app/api/token-stats?days=30");
+    const [rows, aiRep] = await Promise.all([
+      api("/app/api/token-stats?days=30"),
+      api("/app/api/ai-costs?days=30").catch(() => null),
+    ]);
     const total = rows.reduce((s, r) => s + r.replies, 0);
     const free = rows.filter((r) => (r.layer || "").startsWith("L1")).reduce((s, r) => s + r.replies, 0);
     const LAYER = { L1: "Katman 1: kural ve önbellek (0 token)", L2: "Katman 2: küçük sınıflandırıcı", L3: "Katman 3: ana model" };
     setMain(
-      header("Yapay Zeka Maliyeti", "Mesajların çoğu kural tabanlı katmanda token harcamadan yanıtlanır. Ana model yalnız gerektiğinde, 180 token sınırıyla çalışır."),
+      header("Yapay Zeka Maliyeti & 3.500 TL Abonelik Kârlılık Analizi", "Mesajların büyük çoğunluğu Katman-1 deterministik kurallarla 0 token ile yanıtlanır; aylık kota ve maliyet freni aktiftir.",
+        S.user.role === "owner" && aiRep ? h("button", {
+          class: "btn btn-ghost",
+          type: "button",
+          on: {
+            click: () => modal("Aylık AI Token & Bütçe Kotası", [
+              fld("Aylık Token Limiti", inp("monthly_token_limit", { type: "number", min: 10000, max: 50000000, value: String(aiRep.monthly_token_limit || 1500000), required: true })),
+              fld("Aylık AI Bütçe Tavanı (TL)", inp("monthly_budget_try", { type: "number", step: "1", min: 10, max: 50000, value: String(aiRep.monthly_budget_try || 250), required: true })),
+            ], async (f) => {
+              await api("/app/api/ai-costs/quota", {
+                method: "POST",
+                body: {
+                  monthly_token_limit: Number(f.get("monthly_token_limit") || 1500000),
+                  monthly_budget_try: Number(f.get("monthly_budget_try") || 250),
+                  hard_stop: true,
+                },
+              });
+              toast("Aylık yapay zeka kotası güncellendi");
+              route();
+            }, "Kaydet"),
+          },
+        }, "Kota Ayarla") : null
+      ),
       h("div", { class: "grid g3" },
-        h("div", { class: "card kpi good" }, h("div", { class: "label", text: "LLM'siz cevap" }), h("div", { class: "value", text: total ? `%${Math.round(100 * free / total)}` : "-" }), h("div", { class: "hint", text: `${free} / ${total} cevap (30 gün)` })),
-        h("div", { class: "card kpi" }, h("div", { class: "label", text: "Girdi token" }), h("div", { class: "value", text: rows.reduce((s, r) => s + Number(r.tin), 0).toLocaleString("tr-TR") })),
-        h("div", { class: "card kpi" }, h("div", { class: "label", text: "Çıktı token" }), h("div", { class: "value", text: rows.reduce((s, r) => s + Number(r.tout), 0).toLocaleString("tr-TR") }))
+        h("div", { class: "card kpi good" }, h("div", { class: "label", text: "0 Token (LLM'siz) Cevap Oranı" }), h("div", { class: "value", text: total ? `%${Math.round(100 * free / total)}` : "%100" }), h("div", { class: "hint", text: `${free} / ${total} cevap (30 gün)` })),
+        h("div", { class: "card kpi" }, h("div", { class: "label", text: "Tahmini 30 Günlük AI Maliyeti" }), h("div", { class: "value", text: aiRep ? fmtTL(aiRep.estimated_cost_try) : "0,00 TL" }),
+          h("div", { class: "hint", text: aiRep ? `Toplam Token: ${Number(aiRep.total_tokens || 0).toLocaleString("tr-TR")} / ${Number(aiRep.monthly_token_limit || 1500000).toLocaleString("tr-TR")}` : "" })),
+        h("div", { class: "card kpi good" }, h("div", { class: "label", text: "3.500 TL Pakette Brüt Kâr Marjı" }), h("div", { class: "value", text: aiRep ? `%${aiRep.gross_margin_after_ai_pct}` : "%100" }),
+          h("div", { class: "hint", text: aiRep ? `AI Sonrası Kalan: ${fmtTL(aiRep.gross_profit_after_ai_try)} / 3.500 TL` : "3.500 TL + KDV / ay" }))
       ),
       h("div", { class: "card card-flush", style: "margin-top:14px" }, tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Katman", "Cevap", "Girdi", "Çıktı"].map((t, i) => h("th", { class: i ? "num" : "", text: t })))),
+        h("thead", null, h("tr", null, ["Katman", "Cevap", "Girdi Token", "Çıktı Token"].map((t, i) => h("th", { class: i ? "num" : "", text: t })))),
         h("tbody", null, rows.length ? rows.map((r) => h("tr", null,
           h("td", null, h("b", { text: r.layer || "-" }), h("div", { style: "color:var(--muted);font-size:13px", text: LAYER[(r.layer || "").slice(0, 2)] || "" })),
           h("td", { class: "num", text: r.replies }),
@@ -4320,27 +5153,64 @@ textarea.input { min-height: 84px; }
     );
   };
 
-  // ---------------- ekip
+  // ---------------- ekip (Bölüm 17: 14 Meslek & 15 Granüler RBAC Yetkisi)
   VIEWS.team = async () => {
-    const rows = await api("/app/api/staff");
+    const [rows, profCat] = await Promise.all([
+      api("/app/api/staff"),
+      api("/app/api/staff/professions-catalog").catch(() => null),
+    ]);
     const owner = S.user.role === "owner";
+    const profEntries = profCat && profCat.professions
+      ? Object.entries(profCat.professions).map(([k, v]) => [k, v.label || k])
+      : [
+        ["dentist", "Diş Hekimi"],
+        ["specialist_dentist", "Uzman Diş Hekimi"],
+        ["orthodontist", "Ortodontist"],
+        ["oral_surgeon", "Ağız, Diş ve Çene Cerrahı"],
+        ["endodontist", "Endodontist"],
+        ["periodontist", "Periodontist"],
+        ["pedodontist", "Pedodontist (Çocuk Diş Hekimi)"],
+        ["prosthodontist", "Protetik Diş Tedavisi Uzmanı"],
+        ["dental_assistant", "Diş Hekimi Asistanı"],
+        ["secretary", "Sekreter / Ön Büro"],
+        ["patient_coordinator", "Hasta Koordinatörü"],
+        ["clinic_manager", "Klinik Yöneticisi"],
+        ["accountant", "Muhasebe Sorumlusu"],
+        ["lab_technician", "Laboratuvar / Protez Teknisyeni"],
+      ];
+    const permLabels = (profCat && profCat.permission_labels) || {};
+    const roleOpts = [
+      ["secretary", "Sekreter / Ön Büro"],
+      ["doctor", "Hekim"],
+      ["owner", "Yönetici"],
+      ["accounting", "Muhasebe"],
+      ["clinical_support", "Klinik Destek / Asistan"],
+      ["lab_tech", "Laboratuvar Teknisyeni"],
+      ["warehouse", "Depo / Envanter"],
+      ["no_access", "Sisteme Giriş Yok"],
+    ];
     setMain(
-      header("Ekip", "Kullanıcı ve hekim sayısı sınırsız. WhatsApp numarası tanımlı personel 'bugün', 'yarın', 'özet', 'stok', 'kasa' yazarak paneli telefondan kullanır.",
+      header("Ekip & 15 Granüler Yetki (RBAC)", "14 klinik meslek grubu ve 15 granüler yetki anahtarı ile rol bazlı erişim kontrolü. Hekim hakediş raporunu CSV indirebilirsiniz.",
+        h("a", { class: "btn btn-ghost", href: "/app/api/export/doctor_shares.csv", download: "dentacore-hekim-hakedis.csv" }, "Hakediş CSV"),
         owner ? h("button", {
           class: "btn btn-cta",
           type: "button",
           on: {
             click: () => modal("Ekip üyesi ekle", [
-              fld("Ad Soyad", inp("full_name", { required: true, minLength: 2 })),
-              fld("E-posta", inp("email", { type: "email", required: true })),
+              fld("Ad Soyad *", inp("full_name", { required: true, minLength: 2, value: "" })),
+              fld("E-posta *", inp("email", { type: "email", required: true, value: "" })),
               h("div", { class: "row" },
-                fld("Rol", sel("role", [["secretary", "Sekreter"], ["doctor", "Hekim"], ["owner", "Yönetici"]], "secretary")),
-                fld("Hekim pay oranı (%)", inp("share_pct", { type: "number", min: 0, max: 100, step: "0.5", value: 0 }))
+                fld("Meslek / Uzmanlık (14 Meslek)", sel("job_title", profEntries, "dentist")),
+                fld("Sistem Rolü", sel("role", roleOpts, "doctor"))
               ),
-              fld("WhatsApp numarası (personel asistanı, isteğe bağlı)", inp("phone", { placeholder: "05xx xxx xx xx" })),
-              fld("Geçici parola (en az 12 karakter)", inp("password", { type: "password", required: true, minLength: 12, autocomplete: "new-password" })),
+              h("div", { class: "row" },
+                fld("Hekim pay oranı (%)", inp("share_pct", { type: "number", min: 0, max: 100, step: "0.5", value: "" })),
+                fld("WhatsApp numarası (isteğe bağlı)", inp("phone", { placeholder: "05xx xxx xx xx", value: "" }))
+              ),
+              fld("Geçici parola (en az 12 karakter) *", inp("password", { type: "password", required: true, minLength: 12, autocomplete: "new-password", value: "" })),
             ], async (f) => {
               const b = Object.fromEntries(f);
+              b.share_pct = b.share_pct || "0";
               if (!b.phone) delete b.phone;
               await api("/app/api/staff", { method: "POST", body: b });
               toast("Ekip üyesi eklendi");
@@ -4350,37 +5220,84 @@ textarea.input { min-height: 84px; }
         }, icon("plus"), "Üye ekle") : null
       ),
       h("div", { class: "card card-flush" }, tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Ad", "Rol", owner ? "E-posta" : null, "2FA", "WhatsApp", "Durum", owner ? "İşlemler" : null].filter((x) => x !== null).map((t) => h("th", { text: t })))),
+        h("thead", null, h("tr", null, ["Ad", "Meslek / Rol", owner ? "E-posta" : null, "Pay", "2FA", "WhatsApp", "Durum", owner ? "İşlemler" : null].filter((x) => x !== null).map((t) => h("th", { text: t })))),
         h("tbody", null, rows.map((s) => h("tr", null,
           h("td", null, h("b", { text: s.full_name })),
-          h("td", null, tag(ROLE[s.role] || s.role, s.role === "owner" ? "teal" : "")),
+          h("td", null,
+            tag(s.job_title_label || ROLE[s.role] || s.role, s.role === "owner" ? "teal" : "green"),
+            " ",
+            tag(ROLE[s.role] || s.role, "")
+          ),
           owner ? h("td", { text: s.email }) : null,
+          h("td", { text: `%${Number(s.share_pct || 0)}` }),
           h("td", null, s.totp_enabled ? tag("Açık", "green") : tag("Kapalı", "yellow")),
           h("td", null, s.whatsapp ? tag("Bağlı", "teal") : "-"),
           h("td", null, s.active ? tag("Aktif", "green") : tag("Pasif", "")),
-          owner ? h("td", null, s.id !== S.user.id ? h("button", {
-            class: `btn btn-sm ${s.active ? "btn-danger" : "btn-ghost"}`,
-            type: "button",
-            on: {
-              click: async () => {
-                if (!s.active) {
-                  const r = await run(() => api(`/app/api/staff/${s.id}/active`, { method: "POST", body: { active: true } }), "Ekip üyesi aktifleştirildi");
-                  if (r !== null) route();
-                  return;
-                }
-                confirmModal(
-                  "Ekip üyesini pasifleştir",
-                  `${s.full_name} hesabı pasifleştirilsin mi? Pasif kullanıcı panele giriş yapamaz.`,
-                  async () => {
-                    await api(`/app/api/staff/${s.id}/active`, { method: "POST", body: { active: false } });
-                    toast("Ekip üyesi pasifleştirildi");
+          owner ? h("td", null, h("div", { class: "actions" },
+            h("button", {
+              class: "btn btn-sm btn-ghost",
+              type: "button",
+              on: {
+                click: () => {
+                  const curPerms = s.permissions || {};
+                  const permBoxes = Object.entries(permLabels).map(([pk, plbl]) =>
+                    h("label", { class: "odo-check-row" },
+                      h("input", { type: "checkbox", name: `perm_${pk}`, value: "1", checked: Boolean(curPerms[pk]) }),
+                      h("span", { text: `${plbl} (${pk})` })
+                    )
+                  );
+                  modal(`${s.full_name} · Meslek & 15 Yetki Düzenle`, [
+                    h("div", { class: "row" },
+                      fld("Meslek (14 Grup)", sel("job_title", profEntries, s.job_title || "secretary")),
+                      fld("Rol", sel("role", roleOpts, s.role || "secretary"))
+                    ),
+                    fld("Hekim Pay Oranı (%)", inp("share_pct", { type: "number", min: 0, max: 100, step: "0.5", value: String(s.share_pct || 0) })),
+                    h("div", { class: "section-t", text: "15 Granüler Yetki Anahtarı" }),
+                    h("div", { style: "max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px" }, ...permBoxes),
+                  ], async (f) => {
+                    const permissions = {};
+                    Object.keys(permLabels).forEach((pk) => {
+                      permissions[pk] = f.get(`perm_${pk}`) === "1";
+                    });
+                    await api(`/app/api/staff/${s.id}/permissions`, {
+                      method: "PATCH",
+                      body: {
+                        job_title: f.get("job_title"),
+                        role: f.get("role"),
+                        share_pct: f.get("share_pct") || "0",
+                        permissions,
+                      },
+                    });
+                    toast("Personel meslek ve yetkileri güncellendi");
                     route();
-                  },
-                  "Pasifleştir"
-                );
+                  }, "Kaydet");
+                },
               },
-            },
-          }, s.active ? "Pasifleştir" : "Aktifleştir") : null) : null
+            }, "Yetkiler"),
+            s.id !== S.user.id ? h("button", {
+              class: `btn btn-sm ${s.active ? "btn-danger" : "btn-ghost"}`,
+              type: "button",
+              on: {
+                click: async () => {
+                  if (!s.active) {
+                    const r = await run(() => api(`/app/api/staff/${s.id}/active`, { method: "POST", body: { active: true } }), "Ekip üyesi aktifleştirildi");
+                    if (r !== null) route();
+                    return;
+                  }
+                  confirmModal(
+                    "Ekip üyesini pasifleştir",
+                    `${s.full_name} hesabı pasifleştirilsin mi? Pasif kullanıcı panele giriş yapamaz.`,
+                    async () => {
+                      await api(`/app/api/staff/${s.id}/active`, { method: "POST", body: { active: false } });
+                      toast("Ekip üyesi pasifleştirildi");
+                      route();
+                    },
+                    "Pasifleştir"
+                  );
+                },
+              },
+            }, s.active ? "Pasifleştir" : "Aktifleştir") : null
+          )) : null
         )))
       ), "Ekip üyeleri tablosu"))
     );
@@ -4711,33 +5628,40 @@ textarea.input { min-height: 84px; }
     );
   };
 
-  // ---------------- iletişim ve reklam analizi
+  // ---------------- iletişim ve reklam analizi (Bölüm 5: Gerçek Takip Hunisi & Kanal Dağılımı)
   VIEWS.analytics = async () => {
-    const d = await api("/app/api/analytics");
+    const [d, rep] = await Promise.all([
+      api("/app/api/analytics"),
+      api("/app/api/campaigns/report?include_samples=false").catch(() => null),
+    ]);
+    const campRows = (rep && rep.campaigns) ? rep.campaigns : (d.campaigns || []);
     setMain(
-      header("İletişim & Reklam Analizi", "Mesai dışı yakalanan randevular ve Meta/Google reklam kampanyalarının kasa dönüşümü.",
+      header("İletişim & Gerçek Kampanya Dönüşüm Analizi", "Tıklama takip bağlantısı (/c/kod), bot filtreleme, tekil ziyaretçi, hasta kaydı, randevu ve kasa tahsilatı uçtan uca bağlanır.",
+        h("a", { class: "btn btn-ghost", href: "/app/api/export/campaigns.csv", download: "dentacore-kampanyalar.csv" }, "CSV İndir"),
         h("button", {
           class: "btn btn-cta",
           type: "button",
           on: {
-            click: () => modal("Reklam kampanyası ekle", [
-              fld("Kampanya adı", inp("name", { required: true, placeholder: "İstanbul İmplant Meta Eylül" })),
+            click: () => modal("Reklam Kampanyası ve Takip Bağlantısı Oluştur", [
+              fld("Kampanya Adı *", inp("name", { required: true, placeholder: "İstanbul İmplant Meta Kasım", value: "" })),
               h("div", { class: "row" },
-                fld("Kaynak", sel("source", [["meta_ads", "Meta / Instagram Ads"], ["google_ads", "Google Ads"], ["organik", "Organik"]], "meta_ads")),
-                fld("Tıklama", inp("clicks", { type: "number", value: 120 }))
+                fld("Kanal", sel("channel", PATIENT_SOURCES, "instagram")),
+                fld("Takip Kodu (URL /c/kod)", inp("code", { placeholder: "kasim-implant", value: "" }))
               ),
               h("div", { class: "row" },
-                fld("Konuşma", inp("conversations", { type: "number", value: 24 })),
-                fld("Randevu", inp("appointments_booked", { type: "number", value: 9 }))
+                fld("UTM Source", inp("utm_source", { value: "instagram" })),
+                fld("UTM Medium", inp("utm_medium", { value: "cpc" }))
               ),
-              fld("Gerçekleşen Ciro (TL)", inp("revenue_try", { type: "number", step: "0.01", value: 38000 })),
+              fld("UTM Campaign", inp("utm_campaign", { placeholder: "implant_2026_11", value: "" })),
             ], async (f) => {
               const b = Object.fromEntries(f);
-              b.clicks = Number(b.clicks || 0);
-              b.conversations = Number(b.conversations || 0);
-              b.appointments_booked = Number(b.appointments_booked || 0);
+              b.source = b.channel || "instagram";
+              b.clicks = 0;
+              b.conversations = 0;
+              b.appointments_booked = 0;
+              b.revenue_try = "0";
               await api("/app/api/campaigns", { method: "POST", body: b });
-              toast("Kampanya eklendi");
+              toast("Kampanya ve takip bağlantısı oluşturuldu");
               route();
             }),
           },
@@ -4746,18 +5670,30 @@ textarea.input { min-height: 84px; }
       h("div", { class: "grid g3" },
         h("div", { class: "card kpi" }, h("div", { class: "label", text: "Son 30 gün randevu" }), h("div", { class: "value", text: String(d.total_appts_30d) })),
         h("div", { class: "card kpi good" }, h("div", { class: "label", text: "Mesai dışı / Pazar bağlanan" }), h("div", { class: "value", text: `%${d.off_hours_pct}` }), h("div", { class: "hint", text: `${d.off_hours_appts} randevu klinik kapalıyken` })),
-        h("div", { class: "card kpi" }, h("div", { class: "label", text: "Aktif kampanya" }), h("div", { class: "value", text: String(d.campaigns.length) }))
+        h("div", { class: "card kpi" }, h("div", { class: "label", text: "Aktif Gerçek Kampanya" }), h("div", { class: "value", text: String(campRows.length) }))
+      ),
+      h("div", { class: "cal-box", role: "note", style: "margin-top:14px" },
+        h("b", { text: "Ölçüm Dürüstlük Notu: " }),
+        (rep && rep.measurement_honesty_notice_tr) || "Sunucu tarafı gerçek tıklama, bot filtresi ve kasa tahsilatı eşleştirmesi aktiftir; iOS gizlilik ve reklam engelleyiciler nedeniyle %100 reklam tıklama garantisi verilemez."
       ),
       h("div", { class: "card card-flush", style: "margin-top:14px" }, tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Kampanya", "Kaynak", "Tıklama", "Konuşma", "Randevu", "Kasa Cirosu"].map((t, i) => h("th", { class: i > 1 ? "num" : "", text: t })))),
-        h("tbody", null, d.campaigns.length ? d.campaigns.map((c) => h("tr", null,
-          h("td", null, h("b", { text: c.name })),
-          h("td", null, tag(c.source, "teal")),
-          h("td", { class: "num", text: c.clicks }),
-          h("td", { class: "num", text: c.conversations }),
-          h("td", { class: "num", text: c.appointments_booked }),
-          h("td", { class: "num", text: fmtTL(c.revenue_try) })
-        )) : h("tr", null, h("td", { colSpan: 6, class: "empty", text: "Henüz kampanya kaydı yok." })))
+        h("thead", null, h("tr", null, ["Kampanya & Takip Linki", "Kanal", "Tekil Tık (Bot Hariç)", "Form", "Hasta", "Randevu", "Gerçek Kasa Tahsilatı"].map((t, i) => h("th", { class: i > 1 ? "num" : "", text: t })))),
+        h("tbody", null, campRows.length ? campRows.map((c) => h("tr", null,
+          h("td", null,
+            h("b", { text: c.name }),
+            c.tracking_url ? h("div", { style: "font-size:12px;color:var(--teal);margin-top:2px" },
+              h("code", { text: `/c/${c.code}` }),
+              " ",
+              h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => copyText(c.tracking_url, "Kampanya takip linki kopyalandı") } }, "Linki Kopyala")
+            ) : null
+          ),
+          h("td", null, tag(PATIENT_SOURCE_MAP[c.channel || c.source] || c.channel || c.source, "teal")),
+          h("td", { class: "num", text: `${c.unique_clicks !== undefined ? c.unique_clicks : c.clicks}${c.bot_clicks ? " (+" + c.bot_clicks + " bot)" : ""}` }),
+          h("td", { class: "num", text: c.form_submits !== undefined ? `${c.form_submits}/${c.form_starts || 0}` : "-" }),
+          h("td", { class: "num", text: c.patients_created !== undefined ? c.patients_created : (c.conversations || 0) }),
+          h("td", { class: "num", text: c.appointments_booked || 0 }),
+          h("td", { class: "num", text: fmtTL(c.collected_revenue_try !== undefined ? c.collected_revenue_try : c.revenue_try) })
+        )) : h("tr", null, h("td", { colSpan: 7, class: "empty", text: "Henüz kampanya kaydı yok." })))
       ), "Reklam kampanyaları tablosu"))
     );
   };

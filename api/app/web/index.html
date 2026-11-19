@@ -63,11 +63,10 @@
       "publisher": { "@id": "/#organization" },
       "description": "16 dilde WhatsApp ve Instagram hasta karşılama, bekleme listesi koltuk doldurma, kırmızı bayraklı dijital anamnez, iPhone/Android takvim, çok şubeli zincir yönetimi, kasa ve envanter platformu.",
       "offers": {
-        "@type": "AggregateOffer",
+        "@type": "Offer",
         "priceCurrency": "TRY",
-        "lowPrice": "3900",
-        "highPrice": "8900",
-        "offerCount": "3"
+        "price": "3500",
+        "description": "Tek Paket Kurumsal Klinik Aboneliği: 3.500 TL + KDV / ay (Tüm modüller ve sınırsız kullanıcı dahil)"
       }
     },
     {
@@ -366,23 +365,23 @@
 
   <section class="sec surface-alt" id="takvim">
     <div class="wrap">
-      <h2>iPhone, Android ve Google Takvim ile çift yönlü düzen</h2>
-      <p class="sec-sub">Koltuk çakışması veritabanı kilidiyle sunucuda engellenir. Her şubenin imzalı takvim akışı hekimin telefonuna dakikalar içinde bağlanır.</p>
+      <h2>iPhone, Android ve Google Takvim ile RFC 5545 güvenli senkronizasyon</h2>
+      <p class="sec-sub">Koltuk ve hekim çakışması veritabanı kilidiyle sunucuda engellenir. Her şubenin imzalı <code>webcal://</code> takvim akışı hekimin telefonuna tek yönlü (salt-okunur) ve KVKK maskeli olarak bağlanır.</p>
 
       <div class="cal-grid">
         <article class="cal-card">
-          <h3>iPhone (Apple Takvim)</h3>
-          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. Takvim her 15 dakikada bir yenilenir; hasta adı, işlem, koltuk numarası ve varsa kırmızı bayrak uyarısı etkinlik notunda görünür.</p>
+          <h3>iPhone (Apple Takvim · Tek Yönlü ICS)</h3>
+          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. KVKK gereği dış takvim beslemesinde tıbbi işlem adı veya anamnez detayı paylaşılmaz; yalnızca maskeli hasta baş harfleri ve koltuk numarası görünür.</p>
           <ul>
             <li>60 dk ve 15 dk öncesinde çift <code>VALARM</code> bildirimi</li>
-            <li>İptal edilen randevu takvimden otomatik düşer</li>
+            <li>RFC 5545 <code>SEQUENCE</code> ve sabit <code>UID</code> ile iptal/saat güncellemesi (yenileme sıklığı iOS ayarlarına bağlıdır)</li>
           </ul>
         </article>
         <article class="cal-card">
           <h3>Android (Google Takvim)</h3>
           <p>Hem tüm klinik takvimine <code>google_subscribe_url</code> ile abone olunabilir hem de paneldeki her randevu satırından tek tıkla Google Takvim etkinliği açılabilir.</p>
           <ul>
-            <li>Özel HMAC imzalı URL, parola gerektirmez</li>
+            <li>90 gün süreli HMAC imzalı URL, tek tıkla iptal/yenileme (rotasyon)</li>
             <li>Klinik adresi etkinlik konumuna otomatik işlenir</li>
           </ul>
         </article>
@@ -390,7 +389,7 @@
           <h3>Toplu ve Tekil <code>.ics</code> İndirme</h3>
           <p>Outlook, macOS Takvim veya arşiv için tek randevuyu ya da tüm şube programını (<code>all.ics</code>) standart RFC 5545 biçiminde dışa aktarabilirsiniz.</p>
           <ul>
-            <li>Aylık ve haftalık görünüm arasında anlık geçiş</li>
+            <li>Aylık, haftalık ve günlük görünüm arasında anlık geçiş</li>
             <li>Yeni klinik açılışında teslim kartıyla hazır link</li>
           </ul>
         </article>
@@ -588,44 +587,22 @@
 
   <section class="sec surface-alt" id="fiyat">
     <div class="wrap">
-      <h2>Sade fiyat, sürpriz yok</h2>
-      <p class="sec-sub">Tüm paketlerde ilk ay ve kurulum ücretsiz, kullanıcı ve hekim sayısı sınırsız, aylık planda istediğiniz an iptal.</p>
+      <h2>Tek paket, şeffaf fiyat, tüm modüller dahil</h2>
+      <p class="sec-sub">Modül başına ek ücret, hekim başı lisans farkı veya gizli kurulum bedeli yok. İlk ay ve kurulum ücretsiz, istediğiniz an iptal.</p>
       <div class="prices">
-        <article class="price">
-          <h3>Temel</h3>
-          <div class="price-val"><b>3.900 TL</b><span>+ KDV / ay</span></div>
-          <ul>
-            <li>Takvim (iPhone + Android), hasta kartı, kasa, envanter</li>
-            <li>Otomatik hatırlatma ve randevu teyidi</li>
-            <li>Kırmızı bayraklı dijital anamnez ve KVKK onam</li>
-            <li>Personel WhatsApp asistanı</li>
-          </ul>
-          <a class="btn btn-ghost" href="#demo">Temel ile başlayın</a>
-        </article>
         <article class="price best">
-          <h3>Klinik</h3>
-          <span class="flag">En çok tercih edilen</span>
-          <div class="price-val"><b>5.900 TL</b><span>+ KDV / ay</span></div>
+          <h3>DentaCore Kurumsal Tek Paket</h3>
+          <span class="flag">Tüm Klinik ve Otomasyon Modülleri Dahil</span>
+          <div class="price-val"><b>3.500 TL</b><span>+ KDV / ay</span></div>
           <ul>
-            <li>Temel paketin tamamı</li>
-            <li>7/24 yapay zeka karşılama (WhatsApp + Instagram, 16 dil)</li>
-            <li>Bekleme listesi boş koltuk doldurucu</li>
-            <li>İşlem sonrası takip ve uyuyan hasta geri kazanımı</li>
-            <li>Aylık 3.000 yapay zeka yanıtı dahil (SSS’ler sınırsız)</li>
+            <li>Sınırsız hekim, sekreter ve 14 personel meslek/yetki (RBAC) tanımı</li>
+            <li>52 diş (32 erişkin + 20 süt) SVG odontogram, 5 yüzey, periodontal çizelge</li>
+            <li>10 kalem kuruş-kesin finans, avans mahsubu, taksit ve günlük kasa kapanışı</li>
+            <li>7/24 WhatsApp ve Instagram 16 dil hasta karşılama + bekleme listesi koltuk doldurma</li>
+            <li>Gerçek kampanya tıklama (/c/kod), bot filtresi ve kasa tahsilat dönüşüm hunisi</li>
+            <li>Kırmızı bayraklı dijital anamnez, dijital tedavi planı onamı, laboratuvar ve implant/lot pasaportu</li>
           </ul>
-          <a class="btn btn-cta" href="#demo">Ücretsiz deneyin</a>
-        </article>
-        <article class="price">
-          <h3>Grup / Zincir</h3>
-          <div class="price-val"><b>8.900 TL</b><span>+ KDV / ay</span></div>
-          <ul>
-            <li>Klinik paketinin tamamı</li>
-            <li>Çok şubeli merkez yönetim ve tam veri izolasyonu</li>
-            <li>Kendi sunucunuza kurulum ve şifreli yedekleme</li>
-            <li>Hekim sesiyle karşılama (yazılı onayla) ve görsel QC</li>
-            <li>Adil kullanım sınırında sınırsız yapay zeka yanıtı</li>
-          </ul>
-          <a class="btn btn-ghost" href="#demo">Kurumsal görüşelim</a>
+          <a class="btn btn-cta" href="#demo">Ücretsiz tanıtım ve kurulum talep edin</a>
         </article>
       </div>
     </div>
