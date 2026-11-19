@@ -1948,6 +1948,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
 
     @app.post("/form/tedavi-onay/{token}", response_class=HTMLResponse)
     async def submit_treatment_consent_form(token: str, request: Request):
+        _rate_limit(f"tc_sign:{client_ip(request)}", 10, 60)
         tc = q1("SELECT * FROM treatment_consents WHERE token=?", token)
         if not tc:
             raise HTTPException(404, "Onay belgesi bulunamadı")
@@ -1965,14 +1966,17 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             except Exception:
                 raise HTTPException(410, "Geçersiz veya süresi dolmuş onam bağlantısı")
         form = dict(await request.form())
+        if not _verify_form_csrf(token, str(form.get("csrf_token") or "")):
+            raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş; lütfen sayfayı yenileyin")
         signer = (str(form.get("signer_name") or "")).strip()
         accepted = str(form.get("accept_plan") or "") in ("1", "true", "on")
         if not accepted or len(signer) < 2:
             return HTMLResponse("<!doctype html><meta charset=utf-8><body><h2>Lütfen onay kutusunu işaretleyin ve adınızı soyadınızı yazın.</h2></body>", status_code=400)
+        if len(signer) > 80:
+            raise HTTPException(400, "İmza adı en fazla 80 karakter olabilir")
         t_now = iso_now()
         sig_payload = json.dumps({"signer": signer, "signed_at": t_now, "sha256": tc["content_sha256"]}, ensure_ascii=False)
-        with db_lock:
-            c = db()
+        with db_lock, db() as c:
             cur = c.execute(
                 "UPDATE treatment_consents SET signer_name=?, signature_svg_enc=?, status='signed', signed_at=? WHERE id=? AND status='pending'",
                 (signer, enc(sig_payload), t_now, tc["id"]),
@@ -2148,13 +2152,16 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         if not row:
             raise HTTPException(404, "dosya kaydı bulunamadı")
         enc_fn = Path(row["encrypted_path"]).name
-        fp = _media_dir() / enc_fn
+        allowed_roots = (_media_dir().resolve(), (root_dir / "encrypted_media").resolve())
+        fp = (allowed_roots[0] / enc_fn).resolve()
         if not fp.is_file():
-            fp_root = root_dir / "encrypted_media" / enc_fn
-            fp = fp_root if fp_root.is_file() else (root_dir / row["encrypted_path"])
+            fp_alt = (allowed_roots[1] / enc_fn).resolve()
+            fp = fp_alt if fp_alt.is_file() else (root_dir / row["encrypted_path"]).resolve()
+        if not any(fp.is_relative_to(ar) for ar in allowed_roots):
+            raise HTTPException(403, "Geçersiz medya dosya yolu")
         if not fp.is_file():
             raise HTTPException(404, "şifreli medya dosyası diskte bulunamadı")
-        raw_bytes = fernet_obj.decrypt(fp.read_bytes())
+        raw_bytes = _get_fernet().decrypt(fp.read_bytes())
         mime_t = row.get("mime_type") or "application/octet-stream"
         disp_mode = "inline" if mime_t.startswith("image/") and "svg" not in mime_t.lower() else "attachment"
         safe_fn = re.sub(r"[^a-zA-Z0-9._-]", "_", row.get("original_filename") or "media.bin")[:120] or "media.bin"
@@ -2235,6 +2242,9 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             "UPDATE staff_users SET job_title=?, role=?, share_pct=?, permissions_json=?, working_schedule_json=? WHERE id=? AND clinic_id=?",
             new_jt, new_role, new_share, json.dumps(cur_perms, ensure_ascii=False), json.dumps(cur_sched, ensure_ascii=False), sid, cid,
         )
+        # Rol değiştiğinde (ör. yetki/rol düşürme veya no_access) hedef kullanıcının eski oturumlarını anında iptal et (OWASP ASVS L2.2)
+        if sid != u["id"] and new_role != st["role"]:
+            ex("UPDATE sessions SET revoked=1 WHERE user_id=?", sid)
         eff = resolve_permissions(new_role, new_jt, cur_perms)
         write_audit(u["id"], u["email"], "staff.permissions_update", f"staff:{sid}", u["ip_h"],
                     {"job_title": new_jt, "role": new_role, "permissions": cur_perms}, clinic_id=cid)
@@ -2287,9 +2297,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     # 11) SATIŞ CRM (LEADS), ONLİNE RANDEVU SAYFASI VE CSV RAPOR DIŞA AKTARMA (BÖLÜM 15, 18, 19)
     # ------------------------------------------------------------------
     @app.get("/app/api/leads")
-    def list_sales_leads(u: dict = Depends(require_perm("campaign_manage"))):
-        if not u.get("is_hq") and u["clinic_id"] != 1:
-            raise HTTPException(403, "Platform satış talepleri (leads) yalnızca Merkez (HQ) yetkisindedir")
+    def list_sales_leads(u: dict = Depends(hq_owner)):
         rows = q("SELECT * FROM leads ORDER BY id DESC LIMIT 200")
         for r in rows:
             try:
@@ -2299,26 +2307,35 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             r["yurt_disi_riza"] = bool(r.get("yurt_disi_riza", 0))
         return rows
 
-    @app.get("/randevu/{clinic_slug}", response_class=HTMLResponse)
-    def public_online_booking_page(clinic_slug: str):
-        cl = q1("SELECT id, name, city, address, phone FROM clinics WHERE slug=? AND active=1", clinic_slug)
-        if not cl and clinic_slug in ("merkez", "merkez-poliklinik"):
-            cl = q1("SELECT id, name, city, address, phone, slug FROM clinics WHERE id=1 AND active=1")
-        if not cl:
-            raise HTTPException(404, "klinik bulunamadı")
-        return HTMLResponse(f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>{html.escape(cl['name'])} · Online Randevu</title></head>
-        <body style="font-family:system-ui;background:#F8FAFC;color:#0A2540;padding:16px">
-        <main style="max-width:520px;margin:auto;background:#fff;padding:20px;border-radius:12px;border:1px solid #E2E8F0">
-        <h1 style="font-size:20px;margin-top:0">{html.escape(cl['name'])} · Online Randevu</h1>
-        <p style="color:#475569;font-size:14px">{html.escape(cl['address'] or cl['city'])}</p>
-        <p style="font-size:14px">Online randevu oluşturmak için bilgilerinizi girin; koltuk uygunluğu anında kontrol edilir.</p>
-        </main></body></html>""")
+    def _validate_public_booking_slot(cl: dict, st_dt_utc: datetime, end_dt_utc: datetime) -> None:
+        if st_dt_utc < now_utc() + timedelta(minutes=15):
+            raise HTTPException(422, "Geçmiş veya 15 dakikadan daha yakın bir saate online randevu alınamaz")
+        local_s = st_dt_utc.astimezone(TZ)
+        local_e = end_dt_utc.astimezone(TZ)
+        try:
+            wh = json.loads(cl.get("working_hours_json") or "{}")
+        except Exception:
+            wh = {}
+        wd = local_s.weekday()
+        slot_rng = wh.get("sun") if wd == 6 else (wh.get("sat") if wd == 5 else wh.get("mon_fri", ["09:00", "19:00"]))
+        if not slot_rng or not isinstance(slot_rng, (list, tuple)) or len(slot_rng) != 2:
+            raise HTTPException(422, "Seçilen gün klinik çalışma takviminde kapalıdır")
+        try:
+            sh, sm = (int(x) for x in str(slot_rng[0]).split(":", 1))
+            eh, em = (int(x) for x in str(slot_rng[1]).split(":", 1))
+        except Exception:
+            sh, sm, eh, em = 9, 0, 19, 0
+        s_min = local_s.hour * 60 + local_s.minute
+        e_min = local_e.hour * 60 + local_e.minute
+        if local_s.date() != local_e.date() or s_min < (sh * 60 + sm) or e_min > (eh * 60 + em):
+            raise HTTPException(422, f"Seçilen saat klinik çalışma saatleri ({slot_rng[0]}-{slot_rng[1]}) dışındadır")
 
-    @app.post("/api/public/book/{clinic_slug}")
-    def public_online_book_appointment(clinic_slug: str, b: PublicBookIn, request: Request):
+    def _execute_public_booking(clinic_slug: str, b: PublicBookIn, request: Request) -> dict[str, Any]:
+        if (b.website or "").strip():
+            return {"ok": True, "appointment_id": None, "chair": None, "source": "website", "campaign_id": None}
         if not b.kvkk_consent:
             raise HTTPException(400, "KVKK aydınlatma onayı zorunludur")
+        _rate_limit(f"pub_book_ip:{client_ip(request)}", 5, 3600)
         cl = q1("SELECT * FROM clinics WHERE slug=? AND active=1", clinic_slug)
         if not cl and clinic_slug in ("merkez", "merkez-poliklinik"):
             cl = q1("SELECT * FROM clinics WHERE id=1 AND active=1")
@@ -2328,8 +2345,11 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         np = norm_phone(b.phone)
         if len(np) < 10:
             raise HTTPException(400, "Geçerli bir telefon numarası giriniz")
+        ph = phone_hmac(np)
+        _rate_limit(f"pub_book_ph:{cid}:{ph[:24]}", 3, 3600)
         st_dt = (b.starts_at if b.starts_at.tzinfo else b.starts_at.replace(tzinfo=TZ)).astimezone(timezone.utc)
         end_dt = st_dt + timedelta(minutes=30)
+        _validate_public_booking_slot(cl, st_dt, end_dt)
         det_src = detect_acquisition_source(b.source, b.utm_source, b.utm_medium, request.headers.get("referer"))
         camp = None
         if b.campaign_code:
@@ -2338,9 +2358,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             camp = q1("SELECT id FROM campaigns WHERE clinic_id=? AND (utm_campaign=? OR code=?)", cid, b.utm_campaign.strip(), b.utm_campaign.strip())
         camp_id = int(camp["id"]) if camp else None
 
-        with db_lock:
-            c = db()
-            # Koltuk çakışma kontrolü
+        with db_lock, db() as c:
             busy = c.execute(
                 "SELECT starts_at, duration_min, chair FROM appointments WHERE clinic_id=? AND status IN ('booked','confirmed')",
                 (cid,),
@@ -2367,14 +2385,15 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             if not chosen_chair:
                 raise HTTPException(409, "Seçilen saatte tüm koltuklar dolu; lütfen başka bir saat seçiniz")
 
-            ph = phone_hmac(np)
             t_now = iso_now()
-            ex_p = c.execute("SELECT id, first_source FROM patients WHERE clinic_id=? AND phone_hmac=?", (cid, ph)).fetchone()
+            ex_p = c.execute("SELECT id, first_source, active FROM patients WHERE clinic_id=? AND phone_hmac=?", (cid, ph)).fetchone()
             is_new_patient = False
             if ex_p:
+                if not ex_p["active"]:
+                    raise HTTPException(409, "Bu telefon numarası arşivlenmiş kayda aittir; randevu için lütfen kliniği doğrudan arayınız")
                 pid = ex_p["id"]
                 c.execute(
-                    "UPDATE patients SET last_source=?, campaign_id=COALESCE(?, campaign_id), active=1 WHERE id=?",
+                    "UPDATE patients SET last_source=?, campaign_id=COALESCE(?, campaign_id) WHERE id=?",
                     (det_src, camp_id, pid),
                 )
             else:
@@ -2405,7 +2424,72 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                         (cid, camp_id, ev_t, det_src, b.utm_source[:80], b.utm_medium[:80], b.utm_campaign[:120], v_hash, pid, aid, ua_s, t_now),
                     )
             c.commit()
-        return {"ok": True, "appointment_id": aid, "patient_id": pid, "chair": chosen_chair, "source": det_src, "campaign_id": camp_id}
+        return {"ok": True, "appointment_id": aid, "chair": chosen_chair, "source": det_src, "campaign_id": camp_id}
+
+    @app.get("/randevu/{clinic_slug}", response_class=HTMLResponse)
+    def public_online_booking_page(clinic_slug: str):
+        cl = q1("SELECT id, name, city, address, phone FROM clinics WHERE slug=? AND active=1", clinic_slug)
+        if not cl and clinic_slug in ("merkez", "merkez-poliklinik"):
+            cl = q1("SELECT id, name, city, address, phone, slug FROM clinics WHERE id=1 AND active=1")
+        if not cl:
+            raise HTTPException(404, "klinik bulunamadı")
+        min_dt = (datetime.now(TZ) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
+        return HTMLResponse(f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>{html.escape(cl['name'])} · Online Randevu</title>
+        <style>body{{font-family:system-ui,-apple-system,sans-serif;background:#F8FAFC;color:#0A2540;padding:16px;margin:0}}main{{max-width:520px;margin:20px auto;background:#fff;padding:24px;border-radius:14px;border:1px solid #E2E8F0}}label{{display:block;font-size:14px;font-weight:600;margin:12px 0 4px}}input,select{{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #CBD5E1;border-radius:8px;font-size:15px}}.hp{{position:absolute;left:-9999px;opacity:0}}.chk{{display:flex;align-items:flex-start;gap:8px;font-weight:400;margin:14px 0}}.chk input{{width:auto;margin-top:3px}}button{{width:100%;background:#0F766E;color:#fff;border:0;border-radius:10px;padding:13px;font-size:16px;font-weight:700;cursor:pointer}}</style></head>
+        <body><main>
+        <h1 style="font-size:20px;margin-top:0">{html.escape(cl['name'])} · Online Randevu</h1>
+        <p style="color:#475569;font-size:14px">{html.escape(cl['address'] or cl['city'])}</p>
+        <p style="font-size:14px">Online randevu oluşturmak için bilgilerinizi girin; koltuk uygunluğu anında kontrol edilir.</p>
+        <form method="post" action="/randevu/{html.escape(clinic_slug, quote=True)}">
+          <div class="hp" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+          <label for="name">Ad Soyad</label>
+          <input id="name" name="name" type="text" required minlength="2" maxlength="80" placeholder="Adınız ve soyadınız">
+          <label for="phone">Telefon Numarası</label>
+          <input id="phone" name="phone" type="tel" required minlength="10" maxlength="30" placeholder="05XX XXX XX XX">
+          <label for="starts_at">Randevu Tarihi ve Saati</label>
+          <input id="starts_at" name="starts_at" type="datetime-local" required min="{min_dt}">
+          <label for="treatment">Talep Edilen İşlem</label>
+          <select id="treatment" name="treatment">
+            <option value="İlk Muayene">İlk Muayene</option>
+            <option value="Diş Taşı Temizliği">Diş Taşı Temizliği</option>
+            <option value="İmplant Danışmanlığı">İmplant Danışmanlığı</option>
+            <option value="Zirkonyum / Estetik">Zirkonyum / Estetik</option>
+            <option value="Acil Ağrı Muayenesi">Acil Ağrı Muayenesi</option>
+          </select>
+          <label class="chk"><input type="checkbox" name="kvkk_consent" value="1" required> <span>KVKK aydınlatma metnini okudum ve randevu iletişimi için onay veriyorum.</span></label>
+          <button type="submit">Online Randevuyu Onayla</button>
+        </form>
+        </main></body></html>""")
+
+    @app.post("/randevu/{clinic_slug}", response_class=HTMLResponse)
+    async def public_online_booking_form_submit(clinic_slug: str, request: Request):
+        f = dict(await request.form())
+        raw_dt = str(f.get("starts_at") or "").strip()
+        try:
+            parsed_dt = datetime.fromisoformat(raw_dt)
+        except ValueError:
+            return HTMLResponse("<!doctype html><meta charset=utf-8><body><h2>Geçersiz tarih veya saat seçimi.</h2><p><a href=\"/randevu/" + html.escape(clinic_slug, quote=True) + "\">Geri Dön</a></p></body>", status_code=422)
+        payload = PublicBookIn(
+            name=str(f.get("name") or "").strip()[:80],
+            phone=str(f.get("phone") or "").strip()[:30],
+            starts_at=parsed_dt,
+            treatment=(str(f.get("treatment") or "İlk Muayene").strip()[:100] or "İlk Muayene"),
+            kvkk_consent=str(f.get("kvkk_consent") or "") in ("1", "true", "on"),
+            website=str(f.get("website") or "")[:200],
+        )
+        res = _execute_public_booking(clinic_slug, payload, request)
+        return HTMLResponse(
+            f"<!doctype html><html lang='tr'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Randevu Onayı</title></head>"
+            f"<body style='font-family:system-ui;background:#F8FAFC;color:#0A2540;padding:24px'><main style='max-width:520px;margin:auto;background:#fff;padding:24px;border-radius:12px;border:1px solid #CBD5E1'>"
+            f"<h1 style='font-size:20px;color:#0F766E'>Randevunuz Oluşturuldu</h1>"
+            f"<p>Randevu numaranız: <strong>#{html.escape(str(res.get('appointment_id') or '-'))}</strong> (Koltuk {html.escape(str(res.get('chair') or '-'))}).</p>"
+            f"<p><a href='/'>Ana Sayfaya Dön</a></p></main></body></html>"
+        )
+
+    @app.post("/api/public/book/{clinic_slug}")
+    def public_online_book_appointment(clinic_slug: str, b: PublicBookIn, request: Request):
+        return _execute_public_booking(clinic_slug, b, request)
 
     @app.post("/app/api/appointments/recurring")
     def create_recurring_appointments(b: RecurringAppointmentIn, u: dict = Depends(require_perm("patient_edit"))):
@@ -2532,9 +2616,11 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
 
 def register_enterprise_routes_for_pg(app: FastAPI) -> None:
     """PostgreSQL bulut katmanı (`api/app/main.py`) ile SQLite (`run_local.py`) arasında %100 uç ve çalışma zamanı eşitliği sağlar."""
+    import atexit
     import threading
     from . import core, panel
     _pg_lock = threading.RLock()
+    _pg_pool_holder: dict[str, Any] = {"pool": None, "url": ""}
     root_dir = Path(__file__).resolve().parents[2]
 
     def _sql_pg(sql: str) -> tuple[str, bool]:
@@ -2550,6 +2636,9 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
             s = re.sub(r"\bactive\s*=\s*0\b", "active=FALSE", s)
             if "insert into patients" in s_low and ",1,?)" in s:
                 s = s.replace(",1,?)", ",TRUE,?)")
+        if "sessions" in s_low:
+            s = re.sub(r"\brevoked\s*=\s*1\b", "revoked=TRUE", s)
+            s = re.sub(r"\brevoked\s*=\s*0\b", "revoked=FALSE", s)
         s = s.replace("?", "%s")
         is_ins = s.upper().startswith("INSERT ") and "RETURNING" not in s.upper() and not had_or_ignore
         return s, is_ins
@@ -2567,9 +2656,11 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
             return self._cur.fetchall()
 
     class _PgCompatConn:
-        def __init__(self, raw_conn: Any, is_pg: bool):
+        def __init__(self, raw_conn: Any, is_pg: bool, pool: Any = None):
             self._raw = raw_conn
             self._is_pg = is_pg
+            self._pool = pool
+            self._released = False
 
         def execute(self, sql: str, params: Any = ()) -> _PgCompatCursor:
             if not self._is_pg:
@@ -2591,7 +2682,13 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
             self._raw.rollback()
 
         def close(self) -> None:
-            self._raw.close()
+            if self._released:
+                return
+            self._released = True
+            if self._pool is not None:
+                self._pool.putconn(self._raw)
+            else:
+                self._raw.close()
 
         def __enter__(self):
             return self
@@ -2603,14 +2700,31 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
                 else:
                     self._raw.rollback()
             finally:
-                self._raw.close()
+                self.close()
+
+    def _get_pg_pool(db_url: str):
+        with _pg_lock:
+            if _pg_pool_holder["pool"] is not None and _pg_pool_holder["url"] == db_url:
+                return _pg_pool_holder["pool"]
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+            pool = ConnectionPool(
+                conninfo=db_url,
+                min_size=1,
+                max_size=10,
+                kwargs={"row_factory": dict_row},
+                open=True,
+            )
+            _pg_pool_holder["pool"] = pool
+            _pg_pool_holder["url"] = db_url
+            atexit.register(lambda p=pool: p.close())
+            return pool
 
     def _get_conn() -> _PgCompatConn:
         db_url = os.environ.get("DATABASE_URL", "")
         if db_url.startswith("postgres"):
-            import psycopg
-            from psycopg.rows import dict_row
-            return _PgCompatConn(psycopg.connect(db_url, row_factory=dict_row), True)
+            pool = _get_pg_pool(db_url)
+            return _PgCompatConn(pool.getconn(), True, pool=pool)
         db_p = os.environ.get("DC_DB_PATH") or str(root_dir / "dentacore_local.db")
         c = sqlite3.connect(db_p, check_same_thread=False)
         c.row_factory = sqlite3.Row
@@ -2670,6 +2784,9 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
             "client_ip": panel.client_ip,
             "root_dir": root_dir,
             "fernet": core.fernet() if os.environ.get("DATA_ENCRYPTION_KEY") else None,
+            "fernet_factory": core.fernet,
+            "phone_hmac_key": core.S.phone_hmac_key,
+            "limiter": lambda: panel.limiter,
         },
     )
 
