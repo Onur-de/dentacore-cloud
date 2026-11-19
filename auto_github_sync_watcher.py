@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 
-ROOT = pathlib.Path(r"C:\Users\onura\OneDrive\Masaüstü\Kurumsal-Otomasyon-Sistemi")
+ROOT = pathlib.Path(r"C:\Users\onura\OneDrive\Masaüstü\Gerçek kurumsal otomasyon")
 SRC_WEB = ROOT / "4_SISTEM_MOTORU_DOKUNMA" / "dentacore" / "api" / "app" / "web"
 SRC_WA = ROOT / "WhatsApp_Gonderim"
 TARGET = ROOT / "5_KALICI_GITHUB_VE_BULUT_KURULUMU"
