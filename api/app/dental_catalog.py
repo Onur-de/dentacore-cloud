@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
@@ -339,8 +339,8 @@ def resolve_permissions(role: str | None, job_title: str | None = None, custom_j
                 for k, v in overrides.items():
                     if k in PERMISSION_KEYS:
                         base[k] = bool(v)
-        except Exception:
-            pass
+        except (ValueError, TypeError):
+            return base
     return base
 
 

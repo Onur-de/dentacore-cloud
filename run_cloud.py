@@ -31,7 +31,9 @@ else:
     app = run_local.app
 
 if __name__ == "__main__":
-    host = os.environ.get("DC_HOST", "0.0.0.0")
+    # Konteyner/PaaS (Render/Railway) PORT verdiğinde 0.0.0.0 gerekir; yerel çalıştırmada 127.0.0.1 güvenli varsayılandır.
+    default_host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"  # nosec B104  # noqa: S104
+    host = os.environ.get("DC_HOST", default_host)
     port = int(os.environ.get("PORT", os.environ.get("DC_PORT", "8000")))
     workers = int(os.environ.get("WEB_CONCURRENCY", "2")) if USE_PG else 1
     target = "app.main:app" if USE_PG else app

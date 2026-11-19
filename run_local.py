@@ -109,16 +109,11 @@ os.environ.setdefault("LLM_MAIN_MODEL", "free-auto")
 os.environ.setdefault("CLINIC_NAME", "Özel DentaCore Merkez Polikliniği")
 
 sys.path.insert(0, str(API_DIR))
-from app import cal, enterprise_ext as ent, media, security as sec, wa  # noqa: E402
+from app import cal, enterprise_ext as ent, ig, media, security as sec, wa  # noqa: E402
 from app.dental_catalog import (  # noqa: E402
-    FDI_TOOTH_CATALOG,
-    ODO_ALL_STATUSES,
-    ODO_BILLABLE_STATUSES,
-    ODO_PLANNED_STATUSES,
     PATIENT_SOURCE_LABELS,
     PERMISSION_KEYS,
     STAFF_PROFESSIONS,
-    compute_ai_cost_report,
     compute_bank_discount,
     detect_acquisition_source,
     is_bot_traffic,
@@ -1149,8 +1144,8 @@ async def _lifespan(_app: FastAPI):
         if _WEBHOOK_QUEUE is not None and _WEBHOOK_WORKERS:
             try:
                 await asyncio.wait_for(_WEBHOOK_QUEUE.join(), timeout=5.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Webhook kuyruğu kapanış beklemesi zaman aşımı: %s", exc)
         for w in _WEBHOOK_WORKERS:
             w.cancel()
         _WEBHOOK_WORKERS.clear()
@@ -1866,7 +1861,7 @@ async def _handle_patient_reply(
     # P0-6: "DURDUR/STOP" → iletişim izni geri alınır, otomatik mesajlar durur (tek seferlik teyit cevabı verilir).
     if not payload and cleaned in _OPTOUT_WORDS:
         t_now = iso_now()
-        n = ex("UPDATE consents SET revoked_at=? WHERE patient_id=? AND kind='iletisim' AND revoked_at IS NULL", t_now, pid)
+        ex("UPDATE consents SET revoked_at=? WHERE patient_id=? AND kind='iletisim' AND revoked_at IS NULL", t_now, pid)
         if not q1("SELECT 1 FROM consents WHERE patient_id=? AND kind='iletisim' AND revoked_at IS NOT NULL LIMIT 1", pid):
             ex("INSERT INTO consents (patient_id,kind,text_version,text_sha256,channel,granted_at,revoked_at) VALUES (?,?,?,?,?,?,?)",
                pid, "iletisim", "opt_out_kaydi", "-", channel, t_now, t_now)

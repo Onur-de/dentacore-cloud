@@ -46,10 +46,12 @@ def _free_port() -> int:
 def _wait_http(url: str, timeout: float = 15.0) -> None:
     import urllib.request
 
+    if not url.startswith(("http://127.0.0.1:", "http://localhost:")):
+        raise ValueError(f"Beklenmeyen yerel URL şeması: {url}")
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=2) as r:
+            with urllib.request.urlopen(url, timeout=2) as r:  # noqa: S310
                 if r.status == 200:
                     return
         except Exception:
@@ -155,7 +157,7 @@ def main() -> None:
     env["DC_PORT"] = str(live_port)
     env["DC_ALLOW_HTTP_LOCAL"] = "1"
 
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # noqa: S603
         [sys.executable, "-X", "utf8", "run_local.py"],
         cwd=str(DENTACORE_DIR),
         env=env,

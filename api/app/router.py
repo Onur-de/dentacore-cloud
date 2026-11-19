@@ -345,7 +345,7 @@ MULTILINGUAL_TYPO_TOKEN_MAP: dict[str, str] = {
     # Felemenkçe (NL) yazım hataları
     "goedemrgen": "goedemorgen", "afsprak": "afspraak", "afsprk": "afspraak",
     "implntaat": "implantaat", "openingstjden": "openingstijden", "parkern": "parkeren",
-    "prjs": "prijs", "ksten": "kosten", "tndarts": "tandarts",
+    "prjs": "prijs", "tndarts": "tandarts",
     # İspanyolca (ES) yazım hataları
     "hla": "hola", "bunos": "buenos", "cunto": "cuanto", "csta": "cuesta", "prcio": "precio",
     "implnte": "implante", "clnica": "clinica", "dnde": "donde", "direcion": "direccion",
@@ -370,7 +370,7 @@ MULTILINGUAL_TYPO_TOKEN_MAP: dict[str, str] = {
     # Arapça (AR) & Farsça (FA) yaygın harf/همزه/هاء yazım varyasyonları
     "العياده": "العيادة", "عياده": "عيادة", "زراعه": "زراعة", "الاسنان": "الأسنان", "اسنان": "أسنان",
     "تكلفه": "تكلفة", "التكلفه": "التكلفة", "اشعه": "أشعة", "صوره": "صورة", "اطفال": "أطفال",
-    "ادرس": "آدرس", "ايمپلنت": "ایمپلنت", "ايمپلنت": "ایمپلنت", "کلينيک": "کلینیک", "چقدره": "چقدر",
+    "ادرس": "آدرس", "ايمپلنت": "ایمپلنت", "کلينيک": "کلینیک", "چقدره": "چقدر",
     # Yunanca (EL) & İbranice (HE) yazım hataları
     "καλημρα": "καλημερα", "κοστζει": "κοστιζει", "εμφυτεμα": "εμφυτευμα", "εμφτευμα": "εμφυτευμα",
     "κλινκη": "κλινικη", "ραντεβυ": "ραντεβου", "παρκνγκ": "παρκινγκ", "διευθνση": "διευθυνση",
@@ -760,8 +760,8 @@ class TokenRouter:
                     for k, v in parsed.items():
                         if v is not None and str(v).strip() != "":
                             rules[k] = v
-            except Exception:
-                pass
+            except (ValueError, TypeError):
+                return rules
         elif isinstance(raw, dict):
             for k, v in raw.items():
                 if v is not None and str(v).strip() != "":
@@ -1105,7 +1105,7 @@ class TokenRouter:
 
     @staticmethod
     def _cos(a, b) -> float:
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         na = math.sqrt(sum(x * x for x in a)); nb = math.sqrt(sum(y * y for y in b))
         return dot / (na * nb) if na and nb else 0.0
 
@@ -1177,7 +1177,7 @@ class TokenRouter:
         high_value = bool(self.kw["yuksek_deger"].search(n) or (prev_norm and self.kw["yuksek_deger"].search(prev_norm)))
 
         # Katman-1a: Acil durum triyajı (16 dil + bulanık acil kontrolü; her şeyden önce gelir!)
-        for lg, pat in self.emerg.items():
+        for _lg, pat in self.emerg.items():
             if pat.search(n) or pat.search(n_raw):
                 ans = self._pick(self.emerg_ans, lang, effective_facts)
                 if sess is not None:
@@ -1385,8 +1385,8 @@ class TokenRouter:
                 if cand in LABELS:
                     label, layer2 = cand, "L2-kucuk-model"
                     await self.cache.set(lkey, cand, ex=30 * 86400)
-            except Exception:
-                pass
+            except (ValueError, TypeError):
+                return rules
 
         if label == "fiyat" and not self.price_on:
             return RouteResult(

@@ -161,8 +161,8 @@ def _feed_key(secret: str | None = None) -> bytes:
             file_val = data.get("CALENDAR_SECRET") or data.get("ADMIN_TOKEN")
             if file_val:
                 return str(file_val).encode()
-        except Exception:
-            pass
+        except (OSError, ValueError):
+            file_val = None
     if _EPHEMERAL_FEED_KEY is None:
         _EPHEMERAL_FEED_KEY = secrets.token_bytes(32)
     return _EPHEMERAL_FEED_KEY

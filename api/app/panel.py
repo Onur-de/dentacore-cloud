@@ -22,7 +22,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 
 from . import cal, media, modules, security as sec
-from .core import (S, add_alert, dec, dec_msg_body, enc, env, has_consent, ip_hash, log_msg, mask_phone, norm_phone, phone_hmac, q, q1, tx, upsert_patient)
+from .core import (S, add_alert, dec, dec_msg_body, enc, env, has_consent, ip_hash, log_msg, norm_phone, phone_hmac, q, q1, tx, upsert_patient)
 from .dental_catalog import (PATIENT_SOURCE_LABELS, PERMISSION_LABELS_TR, detect_acquisition_source, is_bot_traffic, resolve_permissions)
 from .router import TokenRouter
 

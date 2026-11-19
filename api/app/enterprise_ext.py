@@ -837,7 +837,6 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     dec = ctx["dec"]
     norm_phone = ctx["norm_phone"]
     phone_hmac = ctx["phone_hmac"]
-    mask_phone = ctx["mask_phone"]
     tl = ctx["tl"]
     kurus = ctx["kurus"]
     iso_now = ctx["iso_now"]
@@ -1806,7 +1805,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                 raise HTTPException(400, f"Geçersiz FDI diş numarası: {fdi_str}")
             if fdi_num not in VALID_FDI_NUMBERS:
                 raise HTTPException(400, f"Geçersiz FDI diş numarası: {fdi_num}")
-            cal_vals = [int(p) + int(g) for p, g in zip(tm.pd, tm.gm)]
+            cal_vals = [int(p) + int(g) for p, g in zip(tm.pd, tm.gm, strict=False)]
             all_pds.extend(int(x) for x in tm.pd)
             all_bop.extend(bool(x) for x in tm.bop)
             all_plq.extend(bool(x) for x in tm.plaque)
@@ -2187,8 +2186,8 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                 fp = d_cand / enc_fn
                 if fp.is_file():
                     fp.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except OSError as exc:
+            log.debug("Medya dosyası silinirken uyarı: %s", exc)
         ex("DELETE FROM patient_media WHERE id=? AND clinic_id=?", mid, cid)
         write_audit(u["id"], u["email"], "patient.media_delete", f"patient:{pid}:media:{mid}", u["ip_h"], clinic_id=cid)
         return {"ok": True}
