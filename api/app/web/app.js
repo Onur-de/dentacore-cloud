@@ -3634,7 +3634,7 @@
   VIEWS.settings = async () => {
     const [s, eco] = await Promise.all([
       api("/app/api/settings"),
-      api("/app/api/ecosystem-status").catch(() => null),
+      (S.user && S.user.is_hq) ? api("/app/api/ecosystem-status").catch(() => null) : Promise.resolve(null),
     ]);
     const owner = S.user.role === "owner";
 
