@@ -5949,7 +5949,7 @@ ent.register_enterprise_routes(
         "root_dir": ROOT,
         "fernet": _FERNET,
         "phone_hmac_key": _HMAC_KEY,
-        "limiter": _LIMITER,
+        "limiter": lambda: _LIMITER,
     },
 )
 

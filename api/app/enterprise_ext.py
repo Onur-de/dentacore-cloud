@@ -30,6 +30,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Callable, Literal
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -844,7 +845,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     root_dir: Path = ctx["root_dir"]
     fernet_obj = ctx.get("fernet")
     _fernet_factory = ctx.get("fernet_factory")
-    _limiter = ctx.get("limiter") or sec.RateLimiter()
+    _limiter_src = ctx.get("limiter") or sec.RateLimiter()
     _vh_raw = ctx.get("phone_hmac_key")
     # Ziyaretçi özet anahtarı: çalışma zamanı PHONE_HMAC_KEY; yoksa süreç başına rastgele (sabit metin yok, CWE-798)
     _visitor_key: bytes = (_vh_raw.encode() if isinstance(_vh_raw, str) else _vh_raw) or secrets.token_bytes(32)
@@ -859,7 +860,8 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         return fernet_obj
 
     def _rate_limit(key: str, limit: int, window: int) -> None:
-        if not _limiter.hit_sync(key, limit, window):
+        lim = _limiter_src if isinstance(_limiter_src, sec.RateLimiter) else _limiter_src()
+        if not lim.hit_sync(key, limit, window):
             raise HTTPException(429, "Çok fazla istek gönderildi; lütfen daha sonra tekrar deneyin")
 
     def hq_owner(u: dict = Depends(current_user)) -> dict:
@@ -1124,8 +1126,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         if grp["is_restricted"] and len(b.reason.strip()) < 3:
             raise HTTPException(400, f"'{grp['name']}' etiketi için nesnel bir neden/açıklama (en az 3 karakter) girilmesi zorunludur")
         t_now = iso_now()
-        with db_lock:
-            c = db()
+        with db_lock, db() as c:
             c.execute(
                 """INSERT INTO patient_group_members (clinic_id,patient_id,group_id,reason,added_by,added_by_name,added_at)
                    VALUES (?,?,?,?,?,?,?)
@@ -1153,7 +1154,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         ip = client_ip(request)
         ua = (request.headers.get("user-agent") or "")[:160]
         day_s = date.today().isoformat()
-        secret = (os.environ.get("PHONE_HMAC_KEY") or "dc-visitor-hmac").encode()
+        secret = _visitor_key
         return hmac.new(secret, f"v:{campaign_id or 0}:{day_s}:{ip}:{ua}".encode(), hashlib.sha256).hexdigest()[:32]
 
     def _record_campaign_event(
@@ -1177,8 +1178,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         v_hash = _visitor_hash(request, campaign_id)
         t_now = iso_now()
 
-        with db_lock:
-            c = db()
+        with db_lock, db() as c:
             if idempotency_key:
                 dup = c.execute(
                     "SELECT id FROM campaign_events WHERE clinic_id=? AND idempotency_key=?",
@@ -1221,6 +1221,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         ttclid: str = "",
         format: str = "",
     ):
+        _rate_limit(f"camp_click:{client_ip(request)}", 20, 60)
         camp = q1("SELECT * FROM campaigns WHERE code=? ORDER BY id DESC LIMIT 1", code.strip())
         if not camp:
             raise HTTPException(404, "kampanya takip bağlantısı bulunamadı")
@@ -1242,9 +1243,14 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             request, cid, camp["id"], "click", det_src,
             utm_source=eff_us, utm_medium=eff_um, utm_campaign=eff_uc, click_id=click_id,
         )
-        target = f"/?dc_cid={camp['id']}&dc_code={camp['code']}&utm_source={eff_us}&utm_medium={eff_um}&utm_campaign={eff_uc}&source={det_src}"
+        q_params = {
+            "dc_cid": camp["id"], "dc_code": camp["code"], "utm_source": eff_us, "utm_medium": eff_um,
+            "utm_campaign": eff_uc, "source": det_src,
+        }
         if click_id:
-            target += f"&click_id={click_id}"
+            q_params["click_id"] = click_id
+        # Tüm parametreler urlencode ile kodlanır: '&' / '=' enjeksiyonu Location başlığına sızamaz (CWE-74)
+        target = "/?" + urlencode(q_params)
         if format == "json" or "application/json" in (request.headers.get("accept") or ""):
             return {
                 "ok": True,
@@ -1259,6 +1265,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
 
     @app.post("/api/campaigns/track")
     def track_campaign_event_public(b: CampaignTrackIn, request: Request):
+        _rate_limit(f"camp_track:{client_ip(request)}", 20, 60)
         camp = None
         if b.campaign_id:
             camp = q1("SELECT * FROM campaigns WHERE id=?", b.campaign_id)
