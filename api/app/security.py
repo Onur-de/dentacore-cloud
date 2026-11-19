@@ -59,7 +59,7 @@ STRIP = {b"server", b"x-powered-by"}
 
 
 class SecurityHeadersMiddleware:
-    """Saf ASGI ara katmanı: her yanıta güvenlik başlıklarını ekler, sunucu kimliğini siler."""
+    """Saf ASGI ara katmanı: her yanıta güvenlik başlıkları ve X-Request-ID ekler, sunucu kimliğini siler."""
 
     def __init__(self, app):
         self.app = app
@@ -69,12 +69,24 @@ class SecurityHeadersMiddleware:
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
         no_store = path.startswith(NO_STORE_PREFIXES)
+        req_id = ""
+        for hk, hv in scope.get("headers") or ():
+            if hk.lower() == b"x-request-id":
+                cand = hv.decode("ascii", errors="ignore").strip()[:32]
+                if cand and all(ch.isalnum() or ch in "-_" for ch in cand):
+                    req_id = cand
+                break
+        if not req_id:
+            req_id = secrets.token_hex(8)
+        req_id_bytes = req_id.encode("ascii")
 
         async def _send(msg):
             if msg["type"] == "http.response.start":
                 hdrs = [(k, v) for k, v in msg.get("headers", []) if k.lower() not in STRIP]
                 present = {k.lower() for k, _ in hdrs}
                 hdrs += [(k, v) for k, v in BASE_HEADERS if k not in present]
+                if b"x-request-id" not in present:
+                    hdrs.append((b"x-request-id", req_id_bytes))
                 if no_store:
                     hdrs = [(k, v) for k, v in hdrs if k.lower() != b"cache-control"]
                     hdrs.append((b"cache-control", b"no-store"))
@@ -197,8 +209,12 @@ class RateLimiter:
         if self.redis:
             k = f"dc:rl:{key}"
             n = await self.redis.incr(k)
-            if n == 1:
-                await self.redis.expire(k, window)
+            # Süreç kesilse bile anahtarın süresiz kalmaması için her çağrıda nx=True ile TTL güvencesi
+            try:
+                await self.redis.expire(k, window, nx=True)
+            except TypeError:
+                if n == 1:
+                    await self.redis.expire(k, window)
             return n <= limit
         now = time.time()
         if len(self.mem) > 2048:
@@ -253,9 +269,9 @@ async def audit(actor_id: int | None, actor: str, action: str, target: str = "",
 
 def verify_chain(rows: list[dict]) -> dict:
     prev = GENESIS
-    for r in rows:
+    for idx, r in enumerate(rows):
         if r["prev_hash"] != prev or audit_digest(prev, r["ts"], r["actor"], r["action"], r["target"], r["meta"]) != r["hash"]:
-            return {"ok": False, "broken_at": r["id"], "checked": rows.index(r)}
+            return {"ok": False, "broken_at": r["id"], "checked": idx}
         prev = r["hash"]
     return {"ok": True, "checked": len(rows), "head": prev}
 

@@ -240,13 +240,20 @@ def test_100_concurrent_whatsapp_webhooks_async_queue_and_attribution(isolated_e
             )
             assert leads_cnt == 51
 
-            # /health kuyruk ve WAL bilgisi kontrolü
+            # /health minimal liveness (CWE-200) ve HQ korumalı /app/api/admin/health WAL/kuyruk kontrolü
             r_health = await ac.get("/health")
             assert r_health.status_code == 200
             hj = r_health.json()
             assert hj["ok"] is True
             assert hj["db_ok"] is True
-            assert hj["wal_mode"] == "wal"
+            assert "wal_mode" not in hj
+
+            r_adm_h = await ac.get("/app/api/admin/health")
+            assert r_adm_h.status_code == 200
+            ahj = r_adm_h.json()
+            assert ahj["ok"] is True
+            assert ahj["wal_mode"] == "wal"
+            assert ahj["workers_ready"] >= 1
 
     asyncio.run(_run())
 

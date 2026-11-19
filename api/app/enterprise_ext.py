@@ -811,6 +811,7 @@ class PublicBookIn(BaseModel):
     utm_campaign: str = ""
     campaign_code: str = ""
     kvkk_consent: bool = False
+    website: str = Field("", max_length=200)
 
 
 class RecurringAppointmentIn(BaseModel):
@@ -1918,11 +1919,13 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             f"<td style='text-align:right'>{html.escape(str(x.get('amount',0)))} TL</td></tr>"
             for x in items
         ) or "<tr><td colspan='3'>Genel tedavi planı</td></tr>"
+        csrf_val = html.escape(_form_csrf(token, int(datetime.now(timezone.utc).timestamp()) + 3600), quote=True)
         signed_banner = (
             f"<div style='background:#DCFCE7;color:#15803D;padding:12px;border-radius:8px;font-weight:700'>"
             f"Bu tedavi planı {html.escape(tc['signed_at'] or '')} tarihinde {html.escape(tc['signer_name'])} tarafından onaylanmıştır.</div>"
             if tc["status"] == "signed"
             else f"""<form method="post">
+                <input type="hidden" name="csrf_token" value="{csrf_val}">
                 <label style="display:block;margin:12px 0"><input type="checkbox" name="accept_plan" value="1" required> Tedavi planı kalemlerini, tahmini tutarı ve bilgilendirme metnini okudum, onaylıyorum.</label>
                 <label style="display:block;margin:12px 0">Ad Soyad (İmza): <input type="text" name="signer_name" required minlength="2" maxlength="80" placeholder="Adınızı ve soyadınızı yazınız" style="width:100%;padding:10px;margin-top:4px"></label>
                 <button type="submit" style="width:100%;background:#0F766E;color:#fff;border:0;padding:14px;border-radius:8px;font-weight:700;font-size:16px">Tedavi Planını Onayla ve İmzala</button>

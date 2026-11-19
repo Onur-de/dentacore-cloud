@@ -924,10 +924,13 @@ def test_18_periodontal_chart_and_treatment_consent_e2e():
 
         form_page = hq.get(f"/form/tedavi-onay/{tok}")
         assert form_page.status_code == 200
+        import re as _re_tc
+        m_csrf = _re_tc.search(r'name="csrf_token"\s+value="([^"]+)"', form_page.text)
+        assert m_csrf, "Tedavi onam formunda csrf_token gizli alanı bulunmalıdır"
 
         sign_res = hq.post(
             f"/form/tedavi-onay/{tok}",
-            data={"accept_plan": "1", "signer_name": f"Perio Onam Hasta {u}"},
+            data={"csrf_token": m_csrf.group(1), "accept_plan": "1", "signer_name": f"Perio Onam Hasta {u}"},
         )
         assert sign_res.status_code == 200
         tc_rows = hq.get(f"/app/api/patients/{pid}/treatment-consents").json()

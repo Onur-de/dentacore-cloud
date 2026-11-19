@@ -43,5 +43,5 @@ if __name__ == "__main__":
         log_level="info",
         server_header=False,
         proxy_headers=True,
-        forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "*"),
+        forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1"),
     )

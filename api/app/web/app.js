@@ -523,9 +523,15 @@
   let main;
   function visibleNavItems() {
     const role = S.user && S.user.role;
+    const perms = (S.user && S.user.permissions) || null;
     return NAV.filter(([k]) => {
       if (k === "clinics") return role === "owner";
-      if (k === "kasa") return role !== "secretary";
+      if (k === "kasa" || k === "analytics" || k === "costs") {
+        return perms ? Boolean(perms.finance_view) : role !== "secretary";
+      }
+      if (k === "inventory") {
+        return perms ? Boolean(perms.inventory_manage) : role !== "secretary";
+      }
       return true;
     });
   }

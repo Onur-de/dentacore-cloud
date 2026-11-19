@@ -1146,6 +1146,11 @@ async def _lifespan(_app: FastAPI):
             except asyncio.CancelledError:
                 pass
         _SCHED_TASK = None
+        if _WEBHOOK_QUEUE is not None and _WEBHOOK_WORKERS:
+            try:
+                await asyncio.wait_for(_WEBHOOK_QUEUE.join(), timeout=5.0)
+            except Exception:
+                pass
         for w in _WEBHOOK_WORKERS:
             w.cancel()
         _WEBHOOK_WORKERS.clear()
