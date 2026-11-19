@@ -601,6 +601,7 @@
         h("div", null, h("strong", { text: "DentaCore" }), h("small", { text: S.clinic }))
       ),
       h("div", { class: "m-topbar-actions" },
+        h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": "Hızlı hasta ara", on: { click: openQuickSearch } }, "Ara"),
         h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: openAssistant } }, icon("chip"), "Asistan"),
         h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": "Çıkış yap", on: { click: logoutAction } }, icon("out"), "Çıkış")
       )
@@ -614,6 +615,7 @@
       h("button", { type: "button", "data-mk": "more", on: { click: openMobileSheet } }, icon("menu"), "Diğer")
     );
 
+    const sideQuick = h("button", { class: "btn side-asst", style: "margin-bottom:4px;background:rgba(255,255,255,0.08)", type: "button", on: { click: openQuickSearch } }, icon("users"), "Hızlı Hasta Ara (Ctrl+K)");
     const sideAsst = h("button", { class: "btn side-asst", type: "button", on: { click: openAssistant } }, icon("chip"), "Klinik Asistanı (0 Token)");
 
     root.appendChild(mTopbar);
@@ -624,6 +626,7 @@
           h("div", null, "DentaCore", h("small", { text: S.clinic }))
         ),
         nav,
+        sideQuick,
         sideAsst,
         h("div", { class: "me" },
           h("div", { class: "avatar", text: initials }),
@@ -652,6 +655,103 @@
     const cancelBtn = ov.querySelector(".btn-ghost");
     if (cancelBtn) cancelBtn.textContent = "Kapat";
   }
+
+  async function openQuickSearch() {
+    if (!S.user) return;
+    const qIn = inp("q", { placeholder: "Ad, soyad veya telefon numarası yazın (ör. Ayşe, 0532)...", autocomplete: "off" });
+    const listBox = h("div", { class: "sec-desk-list", style: "max-height:320px;overflow-y:auto" },
+      h("div", { class: "empty", style: "padding:12px", text: "Hastalar yükleniyor..." })
+    );
+    const ov = modal("Hızlı Hasta Arama ve Tek Tık İşlem (Ctrl+K)", [
+      h("p", { style: "margin:0 0 8px;font-size:13px;color:var(--muted)", text: "Herhangi bir ekrandayken Ctrl+K veya / tuşuyla hasta bulup kartını açabilir ya da doğrudan randevu bağlayabilirsiniz." }),
+      fld("Hasta Ara", qIn),
+      listBox,
+    ], async () => true, "Kapat");
+    const cancelBtn = ov.querySelector(".foot .btn-ghost");
+    if (cancelBtn) cancelBtn.remove();
+
+    let timer = null;
+    const renderMatches = (rows) => {
+      if (!rows || !rows.length) {
+        listBox.replaceChildren(
+          h("div", { class: "empty", style: "padding:12px" },
+            "Eşleşen hasta bulunamadı. ",
+            h("button", {
+              type: "button",
+              class: "btn btn-sm btn-cta",
+              style: "margin-left:8px",
+              on: {
+                click: () => {
+                  ov.remove();
+                  newAppt();
+                },
+              },
+            }, "+ Yeni Hasta & Randevu Oluştur")
+          )
+        );
+        return;
+      }
+      listBox.replaceChildren(...rows.slice(0, 15).map((p) => h("div", { class: "sec-desk-row" },
+        h("div", { class: "sec-desk-meta" },
+          h("strong", { text: p.display_name || `Hasta #${p.id}` }),
+          tag(p.first_source_label || p.first_source || "WhatsApp", "teal"),
+          p.primary_doctor_name ? h("span", { style: "font-size:12.5px;color:var(--muted)", text: `Dr: ${p.primary_doctor_name}` }) : null,
+          p.balance > 0 ? tag(`Borç: ${fmtTL(p.balance)}`, "amber") : null
+        ),
+        h("div", { class: "actions" },
+          h("button", {
+            type: "button",
+            class: "btn btn-sm btn-primary",
+            on: {
+              click: () => {
+                ov.remove();
+                openPatient(p.id);
+              },
+            },
+          }, "Kartı Aç"),
+          h("button", {
+            type: "button",
+            class: "btn btn-sm btn-teal",
+            on: {
+              click: () => {
+                ov.remove();
+                newAppt(p.id);
+              },
+            },
+          }, "+ Randevu")
+        )
+      )));
+    };
+
+    const fetchMatches = async (term) => {
+      try {
+        const rows = await api(`/app/api/patients${term ? "?search=" + encodeURIComponent(term) : ""}`);
+        renderMatches(rows);
+      } catch (e) {
+        listBox.replaceChildren(h("div", { class: "empty", text: e.message || "Arama yapılamadı" }));
+      }
+    };
+
+    qIn.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fetchMatches(qIn.value.trim()), 250);
+    });
+    fetchMatches("");
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (!S.user) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      if (!document.querySelector(".modal")) openQuickSearch();
+      return;
+    }
+    const tagEl = (document.activeElement && document.activeElement.tagName) || "";
+    if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(tagEl) && !document.querySelector(".modal")) {
+      e.preventDefault();
+      openQuickSearch();
+    }
+  });
 
   function hqSwitchBanner() {
     if (!isHQ() || S.clinic_id === S.home_clinic_id) return null;

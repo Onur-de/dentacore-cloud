@@ -1116,6 +1116,91 @@ textarea.input { min-height: 84px; }
 }
 .m-more-grid a.active { background: var(--teal-soft); border-color: var(--teal); color: var(--teal-ink); }
 
+/* Sekreter Masası, Hızlı Arama (Ctrl+K), Sayfalama ve Hasta Çekmecesi Sekmeleri */
+.sec-desk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.sec-desk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-1) 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-canvas);
+}
+.sec-desk-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.sec-desk-time {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--navy);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 13px;
+}
+.drawer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-tab {
+  border: 1px solid var(--border);
+  background: var(--bg-canvas);
+  color: var(--ink-2);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.drawer-tab:hover {
+  background: var(--teal-mint);
+  border-color: var(--teal);
+}
+.drawer-tab.active {
+  background: var(--navy);
+  color: var(--on-dark);
+  border-color: var(--navy);
+}
+.pager-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-canvas);
+  font-size: 13px;
+  color: var(--muted);
+}
+.mcell-more {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--teal-ink);
+  background: var(--teal-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-top: 2px;
+}
+
 @media (max-width: 1100px) {
   .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .g3, .eco-grid { grid-template-columns: 1fr; }
