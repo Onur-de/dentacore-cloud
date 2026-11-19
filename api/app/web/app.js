@@ -803,7 +803,12 @@
   const VIEWS = {};
 
   VIEWS.overview = async () => {
-    const o = await api("/app/api/overview");
+    const todayStart = sod(new Date());
+    const todayEnd = addDays(todayStart, 2);
+    const [o, todayAppts] = await Promise.all([
+      api("/app/api/overview"),
+      api(`/app/api/appointments?start=${encodeURIComponent(todayStart.toISOString())}&end=${encodeURIComponent(todayEnd.toISOString())}`).catch(() => []),
+    ]);
     S.counts = o.counts || {};
     const c = S.counts;
     const kpi = (label, value, hint, cls) => h("div", { class: `card kpi ${cls || ""}` },
@@ -819,8 +824,58 @@
     );
     const nameParts = (S.user.full_name || "").trim().split(/\s+/);
     const greetName = nameParts[0] && nameParts[0].endsWith(".") && nameParts[1] ? `${nameParts[0]} ${nameParts[1]}` : (nameParts[0] || "Ekip");
+
+    const setDeskStatus = async (aid, st) => {
+      const r = await run(() => api(`/app/api/appointments/${aid}/status`, { method: "POST", body: { status: st } }), "Randevu durumu güncellendi");
+      if (r) route();
+    };
+
+    const runDemoFlow = async () => {
+      const r = await run(() => api("/app/api/demo/simulate-flow", { method: "POST", body: {} }), "Canlı demo akışı tamamlandı");
+      if (r && r.steps) {
+        modal("Canlı 100 Hasta + WhatsApp AI + Takvim Akışı (Örnek Demo Verisi)", [
+          h("p", { style: "margin:0 0 8px;font-size:13.5px;color:var(--ink-2)", text: `Hasta: ${r.patient_name || "Örnek Demo Hastası"} · Randevu: ${r.slot || "-"}` }),
+          h("div", { class: "cal-box" }, (r.steps || []).map((stTxt) => h("div", { style: "margin-bottom:6px;font-size:13px" }, stTxt))),
+        ], async () => {
+          route();
+          return true;
+        }, "Tamam");
+      }
+    };
+
+    const deskCard = h("div", { class: "card", style: "margin-top:14px" },
+      h("div", { style: "display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px" },
+        h("h3", { style: "margin:0", text: `Sekreter Masası · Bugün ve Yakın Randevu Akışı (${todayAppts.length})` }),
+        h("div", { class: "actions" },
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openQuickSearch } }, "Hızlı Hasta Ara (Ctrl+K)"),
+          h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: () => newAppt("") } }, "+ Hızlı Hasta & Randevu"),
+          S.is_demo ? h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: runDemoFlow } }, "Canlı Demo Senaryosu Çalıştır") : null
+        )
+      ),
+      todayAppts.length ? h("div", { class: "sec-desk-list" }, todayAppts.slice(0, 12).map((a) => {
+        const [stLbl, stCls] = STATUS[a.status] || [a.status, ""];
+        const live = a.status === "booked" || a.status === "confirmed";
+        return h("div", { class: "sec-desk-row" },
+          h("div", { class: "sec-desk-meta" },
+            h("span", { class: "sec-desk-time", text: `${fmtD(a.starts_at)} ${fmtT(a.starts_at)} · K${a.chair}` }),
+            h("strong", { text: a.patient || "İsimsiz hasta" }),
+            a.red_flag ? tag("Kırmızı bayrak", "red") : null,
+            h("span", { style: "font-size:13px;color:var(--ink-2)", text: `${a.treatment}${a.doctor ? " · " + a.doctor : ""}` }),
+            tag(stLbl, stCls)
+          ),
+          h("div", { class: "actions" },
+            live && a.status === "booked" ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => setDeskStatus(a.id, "confirmed") } }, "Teyitli Yap") : null,
+            live ? h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: () => setDeskStatus(a.id, "done") } }, "Koltukta / Geldi") : null,
+            live ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => editAppt(a) } }, "Saat Değiştir") : null,
+            a.patient_id ? h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: () => openPatient(a.patient_id) } }, "Hasta Kartı") : null
+          )
+        );
+      })) : h("div", { class: "empty", style: "padding:14px", text: "Bugün için bekleyen randevu yok. '+ Hızlı Hasta & Randevu' ile tek adımda ekleyebilirsiniz." })
+    );
+
     setMain(
       header(`Günaydın, ${greetName}`, new Date().toLocaleDateString("tr-TR", { weekday: "long", day: "numeric", month: "long" }),
+        h("button", { class: "btn btn-ghost", type: "button", on: { click: openQuickSearch } }, "Hızlı Hasta Ara (Ctrl+K)"),
         h("a", { class: "btn btn-cta", href: "#/calendar" }, icon("plus"), "Randevu oluştur")),
       h("div", { class: "grid g4" },
         occ,
@@ -828,6 +883,7 @@
         kpi("Gelmeyenlerden kayıp", o.loss ? fmtTL(o.loss.noshow_30d_try) : "-", o.loss ? `Ortalama işlem ${fmtTL(o.loss.avg_ticket_try)} üzerinden` : "Finans yetkisi gerektirir", "loss"),
         kpi("LLM'siz cevap oranı", o.tokens_30d.llm_free_pct === null ? "-" : `%${o.tokens_30d.llm_free_pct}`, `${o.tokens_30d.replies} otomatik cevap, ${o.tokens_30d.tokens} token`, "good")
       ),
+      deskCard,
       h("div", { class: "grid g3", style: "margin-top:14px" },
         h("div", { class: "card span-2" },
           h("h3", null, "Son 14 gün: gelen mesaj ve açılan randevu",
@@ -932,7 +988,8 @@
             h("span", { text: d.getDate() }),
             dayAppts.length ? h("span", { class: "mcell-cnt", text: dayAppts.length }) : null
           ),
-          dayAppts.slice(0, 2).map((a) => h("div", { class: "mcell-item", text: `${fmtT(a.starts_at)} ${a.patient || ""}` }))
+          dayAppts.slice(0, 2).map((a) => h("div", { class: "mcell-item", text: `${fmtT(a.starts_at)} ${a.patient || ""}` })),
+          dayAppts.length > 2 ? h("div", { class: "mcell-more", text: `+${dayAppts.length - 2} daha` }) : null
         );
       });
       calGridView = h("div", { class: "month-wrap" },
@@ -1191,6 +1248,16 @@
     ["other", "Diğer"],
   ];
 
+  const PATIENT_SOURCE_MAP = {
+    ...Object.fromEntries(PATIENT_SOURCES),
+    meta_ads: "Meta / Instagram Reklamı",
+    google_organic: "Google Organik",
+    organik: "Organik",
+    whatsapp_ai: "WhatsApp AI",
+    instagram_ai: "Instagram AI",
+    panel: "Klinik Paneli",
+  };
+
   async function newAppt(preselectedPatientId) {
     const [patients, staff] = await Promise.all([
       api("/app/api/patients"),
@@ -1303,6 +1370,14 @@
       location.hash = `#/patients${nq.toString() ? "?" + nq.toString() : ""}`;
     };
     search.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+    let searchDebounce = null;
+    search.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        curPage = 1;
+        renderPatientTable();
+      }, 250);
+    });
     grpSel.addEventListener("change", doSearch);
     srcSel.addEventListener("change", doSearch);
 
@@ -1431,6 +1506,75 @@
       }, "İçe Aktar");
     }
 
+    let curPage = 1;
+    let pageSize = 25;
+    const ptbody = h("tbody");
+    const pagerBox = h("div", { class: "pager-bar" });
+
+    function renderPatientTable() {
+      const term = (search.value || "").trim().toLowerCase();
+      const filtered = term
+        ? rows.filter((p) =>
+            String(p.display_name || "").toLowerCase().includes(term) ||
+            String(p.phone || "").toLowerCase().includes(term) ||
+            String(p.first_source_label || p.first_source || "").toLowerCase().includes(term)
+          )
+        : rows;
+      const total = filtered.length;
+      const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1;
+      if (curPage > totalPages) curPage = totalPages;
+      const slice = pageSize > 0 ? filtered.slice((curPage - 1) * pageSize, curPage * pageSize) : filtered;
+
+      ptbody.replaceChildren(...(slice.length ? slice.map((p) => h("tr", { class: "click", on: { click: () => openPatient(p.id) } },
+        h("td", null,
+          h("b", { text: p.display_name || `Hasta #${p.id}` }), " ",
+          p.red_flag ? tag("Kırmızı bayrak", "red") : null,
+          (p.groups || []).map((g) => tag(g.name, g.color || "teal"))
+        ),
+        h("td", null,
+          tag(p.first_source_label || p.first_source || "WhatsApp", p.first_source === "instagram" ? "amber" : "teal"),
+          p.last_source && p.last_source !== p.first_source ? h("small", { style: "display:block;color:var(--muted)", text: `Son: ${p.last_source_label || p.last_source}` }) : null
+        ),
+        h("td", { text: p.primary_doctor_name || "-" }),
+        h("td", { text: (p.lang || "tr").toUpperCase() }),
+        h("td", { text: p.last_appt ? fmtD(p.last_appt) : "-" }),
+        h("td", { class: "num" },
+          p.balance > 0 ? h("b", { style: "color:var(--amber-hover)", text: fmtTL(p.balance) }) : fmtTL(p.balance),
+          p.planned_total > 0 ? h("small", { style: "display:block;color:var(--muted)", text: `Plan: ${fmtTL(p.planned_total)}` }) : null
+        ),
+        h("td", null, h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": `${p.display_name || "Hasta"} kartını aç`, on: { click: (ev) => { ev.stopPropagation(); openPatient(p.id); } } }, "Aç"))
+      )) : [h("tr", null, h("td", { colSpan: 7, class: "empty", text: "Hasta kaydı bulunamadı." }))]));
+
+      if (total > 25) {
+        pagerBox.classList.remove("hidden");
+        pagerBox.replaceChildren(
+          h("span", { text: `Toplam ${total} hasta · Sayfa ${curPage} / ${totalPages}` }),
+          h("div", { class: "actions" },
+            [25, 50, 0].map((sz) => h("button", {
+              type: "button",
+              class: `btn btn-sm ${pageSize === sz ? "btn-primary" : "btn-ghost"}`,
+              on: { click: () => { pageSize = sz; curPage = 1; renderPatientTable(); } },
+            }, sz === 0 ? "Tümü" : `${sz} / sayfa`)),
+            pageSize > 0 ? h("button", {
+              type: "button",
+              class: "btn btn-sm btn-ghost",
+              disabled: curPage <= 1,
+              on: { click: () => { if (curPage > 1) { curPage--; renderPatientTable(); } } },
+            }, "Önceki") : null,
+            pageSize > 0 ? h("button", {
+              type: "button",
+              class: "btn btn-sm btn-ghost",
+              disabled: curPage >= totalPages,
+              on: { click: () => { if (curPage < totalPages) { curPage++; renderPatientTable(); } } },
+            }, "Sonraki") : null
+          )
+        );
+      } else {
+        pagerBox.classList.add("hidden");
+      }
+    }
+    renderPatientTable();
+
     setMain(
       header("Hastalar", "13 geliş kanalı, değiştirilemez ilk kaynak, sorumlu doktor, özel hasta grupları ve 10 kalem finans takibi.",
         search,
@@ -1441,28 +1585,13 @@
         h("a", { class: "btn btn-ghost", href: "/app/api/export/patients.csv", download: "dentacore-hastalar.csv" }, "CSV İndir"),
         h("button", { class: "btn btn-cta", type: "button", on: { click: openFastCreatePatientModal } }, icon("plus"), "Hasta ekle")
       ),
-      h("div", { class: "card card-flush" }, tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Hasta & Gruplar", "İlk / Son Kaynak", "Sorumlu Doktor", "Dil", "Son randevu", "Kalan Borç / Bakiye", "İşlemler"].map((t, i) => h("th", { class: i === 5 ? "num" : "", text: t })))),
-        h("tbody", null, rows.length ? rows.map((p) => h("tr", { class: "click", on: { click: () => openPatient(p.id) } },
-          h("td", null,
-            h("b", { text: p.display_name || `Hasta #${p.id}` }), " ",
-            p.red_flag ? tag("Kırmızı bayrak", "red") : null,
-            (p.groups || []).map((g) => tag(g.name, g.color || "teal"))
-          ),
-          h("td", null,
-            tag(p.first_source_label || p.first_source || "WhatsApp", p.first_source === "instagram" ? "amber" : "teal"),
-            p.last_source && p.last_source !== p.first_source ? h("small", { style: "display:block;color:var(--muted)", text: `Son: ${p.last_source_label || p.last_source}` }) : null
-          ),
-          h("td", { text: p.primary_doctor_name || "-" }),
-          h("td", { text: (p.lang || "tr").toUpperCase() }),
-          h("td", { text: p.last_appt ? fmtD(p.last_appt) : "-" }),
-          h("td", { class: "num" },
-            p.balance > 0 ? h("b", { style: "color:var(--amber-hover)", text: fmtTL(p.balance) }) : fmtTL(p.balance),
-            p.planned_total > 0 ? h("small", { style: "display:block;color:var(--muted)", text: `Plan: ${fmtTL(p.planned_total)}` }) : null
-          ),
-          h("td", null, h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": `${p.display_name || "Hasta"} kartını aç`, on: { click: (ev) => { ev.stopPropagation(); openPatient(p.id); } } }, "Aç"))
-        )) : h("tr", null, h("td", { colSpan: 7, class: "empty", text: "Hasta kaydı bulunamadı." })))
-      ), "Hastalar tablosu"))
+      h("div", { class: "card card-flush" },
+        tblWrap(h("table", { class: "table" },
+          h("thead", null, h("tr", null, ["Hasta & Gruplar", "İlk / Son Kaynak", "Sorumlu Doktor", "Dil", "Son randevu", "Kalan Borç / Bakiye", "İşlemler"].map((t, i) => h("th", { class: i === 5 ? "num" : "", text: t })))),
+          ptbody
+        ), "Hastalar tablosu"),
+        pagerBox
+      )
     );
   };
 
