@@ -508,6 +508,163 @@ def normalize_tr_informal(n_text: str) -> str:
     return normalize_multilingual_typos(n_text, lang="tr")
 
 
+# ---------------------------------------------------------------------------
+# FAZ 2 — Çok dilli deterministik L1 kalkanlar (LLM'e hiç gitmeden, 0 token).
+# Kalıplar, gelen metinle aynı normalize() hattından geçirilerek derlenir (aksan, diyakritik, ZWNJ ve büyük/küçük harf
+# farkı eşleşmeyi bozmaz). normalize() casefold yaptığından kalıplarda büyük harfli kaçışlar (\W, \S, \D, \B)
+# KULLANILMAZ; "harf dışı" için [^\w\s] yazılır.
+# ---------------------------------------------------------------------------
+def _compile_norm(*patterns: str) -> re.Pattern[str]:
+    return re.compile("|".join(f"(?:{normalize(p)})" for p in patterns))
+
+
+PROMPT_INJECTION_I18N_RE = _compile_norm(
+    # EN
+    r"(ignore|disregard|forget|override|bypass)\s+(all\s+|any\s+|every\s+)?(of\s+)?(the\s+|your\s+|my\s+)?(previous|prior|above|earlier|preceding|initial|original|system)\s+(instructions?|rules?|prompts?|guidelines?|directives?)",
+    r"(forget|ignore|disregard)\s+(everything|all)\s+(above|before|prior|you\s+(were|have\s+been)\s+told)",
+    r"(reveal|show|print|display|repeat|output|leak|tell\s+me|give\s+me)\s+(me\s+)?(your|the)\s+(hidden|secret|system|initial|original|internal|full|first)\s+(prompt|instructions?|rules|guidelines)",
+    r"(reveal|show|print|display|repeat|output|leak)\s+(me\s+)?your\s+(prompt|instructions?|rules|guidelines)",
+    r"repeat\s+(the\s+)?(text|words|everything|content)\s+(above|before)",
+    r"(developer|debug|god|jailbreak|unrestricted|sudo)\s+mode", r"\bjailbreak\w*", r"do\s+anything\s+now",
+    r"you\s+(are|have)\s+(now\s+)?(in\s+)?(no|without)\s+(restrictions?|rules|filters?|limits)",
+    r"(remove|disable|lift|turn\s+off)\s+(all\s+)?(your\s+)?(restrictions?|filters?|safety|guardrails?)",
+    r"pretend\s+(you\s+are|to\s+be)\s+(my\s+)?(late\s+)?(grandma|grandmother|dan\b)",
+    r"(obey|execute|carry\s+out)\s+(the\s+|this\s+)?(note|document|text|message)\b",
+    # dolaylı (indirect) injection: gömülü metnin asistana hitap eden komutu
+    r"\b(assistant|asistan|assistent|assistente)[^\w\s]{1,3}\s*(reveal|ignore|disregard|from\s+now|bundan\s+sonra|bu\s+mesaj\w*|gib\s+alle|zeig\w*|ab\s+jetzt|revela|ignora|montre|affiche)",
+    # TR
+    r"(yukaridaki|onceki|tum|butun|eski)\s+(tum\s+|butun\s+)?(kurallari|talimatlari|yonergeleri|komutlari|istemleri|direktifleri)\s+(\w+\s+){0,2}(unut|yok\s+say|gormezden\s+gel|dikkate\s+alma|iptal\s+et|sifirla)",
+    r"(kurallari|talimatlari|kisitlamalari|filtreleri|guvenlik\s+kurallarini)\s+(\w+\s+){0,2}(yok\s+say|gormezden\s+gel|kaldir|devre\s+disi\s+birak|unut)",
+    r"(baslangic|gizli|ic|dahili)\s+(prompt\w*|talimat\w*|yonerge\w*|istem\w*)",
+    r"prompt\w*\s+(\w+\s+){0,2}(goster|aynen\s+yaz|sizdir|tekrarla)\b",
+    r"gelistirici\s+mod\w*", r"kisitlamasiz", r"kisitlamalari\s+kaldir",
+    r"(notu|belgeyi|metni|talimati)\s+(uygula|yerine\s+getir)\b",
+    # DE
+    r"(ignoriere|ignorier|vergiss|missachte|ubergehe|umgehe)\s+(alle\s+|jegliche\s+)?(vorherigen|fruheren|obigen|bisherigen|vorigen|deine)?\s*(anweisungen|regeln|instruktionen|vorgaben|richtlinien)",
+    r"(zeig|zeige|nenne|gib|verrate|gebe)\s+(mir\s+)?(deinen|dein)\s+(system\s*prompt|prompt|anweisungen)",
+    r"system\s*prompt\w*", r"entwicklermodus", r"(befolge|befolgen\s+sie)\s+(die\s+)?(notiz|anweisung|nachricht)",
+    # FR
+    r"(ignore|ignorez|oublie|oubliez)\s+(toutes?\s+)?(les\s+|tes\s+|vos\s+)?(instructions|regles|consignes|directives)",
+    r"(affiche|affichez|montre|montrez|donne|donnez|revele|reveler)\w*\s+(moi\s+)?(ton|ta|tes|votre|vos)\s+(prompt|instructions|regles|consignes)",
+    r"prompt\s+systeme", r"mode\s+developpeur",
+    # ES
+    r"(ignora|ignore|olvida|olvide|omite)\s+(todas?\s+)?(las\s+|tus\s+)?(instrucciones|reglas|indicaciones|directrices)",
+    r"(muestrame|dime|revela|imprime|ensename|dame)\s+(tu|el)\s+(prompt|instrucciones|reglas)",
+    r"prompt\s+del\s+sistema", r"modo\s+desarrollador",
+    # IT
+    r"(ignora|dimentica|trascura)\s+(tutte\s+)?(le\s+|tue\s+)?(istruzioni|regole|indicazioni)",
+    r"(mostrami|dimmi|rivela|stampa)\s+(il\s+tuo\s+|le\s+tue\s+)?(prompt|istruzioni|regole)",
+    r"prompt\s+di\s+sistema", r"modalita\s+sviluppatore",
+    # NL
+    r"(negeer|vergeet|negeren)\s+(alle\s+)?(voorgaande|vorige|eerdere|bovenstaande)?\s*(instructies|regels|opdrachten)",
+    r"(toon|geef|laat)\s+(me\s+)?(je|jouw)\s+(systeemprompt|prompt|instructies)", r"systeemprompt", r"ontwikkelaarsmodus",
+    # RU
+    r"(игнорируй|игнорируйте|забудь|забудьте|отмени|не\s+учитывай)\s+(все\s+|всё\s+)?(предыдущие|прежние|прошлые|вышеуказанные)?\s*(инструкции|правила|указания|команды|ограничения)",
+    r"(покажи|покажите|выведи|напиши|раскрой|расскажи)\s+(мне\s+)?(свои|свой|твои|твой|ваш\w*|системн\w+)\s+(промпт|инструкции|правила|подсказк\w+)",
+    r"системн\w+\s+(\w+\s+)?(промпт|подсказк\w+|инструкци\w+)", r"режим\s+разработчика",
+    # UK
+    r"[іi]гнор\w*\s+(вс[іi]|ус[іi])?\s*(попередн\w+)?\s*(інструкц\w+|правила|вказівки|команди)",
+    r"(покажи|виведи|напиши|розкрий)\s+(мені\s+)?(свій|свої|твій|твої|системн\w+)\s+(промпт|інструкції|правила)",
+    r"системн\w+\s+(\w+\s+)?(промпт|підказк\w+)", r"режим\s+розробника",
+    # BG
+    r"(игнорирай|забрави|пренебрегни)\s+(всички\s+)?(предишн\w*|предходн\w*)?\s*(инструкции|правила|указания)",
+    r"(покажи|изведи|напиши|разкрий)\s+(ми\s+)?(системния|своя|твоя)\s+(\w+\s+)?(промпт|инструкции|правила)",
+    r"системн\w*\s+(\w+\s+)?промпт",
+    # AR
+    r"(تجاهل|تجاهلي|انس|اهمل|تخط)\w*\s+(جميع\s+|كل\s+)?(ال)?(تعليمات|قواعد|اوامر|أوامر)\s*(السابقة|السابقه)?",
+    r"(اعرض|اظهر|أظهر|اكتب|اطبع|اخبرني|اعطني|اكشف)\s+(لي\s+|عن\s+)?(موجه\s+النظام|برومبت|تعليماتك|تعليمات\s+النظام|قواعدك)",
+    r"موجه\s+النظام|برومبت\s+النظام|وضع\s+المطور",
+    # FA
+    r"(دستورالعمل\w*|قوانين|دستورات)\s+(قبل[یي]|پيشين|پیشین|بالا)\s+را\s+(نادیده\s+بگیر\w*|نادي?ده\s+بگير\w*|فراموش\s+کن\w*|فراموش\s+كن\w*)",
+    r"(پرامپت|دستورالعمل\w*|تنظيمات|تنظیمات)\s+س[یي]ستم", r"حالت\s+(توسعه\s*دهنده|بدون\s+محدود[یي]ت)",
+    # HE
+    r"(התעלם|התעלמי|שכח|שכחי)\s+מכל\s+(ה)?(הוראות|כללים|הנחיות)\s*(הקודמות)?",
+    r"פרומפט\s+(ה)?מערכת|הנחיות\s+המערכת|הוראות\s+המערכת|מצב\s+מפתח",
+    # EL
+    r"(αγνόησε|ξέχασε|παράβλεψε)\s+(όλες\s+)?(τις\s+)?(προηγούμενες\s+)?(οδηγίες|κανόνες|εντολές)",
+    # RO
+    r"(ignora|uita|neglijeaza)\s+(toate\s+)?(instructiunile|regulile|indicatiile)",
+    r"(arata|spune|afiseaza|dezvaluie)[\s-]*(mi|ne)?\s*(promptul|instructiunile|regulile)", r"prompt(ul)?\s+(de\s+)?sistem\w*",
+    # AZ
+    r"(əvvəlki|bütün)\s+(bütün\s+)?(təlimatları|qaydaları|komandaları)\s+(unut|nəzərə\s+alma|ignor\s+et)",
+    r"sistem\s+prompt\w*", r"təlimatları\s+(göstər|yaz)",
+)
+
+KVKK_TRAP_I18N_RE = _compile_norm(
+    # TR: yakın/üçüncü kişi bilgi talebi (çocuk bilerek hariç: ebeveyn meşru randevu alabilir)
+    r"(annemin|babamin|kardesimin|ablamin|abimin|agabeyimin|dedemin|ninemin|amcamin|teyzemin|kayinvalidemin|sevgilimin|nisanlimin|patronumun|komsumun|calisanimin)\s+(\w+\s+){0,4}(randevu\w*|telefon\w*|ilac\w*|islem\w*|tedavi\w*|bilgi\w*|kayit\w*|dosya\w*|rontgen\w*)",
+    # TR: resmi makam/yetkili taklidi ve toplu hasta kaydı talebi
+    r"\b(polis|savci|jandarma|avukat|mufettis|gazeteci)(im|iz|yim|yiz|iyim)\b",
+    r"sigorta\s+sirket\w*(denim|danim|tenim|tanim)\b", r"\b(bakanlik|savcilik|emniyet|mahkeme)\w*(denim|danim|tenim|tanim)\b",
+    r"\bhastalarin(iz)?(in)?\s+(\w+\s+){0,2}(kayit\w*|dosya\w*|bilgi\w*)",
+    # EN
+    r"(wife|husband|spouse|partner|mother|mom|father|dad|sister|brother|friend|neighbou?r|colleague|boss|employee|girlfriend|boyfriend|grandmother|grandfather)[’']s\s+(\w+\s+){0,3}(appointment|phone|number|medications?|treatments?|records?|files?|x-?rays?|details|information|data|address)",
+    r"(i\s+am|i[’']?m|we\s+are|this\s+is)\s+(\w+\s+){0,2}(from|with|at)\s+(the\s+)?(ministry|police|fbi|insurance|health\s+(department|authority)|audit\w*|inspect\w*|law\s+firm|court|government|press|newspaper|tax\s+office)",
+    r"(all|every|list\s+of)\s+(the\s+)?(patients?|clients?|customers?)[’']?s?\s+(phone|names?|numbers?|records?|data|details|addresses)",
+    # DE
+    r"(von|vom)\s+(frau|herrn|herr)\s+\w+[^\w\s]?\s*(\w+\s+){0,4}(termin|telefonnummer|akte|daten|behandlung|medikament\w*)",
+    r"(ihr|sein|ihre|seine)\s+(termin|telefonnummer|behandlung|akte|medikament\w*)",
+    r"(ich\s+bin|wir\s+sind)\s+(\w+\s+){0,2}(von|vom|bei)\s+(der\s+|dem\s+)?(polizei|ministerium|versicherung|staatsanwaltschaft|gericht|behorde|presse|finanzamt)",
+    r"(alle|jede)\s+(patienten|kunden)\w*\s*(daten|nummern|telefon\w*|namen|akten)", r"patienten\w*(nummern|daten|akten)",
+    # FR
+    r"(rendez-vous|rdv|telephone|numero|dossier|traitement|medicaments?)\s+de\s+(ma|mon|sa|son|mes)\s+(femme|mari|epouse|epoux|conjoint\w*|mere|pere|soeur|frere|ami\w*|voisin\w*|collegue)",
+    r"(je\s+suis|nous\s+sommes)\s+(\w+\s+){0,2}(de|du|des|chez)\s+(la\s+|le\s+|l[’'])?(police|ministere|assurance|prefecture|tribunal|justice|presse|impots)",
+    r"(tous\s+les)\s+(patients|clients)\s+(telephones?|numeros|dossiers|donnees)",
+    # ES
+    r"(cita|telefono|numero|historial|expediente|tratamiento|medicamentos?)\s+de\s+(mi|su|mis)\s+(esposa|esposo|marido|mujer|madre|padre|hermano|hermana|amig[oa]|vecin[oa]|jefe|empleado)",
+    r"(soy|somos)\s+(\w+\s+){0,2}(de|del)\s+(la\s+|el\s+)?(policia|ministerio|seguro|fiscalia|juzgado|prensa|hacienda)",
+    r"(todos\s+los)\s+(pacientes|clientes)\s+(telefonos|numeros|datos|historiales)",
+    # RU
+    r"(запись|номер|телефон|лечение|лекарства|карта|данные)\s+(моей|моего|его|ее|её)\s+(жены|мужа|матери|отца|сестры|брата|подруги|друга|соседа|коллеги)",
+    r"(я|мы)\s+(\w+\s+){0,2}(из|от)\s+(полиции|министерства|страховой|прокуратуры|суда|налоговой)",
+    # AR
+    r"(موعد|رقم|هاتف|علاج|ادوية|أدوية|ملف|بيانات|سجل)\s+(زوجتي|زوجي|والدتي|والدي|اختي|أختي|اخي|أخي|صديقي|صديقتي|جاري|زميلي)",
+    r"(انا|أنا|نحن)\s+(\w+\s+){0,2}(من|في)\s+(الشرطة|وزارة|شركة\s+التأمين|النيابة|المحكمة)",
+)
+
+EXTRA_EMERGENCY_RE = _compile_norm(
+    # TR: kontrolsüz kanama ve travma + kanama
+    r"kan\s+(\w+\s+){0,4}(durmuyor|dinmiyor|kesilmiyor)",
+    r"(dustu|carpti|vurdu|kaza|kirildi|kirik|darbe|yerinden\s+cikti)\s+(\w+\s+){0,6}(kaniyor|kanama|kanli|kan\s+var)",
+    r"(kaniyor|kanama)\s+(\w+\s+){0,4}(dustu|carpti|vurdu|kaza|kirildi)",
+    # EN
+    r"(blood|bleeding)\s+(\w+\s+){0,3}(won[’']?t|doesn[’']?t|does\s+not|will\s+not|can[’']?t|cannot)\s+(be\s+)?(stop|stopped|stopping)",
+    r"(can[’']?t|cannot|unable\s+to|trouble|difficulty)\s+(\w+\s+){0,2}(breath\w*|swallow\w*)",
+    r"(face|throat|tongue|neck)\s+(\w+\s+){0,3}(swollen|swelling|swelled|puffed)",
+    # DE
+    r"(blutung|blut)\s+(\w+\s+){0,4}(hort|stoppt|steht)\s+(\w+\s+){0,4}nicht",
+    r"(gesicht|hals|zunge|wange|auge)\s+(\w+\s+){0,4}(geschwollen|angeschwollen)",
+    r"(keine|kaum)\s+luft", r"(kann|konnte)\s+(\w+\s+){0,2}nicht\s+(atmen|schlucken)",
+    # FR
+    r"(saignement|sang)\s+(\w+\s+){0,3}(ne\s+)?s[^\w\s]{0,2}arrete\w*\s+(\w+\s+){0,2}pas",
+    r"(visage|gorge|langue|cou)\s+(\w+\s+){0,4}(gonfle\w*|enfle\w*)",
+    r"n[^\w\s]{0,2}arrive\s+(plus\s+|pas\s+)?a\s+(respirer|avaler)", r"ne\s+(peux|parviens)\s+(plus\s+|pas\s+)?(respirer|avaler)",
+    # AR
+    r"(وجهي|وجه|حلقي|لساني|رقبتي)\s+(\w+\s+){0,2}(منتفخ\w*|متورم\w*|ورم\w*)",
+    r"(لا|ما|مش)\s+(استطيع|أستطيع|اقدر|أقدر)\s+(\w+\s+){0,2}(التنفس|اتنفس|أتنفس|البلع|ابلع|أبلع)",
+    # HE
+    r"(הפנים|פני|הלשון|הגרון)\s+(\w+\s+){0,3}(נפוח\w*|התנפח\w*)", r"(לא|אי)\s+(יכול|יכולה|מצליח|מצליחה)\s+(לנשום|לבלוע)",
+)
+
+MED_SAFETY_I18N_RE = _compile_norm(
+    # hamilelik / emzirme
+    r"\bgebe\b|\bgebeyim\b|\bgebelik\w*|hamile\w*|emzir\w*|pregnan\w*|breast\s*feed\w*|lactat\w*|nursing\s+mother",
+    r"schwanger\w*|stillzeit|ich\s+stille\b|enceinte\w*|allait\w*|embaraz\w*|lactancia|amamant\w*",
+    r"incinta\w*|allatt\w*|zwanger\w*|borstvoeding|insarcinat\w*|alapt\w*",
+    r"беремен\w*|кормлю\s+груд\w*|грудн\w+\s+вскармлив\w*|вагітн\w*|годую\s+груд\w*|бременн\w*|кърмя\w*",
+    r"έγκυ\w*|θηλάζ\w*", r"حامل|ارضع|أرضع|رضاع\w*|בהריון|מניקה|הנקה|باردار|شیردهی|شیر\s*میده\w*",
+    # ilaç adları (Latin çekimleri ve Kiril/Arap/İbrani/Yunan/Fars yazımları)
+    r"paracetamolo|ibuprofene|amoxicillina|paracetamole|ibuprofeno|amoxicilina|paracetamolul",
+    r"парацетамол\w*|ибупрофен\w*|амоксицилл?ин\w*|нурофен\w*|аспирин\w*|антибиотик\w*|обезболивающ\w*|болкоуспокояващ\w*|знеболювальн\w*|анальгетик\w*",
+    r"παρακεταμόλ\w*|ιβουπροφαίν\w*|αμοξικιλλίν\w*|παυσίπον\w*|αντιβιοτικ\w*",
+    r"باراسيتامول|ايبوبروفين|إيبوبروفين|اموكسيسيلين|أموكسيسيلين|بنادول|مضاد\w*\s+حيوي\w*|مسكنات|مسكن\s+(للألم|لألم|للاسنان)",
+    r"פרצטמול|איבופרופן|אמוקסיצילין|משכך\s+כאבים|אנטיביוטיקה",
+    r"پاراستامول|ایبوپروفن|آموکسی\s*سیلین|آنتی\s*بیوتیک",
+    # doz sorusu (çok dilli "kaç mg / kaç ml / how many pills")
+    r"(quanti|quante|cuantos|cuantas|combien\s+de|wie\s+viel\w*|hoeveel|how\s+(many|much)|kac|сколько|скільки|колко|cat|cate|ποσα|ποσο|كم|כמה|چند)\s+(\w+\s+)?(ml|mg|mcg|tablet\w*|hap|kapsul|damla|comprim\w*|pastill\w*|compress\w*|pill\w*|capsul\w*|gouttes?|gotas?|tropfen|druppel\w*|мл|мг|таблетк\w*|капл\w*|مل|ملغ|مغ|حبة|حبات|قرص|اقراص|جرعة|מ״ג|מג|גרם|טבליות|میلی\s*گرم)",
+    r"\d+\s*(мл|мг|ملغ|مغ)",
+)
+
 def detect_lang(text: str, default: str = "tr") -> str:
     raw = (text or "").casefold()
     if re.search(r"[\u0590-\u05FF]", raw):
@@ -1124,7 +1281,7 @@ class TokenRouter:
     def is_emergency(self, text: str) -> bool:
         lg = detect_lang(text)
         n = normalize_multilingual_typos(normalize(text), lang=lg)
-        return any(p.search(n) for p in self.emerg.values())
+        return any(p.search(n) for p in self.emerg.values()) or bool(EXTRA_EMERGENCY_RE.search(n))
 
     async def route(
         self,
@@ -1189,8 +1346,15 @@ class TokenRouter:
                     self.fsm.record_turn(sess_key, text, "acil", branch_key, cur_treatment, ans)
                 return RouteResult(ans, "L1-acil", "acil", lang, alert="acil", handoff=True, meta={"branch": branch_key})
 
+        # Katman-1a2: Ek acil kalıpları (16 dilde havayolu/şişlik/kontrolsüz kanama/travma; doğal cümle varyantları)
+        if EXTRA_EMERGENCY_RE.search(n) or EXTRA_EMERGENCY_RE.search(n_raw):
+            ans = self._pick(self.emerg_ans, lang, effective_facts)
+            if sess is not None:
+                self.fsm.record_turn(sess_key, text, "acil", branch_key, cur_treatment, ans)
+            return RouteResult(ans, "L1-acil", "acil", lang, alert="acil", handoff=True, meta={"branch": branch_key, "extra_emergency": True})
+
         # Katman-1b: Güvenlik / Prompt Injection / KVKK Üçüncü Kişi Veri Sızıntısı Koruması
-        if PROMPT_INJECTION_RE.search(n):
+        if PROMPT_INJECTION_RE.search(n) or PROMPT_INJECTION_I18N_RE.search(n) or PROMPT_INJECTION_I18N_RE.search(n_raw):
             ans = (
                 f"{self._pick(self.tpl['fiyat'], lang, effective_facts)} "
                 f"{self._strip_leading_greeting(self._pick(self.tpl['insan'], lang, effective_facts))}"
@@ -1199,7 +1363,7 @@ class TokenRouter:
                 self.fsm.record_turn(sess_key, text, "insan", branch_key, cur_treatment, ans)
             return RouteResult(ans, "L1-guvenlik", "insan", lang, handoff=True, meta={"guardrail": "prompt_injection"})
 
-        if KVKK_TRAP_RE.search(n):
+        if KVKK_TRAP_RE.search(n) or KVKK_TRAP_I18N_RE.search(n) or KVKK_TRAP_I18N_RE.search(n_raw):
             ans = (
                 "Merhabalar, KVKK ve hasta mahremiyeti kurallarımız gereği hiçbir misafirimizin iletişim veya sağlık bilgisini üçüncü kişilerle paylaşamıyoruz. "
                 "Talebinizi değerlendirmesi için hekim ve hasta kabul ekibimize ilettik; çalışma saatlerimiz içinde size dönüş yapılacaktır."
@@ -1236,7 +1400,7 @@ class TokenRouter:
             return RouteResult(ans, "L1-kapsam", "genel", lang, handoff=False, meta={"guardrail": "out_of_scope_vet"})
 
         # Katman-1b2: Tıbbi Güvenlik, İlaç Dozu & Kan Sulandırıcı Sınıflandırıcısı (0 token)
-        if "tibbi_soru" in self.kw and self.kw["tibbi_soru"].search(n):
+        if ("tibbi_soru" in self.kw and self.kw["tibbi_soru"].search(n)) or MED_SAFETY_I18N_RE.search(n) or MED_SAFETY_I18N_RE.search(n_raw):
             ans = self._pick(self.tpl["tibbi_soru"], lang, effective_facts)
             if sess is not None:
                 self.fsm.record_turn(sess_key, text, "tibbi_soru", branch_key, cur_treatment, ans)
