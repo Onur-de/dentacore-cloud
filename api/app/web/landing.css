@@ -14,20 +14,20 @@
   --navy: #0A2540;
   --navy-deep: #06182B;
   --navy-hover: #13385C;
-  --teal: #0F766E;
+  --teal: #0B5E56;
   --teal-mid: #0D9488;
   --teal-bright: #5EEAD4;
   --teal-soft: #CCFBF1;
   --teal-mint: #F0FDF9;
   --teal-border: #99F6E4;
-  --teal-ink: #115E59;
+  --teal-ink: #0B5E56;
   --amber: #C2410C;
   --amber-hover: #9A3412;
   --amber-soft: #FFF7ED;
   --amber-border: #FDBA74;
-  --bg-canvas: #F8FAFC;
+  --bg-canvas: #FAFDFC;
   --bg-surface: #FFFFFF;
-  --bg-subtle: #F1F5F9;
+  --bg-subtle: #F1F6F6;
   --bg-code: #0D2D4D;
   --ink: #0E1B2E;
   --ink-2: #2D3E52;
@@ -58,8 +58,8 @@
   --space-6: 72px;
   --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", Tahoma, system-ui, sans-serif;
   --font-display: "Plus Jakarta Sans", "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Noto Sans", Tahoma, system-ui, sans-serif;
-  --cta: #0F766E;
-  --cta-hover: #115E59;
+  --cta: #0B5E56;
+  --cta-hover: #084943;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -98,7 +98,9 @@ html, body {
 }
 
 /* Başlıklar: güven veren, sakin başlık yüzü */
-h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.01em; }
+h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.015em; }
+h1, h2, h3 { text-wrap: balance; }
+.calc-total, .price-val, output, .num, td { font-variant-numeric: tabular-nums; }
 
 ::selection {
   background: var(--teal-soft);
@@ -262,6 +264,7 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
   min-height: 44px;
   padding: 12px 20px;
   border-radius: var(--radius-sm);

@@ -43,7 +43,7 @@
     tabSched.addEventListener("click", () => switchPreviewTab("schedule"));
   }
 
-  // Hero senaryoları (TR, EN, AR RTL, DE — Parlant VIP Hasta Koordinatörü Üslubu)
+  // Hero senaryoları (TR, EN, AR RTL, DE: Parlant VIP Hasta Koordinatörü Üslubu)
   const SCENARIOS = {
     tr: {
       dir: "ltr",

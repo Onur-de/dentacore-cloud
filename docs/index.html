@@ -46,20 +46,20 @@
   --navy: #0A2540;
   --navy-deep: #06182B;
   --navy-hover: #13385C;
-  --teal: #0F766E;
+  --teal: #0B5E56;
   --teal-mid: #0D9488;
   --teal-bright: #5EEAD4;
   --teal-soft: #CCFBF1;
   --teal-mint: #F0FDF9;
   --teal-border: #99F6E4;
-  --teal-ink: #115E59;
+  --teal-ink: #0B5E56;
   --amber: #C2410C;
   --amber-hover: #9A3412;
   --amber-soft: #FFF7ED;
   --amber-border: #FDBA74;
-  --bg-canvas: #F8FAFC;
+  --bg-canvas: #FAFDFC;
   --bg-surface: #FFFFFF;
-  --bg-subtle: #F1F5F9;
+  --bg-subtle: #F1F6F6;
   --bg-code: #0D2D4D;
   --ink: #0E1B2E;
   --ink-2: #2D3E52;
@@ -90,8 +90,8 @@
   --space-6: 72px;
   --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", Tahoma, system-ui, sans-serif;
   --font-display: "Plus Jakarta Sans", "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Noto Sans", Tahoma, system-ui, sans-serif;
-  --cta: #0F766E;
-  --cta-hover: #115E59;
+  --cta: #0B5E56;
+  --cta-hover: #084943;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -130,7 +130,9 @@ html, body {
 }
 
 /* Başlıklar: güven veren, sakin başlık yüzü */
-h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.01em; }
+h1, h2, h3, .brand, .brand-name { font-family: var(--font-display); letter-spacing: -0.015em; }
+h1, h2, h3 { text-wrap: balance; }
+.calc-total, .price-val, output, .num, td { font-variant-numeric: tabular-nums; }
 
 ::selection {
   background: var(--teal-soft);
@@ -294,6 +296,7 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
   min-height: 44px;
   padding: 12px 20px;
   border-radius: var(--radius-sm);
@@ -1233,11 +1236,11 @@ code {
   <section class="hero">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <h1>Gece gelen mesaj cevapsız, iptal edilen koltuk boş kalmasın.</h1>
-        <p class="lead">DentaCore WhatsApp ve Instagram mesajlarını 16 dilde saniyeler içinde yanıtlar, iptal edilen koltuğu bekleme listesinden doldurur, kan sulandırıcı kullanan hastayı işlemden önce hekime bildirir. Hasta verisi kendi sunucunuzda şifreli kalır.</p>
+        <h1>Gece mesajlar yanıtlanır, boş koltuklar dolar.</h1>
+        <p class="lead">16 dilde WhatsApp yanıtı, otomatik bekleme listesi ve şifreli klinik paneli.</p>
         <div class="hero-cta">
-          <a class="btn btn-cta btn-lg" href="#demo">15 dakikalık canlı demo iste</a>
-          <a class="btn btn-ghost btn-lg" href="#hesap">Kliniğimin kaybını hesapla</a>
+          <a class="btn btn-cta btn-lg" href="#demo">Canlı demo iste</a>
+          <a class="btn btn-ghost btn-lg" href="#hesap">Kaybı hesapla</a>
         </div>
         <ul class="truth-list">
           <li>
@@ -1637,7 +1640,7 @@ code {
             </ul>
             <p>Bu hesaplama kliniğinizdeki kaybı görünür kılar. İlk ayın sonunda gerçek kaybı panelin ana ekranında kendi randevularınızla izlersiniz.</p>
           </div>
-          <a class="btn btn-cta btn-lg" href="#demo">Bu kaybı durdurmak istiyorum</a>
+          <a class="btn btn-cta btn-lg" href="#demo">Demo talep et</a>
         </div>
       </div>
     </div>
@@ -1660,7 +1663,7 @@ code {
             <li>Gerçek kampanya tıklama (/c/kod), bot filtresi ve kasa tahsilat dönüşüm hunisi</li>
             <li>Kırmızı bayraklı dijital anamnez, dijital tedavi planı onamı, laboratuvar ve implant/lot pasaportu</li>
           </ul>
-          <a class="btn btn-cta" href="#demo">Ücretsiz tanıtım ve kurulum talep edin</a>
+          <a class="btn btn-cta" href="#demo">Ücretsiz kurulum iste</a>
         </article>
       </div>
     </div>
@@ -3124,7 +3127,7 @@ code {
     tabSched.addEventListener("click", () => switchPreviewTab("schedule"));
   }
 
-  // Hero senaryoları (TR, EN, AR RTL, DE — Parlant VIP Hasta Koordinatörü Üslubu)
+  // Hero senaryoları (TR, EN, AR RTL, DE: Parlant VIP Hasta Koordinatörü Üslubu)
   const SCENARIOS = {
     tr: {
       dir: "ltr",

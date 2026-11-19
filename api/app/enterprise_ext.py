@@ -1930,17 +1930,18 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             </form>"""
         )
         return HTMLResponse(f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>Dijital Tedavi Planı Onayı</title></head>
-        <body style="font-family:system-ui;background:#F8FAFC;color:#0A2540;padding:16px">
-        <main style="max-width:640px;margin:auto;background:#fff;padding:20px;border-radius:12px;border:1px solid #E2E8F0">
-        <h1 style="font-size:20px;margin-top:0">{html.escape(tc['clinic_name'])} · Dijital Tedavi Planı Onayı</h1>
-        <p><strong>Hasta:</strong> {html.escape(tc['display_name'] or '')} · <strong>Belge Sürümü:</strong> {html.escape(tc['document_version'])} · <strong>SHA-256:</strong> <code>{tc['content_sha256'][:16]}...</code></p>
-        <table style="width:100%;border-collapse:collapse;margin:12px 0" border="1" cellpadding="8">
-        <thead><tr style="background:#F1F5F9"><th>Diş / Yüzey</th><th>İşlem</th><th>Tutar</th></tr></thead>
+        <title>Dijital Tedavi Planı Onayı</title>
+        <style>:root{{--bg:#F2F7F7;--surface:#FAFDFC;--ink:#0A2540;--muted:#3A575A;--primary:#0B5E56;--primary-hover:#084943;--border:#C8DADA;--subtle:#E9F2F2;--ok-bg:#DCFCE7;--ok-fg:#166534;--r:14px}}*{{box-sizing:border-box}}html,body{{margin:0;padding:0;overflow-x:clip;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.55}}body{{padding:20px 14px}}main{{max-width:680px;margin:12px auto;background:var(--surface);padding:28px;border-radius:var(--r);border:1px solid var(--border);box-shadow:0 8px 24px rgba(10,37,64,.06)}}.hdr{{display:flex;align-items:center;gap:12px;margin-bottom:12px}}.hdr-ico{{width:40px;height:40px;border-radius:10px;background:var(--subtle);color:var(--primary);display:grid;place-items:center;flex:0 0 40px}}h1{{font-size:clamp(1.2rem,2.4vw,1.45rem);line-height:1.25;margin:0;text-wrap:balance}}.meta{{font-size:.9rem;color:var(--muted);margin:0 0 16px;font-variant-numeric:tabular-nums}}.tbl-wrap{{overflow-x:auto;margin:16px 0}}table{{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.95rem}}th,td{{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left}}thead th{{background:var(--subtle);color:var(--ink);font-weight:700}}tfoot th{{background:var(--subtle);font-size:1rem}}.notice{{font-size:.85rem;color:var(--muted);background:var(--subtle);padding:12px 14px;border-radius:10px;border:1px solid var(--border)}}label{{display:block;margin:14px 0;font-size:.95rem;font-weight:600}}input[type=text]{{width:100%;margin-top:6px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:1rem;background:#fff;color:var(--ink)}}input:focus-visible,button:focus-visible{{outline:3px solid rgba(11,94,86,.35);outline-offset:2px}}button[type=submit]{{width:100%;min-height:48px;background:var(--primary);color:#fff;border:0;padding:14px;border-radius:10px;font-weight:700;font-size:1rem;cursor:pointer;transition:background-color .15s ease}}button[type=submit]:hover{{background:var(--primary-hover)}}.signed{{background:var(--ok-bg);color:var(--ok-fg);padding:14px;border-radius:10px;font-weight:700}}@media(prefers-reduced-motion:reduce){{*{{transition:none!important}}}}</style></head>
+        <body><main>
+        <div class="hdr"><span class="hdr-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+        <h1>{html.escape(tc['clinic_name'])} | Dijital Tedavi Planı Onayı</h1></div>
+        <p class="meta"><strong>Hasta:</strong> {html.escape(tc['display_name'] or '')} | <strong>Belge Sürümü:</strong> {html.escape(tc['document_version'])} | <strong>SHA-256:</strong> <code>{tc['content_sha256'][:16]}...</code></p>
+        <div class="tbl-wrap"><table>
+        <thead><tr><th>Diş / Yüzey</th><th>İşlem</th><th style="text-align:right">Tutar</th></tr></thead>
         <tbody>{rows_html}</tbody>
         <tfoot><tr><th colspan="2" style="text-align:right">Toplam Planlanan Tutar</th><th style="text-align:right">{tl(tc['total_amount_kurus']):,.2f} TL</th></tr></tfoot>
-        </table>
-        <p style="font-size:12.5px;color:#475569;background:#F1F5F9;padding:10px;border-radius:8px">{html.escape(LEGAL_CONSENT_NOTICE_TR)}</p>
+        </table></div>
+        <p class="notice">{html.escape(LEGAL_CONSENT_NOTICE_TR)}</p>
         {signed_banner}
         </main></body></html>""")
 
@@ -2432,12 +2433,13 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             raise HTTPException(404, "klinik bulunamadı")
         min_dt = (datetime.now(TZ) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
         return HTMLResponse(f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>{html.escape(cl['name'])} · Online Randevu</title>
-        <style>body{{font-family:system-ui,-apple-system,sans-serif;background:#F8FAFC;color:#0A2540;padding:16px;margin:0}}main{{max-width:520px;margin:20px auto;background:#fff;padding:24px;border-radius:14px;border:1px solid #E2E8F0}}label{{display:block;font-size:14px;font-weight:600;margin:12px 0 4px}}input,select{{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #CBD5E1;border-radius:8px;font-size:15px}}.hp{{position:absolute;left:-9999px;opacity:0}}.chk{{display:flex;align-items:flex-start;gap:8px;font-weight:400;margin:14px 0}}.chk input{{width:auto;margin-top:3px}}button{{width:100%;background:#0F766E;color:#fff;border:0;border-radius:10px;padding:13px;font-size:16px;font-weight:700;cursor:pointer}}</style></head>
+        <title>{html.escape(cl['name'])} | Online Randevu</title>
+        <style>:root{{--bg:#F2F7F7;--surface:#FAFDFC;--ink:#0A2540;--muted:#3A575A;--primary:#0B5E56;--primary-hover:#084943;--border:#C8DADA;--subtle:#E9F2F2;--r:14px}}*{{box-sizing:border-box}}html,body{{margin:0;padding:0;overflow-x:clip;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.55}}body{{padding:20px 14px}}main{{max-width:540px;margin:12px auto;background:var(--surface);padding:28px;border-radius:var(--r);border:1px solid var(--border);box-shadow:0 8px 24px rgba(10,37,64,.06)}}.hdr{{display:flex;align-items:center;gap:12px;margin-bottom:8px}}.hdr-ico{{width:40px;height:40px;border-radius:10px;background:var(--subtle);color:var(--primary);display:grid;place-items:center;flex:0 0 40px}}h1{{font-size:clamp(1.2rem,2.4vw,1.45rem);line-height:1.25;margin:0;text-wrap:balance}}.sub{{color:var(--muted);font-size:.92rem;margin:4px 0 14px}}label{{display:block;font-size:.92rem;font-weight:600;margin:14px 0 6px}}input,select{{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:1rem;background:#fff;color:var(--ink)}}input:focus-visible,select:focus-visible,button:focus-visible{{outline:3px solid rgba(11,94,86,.35);outline-offset:2px}}.hp{{position:absolute;left:-9999px;opacity:0}}.chk{{display:flex;align-items:flex-start;gap:10px;font-weight:400;margin:16px 0;font-size:.92rem;color:var(--muted)}}.chk input{{width:18px;height:18px;margin-top:2px;accent-color:var(--primary)}}button{{width:100%;min-height:48px;background:var(--primary);color:#fff;border:0;border-radius:10px;padding:14px;font-size:1rem;font-weight:700;cursor:pointer;transition:background-color .15s ease}}button:hover{{background:var(--primary-hover)}}@media(prefers-reduced-motion:reduce){{*{{transition:none!important}}}}</style></head>
         <body><main>
-        <h1 style="font-size:20px;margin-top:0">{html.escape(cl['name'])} · Online Randevu</h1>
-        <p style="color:#475569;font-size:14px">{html.escape(cl['address'] or cl['city'])}</p>
-        <p style="font-size:14px">Online randevu oluşturmak için bilgilerinizi girin; koltuk uygunluğu anında kontrol edilir.</p>
+        <div class="hdr"><span class="hdr-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+        <h1>{html.escape(cl['name'])} | Online Randevu</h1></div>
+        <p class="sub">{html.escape(cl['address'] or cl['city'])}</p>
+        <p class="sub">Bilgilerinizi girin; koltuk uygunluğu anında kontrol edilip randevunuz kesinleştirilir.</p>
         <form method="post" action="/randevu/{html.escape(clinic_slug, quote=True)}">
           <div class="hp" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
           <label for="name">Ad Soyad</label>

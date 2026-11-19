@@ -218,14 +218,19 @@ FUZZY_CANONICAL_PHRASES: dict[str, tuple[str, ...]] = {
 
 # Prompt Injection ve KVKK başka hasta verisi sızdırma tuzaklarını yakalayan güvenlik filtreleri
 PROMPT_INJECTION_RE = re.compile(
-    r"(onceki\s+tum\s+kurallari\s+unut|sistem\s+komutu|ignore\s+previous\s+instructions|system\s+prompt|"
+    r"(onceki\s+tum\s+(kurallari|talimat\w*)\s+unut|sistem\s+(komutu|istemi)|gizli\s+kurallar\w*|"
+    r"ignore\s+previous\s+instructions|system\s+prompt|dan\s+mod\w*|"
+    r"admin_token|sifreleme\s+anahtar\w*|veritabani\s+sifre\w*|tum\s+hasta\s+telefon\w*|"
     r"sen\s+artik\s+comert\s+bir\s+asistansin|omur\s+boyu\s+%?100\s+agrisiz\s+garanti)"
 )
 
 KVKK_TRAP_RE = re.compile(
     r"(sistemdeki\s+telefon\s+numarasini|kullandigi\s+ilaclari\s+bana\s+yazar|"
-    r"esinin\s+telefon\s+numarasi|baska\s+hastanin\s+bilgileri|ayse\s+kaya'?nin\s+(esi|telefon|ilac)|"
-    r"diger\s+hastalarin\s+telefon|veritabani\s+sifren)"
+    r"(esimin|esinin|kocamin|karimin|arkadasimin|komsunun|baska\s+birinin)\s+.*(randevu|telefon|ilac|islem|tedavi|bilgi)|"
+    r"hastalarin\s+(isim|ad|telefon|numara|liste|bilgi)|"
+    r"(tum\s+)?hasta\s+(listesi|telefonlari|numaralari)|"
+    r"(baska|diger)\s+hasta\w*\s+.*(bilgi|telefon|randevu|kayit|liste)|"
+    r"ayse\s+kaya'?nin\s+(esi|telefon|ilac)|veritabani\s+sifren)"
 )
 
 # Tehlikeli ev yapımı / kimyasal / kesici alet müdahale tuzakları (Japon yapıştırıcısı, çamaşır suyu, penseyle çekim vb.)
