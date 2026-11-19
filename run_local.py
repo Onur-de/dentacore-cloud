@@ -1423,13 +1423,18 @@ def list_appts(start: datetime, end: datetime, u: dict = Depends(ANY)):
     e_dt = end if end.tzinfo else end.replace(tzinfo=TZ)
     if e_dt - s_dt > timedelta(days=62):
         raise HTTPException(400, "aralık en fazla 62 gün")
-    rows = q(
-        """SELECT a.*, p.display_name AS patient, d.full_name AS doctor,
-                  EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=a.patient_id AND x.red_flags_json <> '[]') AS red_flag
-           FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
-           WHERE a.clinic_id=? ORDER BY a.starts_at""",
-        u["clinic_id"],
-    )
+    cid = u["clinic_id"]
+    perms = u.get("permissions") or {}
+    sql_a = """SELECT a.*, p.display_name AS patient, d.full_name AS doctor,
+                      EXISTS (SELECT 1 FROM anamnesis x WHERE x.patient_id=a.patient_id AND x.red_flags_json <> '[]') AS red_flag
+               FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN staff_users d ON d.id=a.doctor_id
+               WHERE a.clinic_id=?"""
+    args_a: list = [cid]
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        sql_a += " AND (a.doctor_id=? OR p.primary_doctor_id=?)"
+        args_a.extend([u["id"], u["id"]])
+    sql_a += " ORDER BY a.starts_at"
+    rows = q(sql_a, *args_a)
     out = []
     for r in rows:
         dt = datetime.fromisoformat(r["starts_at"])
@@ -2733,6 +2738,7 @@ class PatientUpdateIn(BaseModel):
 @app.patch("/app/api/patients/{pid}")
 def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(require_perm("patient_edit", "edit"))):
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, pid, u)
     t_now = iso_now()
     first_source_audit: dict | None = None
     with _DB_LOCK:
@@ -2805,6 +2811,7 @@ def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(require_perm(
 @app.post("/app/api/patients/{pid}/archive")
 def archive_patient(pid: int, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, pid, u)
     if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
         raise HTTPException(404, "hasta yok")
     ex("UPDATE patients SET active=0 WHERE id=? AND clinic_id=?", pid, cid)
@@ -2815,11 +2822,22 @@ def archive_patient(pid: int, u: dict = Depends(CLINICAL)):
 @app.post("/app/api/patients/{pid}/unarchive")
 def unarchive_patient(pid: int, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, pid, u)
     if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
         raise HTTPException(404, "hasta yok")
     ex("UPDATE patients SET active=1 WHERE id=? AND clinic_id=?", pid, cid)
     write_audit(u["id"], u["email"], "patient.unarchive", f"patient:{pid}", u["ip_h"], clinic_id=cid)
     return {"ok": True}
+
+
+def _media_dir() -> Path:
+    custom = os.environ.get("DC_MEDIA_DIR", "").strip()
+    if custom:
+        return Path(custom)
+    db_p = os.environ.get("DC_DB_PATH", "").strip()
+    if db_p:
+        return Path(db_p).resolve().parent / "encrypted_media"
+    return ROOT / "encrypted_media"
 
 
 @app.post("/app/api/patients/{pid}/media")
@@ -2900,7 +2918,7 @@ async def upload_patient_media(pid: int, request: Request, u: dict = Depends(req
         ext = "pdf"
     else:
         ext = "png" if "png" in eff_mime else ("webp" if "webp" in eff_mime else str(qc.get("format") or "jpg").lower())
-    img_dir = ROOT / "encrypted_media"
+    img_dir = _media_dir()
     img_dir.mkdir(parents=True, exist_ok=True)
     enc_name = f"p{pid}_{secrets.token_hex(6)}.{ext}.enc"
     enc_path = img_dir / enc_name
@@ -3149,8 +3167,8 @@ def get_patient(pid: int, reveal: bool = False, u: dict = Depends(require_perm("
         "bank_agreement_name": p.get("bank_agreement_name"),
         "bank_discount_pct": p.get("bank_discount_pct"),
         "groups": groups,
-        "balance": fin["balance"],
-        "finance_summary": fin,
+        "balance": fin["balance"] if can_fin_view else 0.0,
+        "finance_summary": fin if can_fin_view else {"masked": True},
         "treatments_summary": {
             "planned": [t for t in tooth_recs if t["status"] in ("planned", "caries", "extraction")],
             "completed": [t for t in tooth_recs if t["status"] in ODO_BILLABLE_STATUSES],
@@ -3290,10 +3308,10 @@ def _anonymize_patient_impl(pid: int, u: dict) -> dict:
         except Exception:
             c.rollback()
             raise
-    img_dir = ROOT / "encrypted_media"
-    if img_dir.is_dir():
-        for fp in img_dir.glob(f"p{pid}_*.enc"):
-            fp.unlink(missing_ok=True)
+    for img_dir in (_media_dir(), ROOT / "encrypted_media"):
+        if img_dir.is_dir():
+            for fp in img_dir.glob(f"p{pid}_*.enc"):
+                fp.unlink(missing_ok=True)
     write_audit(u["id"], u["email"], "patient.anonymize", f"patient:{pid}", u["ip_h"],
                 {"financial_records_preserved": True}, clinic_id=cid)
     return {"ok": True, "patient_id": pid, "anonymized": True, "financial_records_preserved": True}
@@ -3452,6 +3470,7 @@ def get_odontogram(pid: int, u: dict = Depends(require_perm("patient_view"))):
 @app.post("/app/api/patients/{pid}/odontogram")
 def add_odontogram_record(pid: int, b: OdontogramIn, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, pid, u)
     charge_id = None
     with _DB_LOCK:
         c = db()
@@ -3614,6 +3633,7 @@ def update_odontogram_record(pid: int, rid: int, b: OdontogramUpdateIn, u: dict 
 @app.delete("/app/api/patients/{pid}/odontogram/{rid}")
 def delete_odontogram_record(pid: int, rid: int, u: dict = Depends(CLINICAL)):
     cid = u["clinic_id"]
+    _enforce_doc_own_patient(cid, pid, u)
     rec = q1("SELECT * FROM tooth_records WHERE id=? AND patient_id=? AND clinic_id=?", rid, pid, cid)
     if not rec:
         raise HTTPException(404, "diş kaydı yok")
@@ -3836,9 +3856,17 @@ async def anamnez_submit(token: str, request: Request):
     flags = [k for k, _, red in ANAMNEZ_SORULAR if red and ans.get(k) == "evet"]
     sig = hashlib.sha256(f"{t['patient_id']}|{imza}".encode()).hexdigest()
     now_s = iso_now()
-    ex("INSERT INTO anamnesis (patient_id,answers_enc,red_flags_json,signer_name,signature_sha256,signed_at) VALUES (?,?,?,?,?,?)",
-       t["patient_id"], enc(json.dumps(ans)), json.dumps(flags), imza, sig, now_s)
-    ex("UPDATE anamnesis_tokens SET used_at=? WHERE token=?", now_s, token)
+    with _DB_LOCK:
+        c = db()
+        cur_t = c.execute("UPDATE anamnesis_tokens SET used_at=? WHERE token=? AND used_at IS NULL", (now_s, token))
+        if cur_t.rowcount == 0:
+            c.rollback()
+            return _patient_page("Bağlantı geçersiz", clinic, _INVALID_LINK, 409)
+        c.execute(
+            "INSERT INTO anamnesis (patient_id,answers_enc,red_flags_json,signer_name,signature_sha256,signed_at) VALUES (?,?,?,?,?,?)",
+            (t["patient_id"], enc(json.dumps(ans)), json.dumps(flags), imza, sig, now_s),
+        )
+        c.commit()
     texts = sec.kvkk_texts(clinic)
     ex("INSERT INTO consents (patient_id,kind,text_version,text_sha256,channel,granted_at) VALUES (?,?,?,?,?,?)",
        t["patient_id"], "kvkk_aydinlatma", sec.KVKK_METIN_VER, sec.kvkk_sha256(texts["aydinlatma"]), "web_form", now_s)
@@ -4979,9 +5007,18 @@ def switch_clinic(cid: int, u: dict = Depends(OWNER)):
 
 
 @app.get("/app/api/conversations")
-def list_conversations(u: dict = Depends(ANY)):
+def list_conversations(u: dict = Depends(require_perm("patient_view"))):
     cid = u["clinic_id"]
-    rows = q("SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? AND active=1 ORDER BY id DESC", cid)
+    perms = u.get("permissions") or {}
+    sql_c = "SELECT id, display_name, channel, lang FROM patients WHERE clinic_id=? AND active=1"
+    args_c: list = [cid]
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        sql_c += """ AND (primary_doctor_id=? OR created_by=?
+                         OR EXISTS (SELECT 1 FROM appointments ap WHERE ap.patient_id=patients.id AND ap.doctor_id=?)
+                         OR EXISTS (SELECT 1 FROM tooth_records tr WHERE tr.patient_id=patients.id AND tr.doctor_id=?))"""
+        args_c.extend([u["id"], u["id"], u["id"], u["id"]])
+    sql_c += " ORDER BY id DESC"
+    rows = q(sql_c, *args_c)
     all_logs = q(
         """SELECT patient_id, layer, intent, direction, body, delivery_status, delivery_error, created_at
            FROM message_log WHERE clinic_id=? AND patient_id IS NOT NULL ORDER BY id DESC""",
@@ -5104,6 +5141,7 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
     if b.patient_id is not None:
         if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
             raise HTTPException(404, "hasta yok")
+        _enforce_doc_own_patient(cid, b.patient_id, u)
         with _DB_LOCK:
             c_sim = db()
             camp_sim = _extract_campaign_ref(c_sim, cid, b.text)

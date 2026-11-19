@@ -21,8 +21,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Res
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 
-from . import cal, modules, security as sec
+from . import cal, media, modules, security as sec
 from .core import (S, add_alert, dec, dec_msg_body, enc, env, has_consent, ip_hash, log_msg, mask_phone, norm_phone, phone_hmac, q, q1, tx, upsert_patient)
+from .dental_catalog import (PATIENT_SOURCE_LABELS, PERMISSION_LABELS_TR, detect_acquisition_source, is_bot_traffic, resolve_permissions)
 from .router import TokenRouter
 
 TZ = ZoneInfo("Europe/Istanbul")
@@ -63,7 +64,8 @@ async def current_user(request: Request) -> dict:
         raise HTTPException(401, "oturum yok")
     s = await q1("""SELECT s.id_hash, s.csrf, s.last_seen, s.expires_at, s.active_clinic_id,
                            u.id, u.clinic_id AS home_clinic_id, u.email, u.full_name, u.role,
-                           u.totp_enabled, u.share_pct, coalesce(c.name, %s) AS clinic_name, coalesce(c.address, '') AS clinic_address
+                           u.job_title, u.permissions_json, u.totp_enabled, u.share_pct,
+                           coalesce(c.name, %s) AS clinic_name, coalesce(c.address, '') AS clinic_address
                     FROM sessions s JOIN staff_users u ON u.id = s.user_id
                     LEFT JOIN clinics c ON c.id = COALESCE(s.active_clinic_id, u.clinic_id)
                     WHERE s.id_hash=%s AND NOT s.revoked AND u.active AND s.expires_at > now()""", S.clinic, sec.session_hash(raw))
@@ -78,6 +80,9 @@ async def current_user(request: Request) -> dict:
             raise HTTPException(403, "köken reddedildi")
         if not hmac.compare_digest(request.headers.get("x-csrf-token", ""), s["csrf"]):
             raise HTTPException(403, "CSRF doğrulaması başarısız")
+    perms = resolve_permissions(s.get("role"), s.get("job_title"), s.get("permissions_json"))
+    if not perms.get("view", False) and not request.url.path.startswith("/auth/"):
+        raise HTTPException(403, "Sistem görüntüleme yetkiniz bulunmamaktadır")
     if (now - s["last_seen"]).total_seconds() > 60:
         await q("UPDATE sessions SET last_seen=now() WHERE id_hash=%s", s["id_hash"])
     s["ip_h"] = ip_hash(client_ip(request))
@@ -87,7 +92,36 @@ async def current_user(request: Request) -> dict:
     if not s["is_hq"] and active_cid != s["home_clinic_id"]:
         active_cid = s["home_clinic_id"]
     s["clinic_id"] = active_cid
+    s["permissions"] = perms
     return s
+
+
+def require_perm(*perm_keys: str):
+    async def dep(u: dict = Depends(current_user)) -> dict:
+        perms = u.get("permissions") or resolve_permissions(u.get("role"), u.get("job_title"), u.get("permissions_json"))
+        for pk in perm_keys:
+            if not perms.get(pk, False):
+                lbl = PERMISSION_LABELS_TR.get(pk, pk)
+                raise HTTPException(403, f"Bu işlem için '{lbl}' ({pk}) yetkisi gereklidir")
+        return u
+    return dep
+
+
+async def _enforce_doc_own_patient_pg(cid: int, pid: int, u: dict) -> None:
+    perms = u.get("permissions") or {}
+    if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+        p = await q1("SELECT primary_doctor_id, created_by FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
+        if not p:
+            raise HTTPException(404, "hasta yok")
+        uid = u["id"]
+        if p.get("primary_doctor_id") != uid and p.get("created_by") != uid:
+            owns = (
+                await q1("SELECT 1 FROM appointments WHERE clinic_id=%s AND patient_id=%s AND doctor_id=%s LIMIT 1", cid, pid, uid)
+                or await q1("SELECT 1 FROM tooth_records WHERE clinic_id=%s AND patient_id=%s AND doctor_id=%s LIMIT 1", cid, pid, uid)
+                or await q1("SELECT 1 FROM charges WHERE clinic_id=%s AND patient_id=%s AND doctor_id=%s LIMIT 1", cid, pid, uid)
+            )
+            if not owns:
+                raise HTTPException(403, "Yalnızca kendi sorumluluğunuzdaki veya tedavisini yaptığınız hastaları görüntüleyebilirsiniz")
 
 
 def need(*roles: str):
@@ -158,6 +192,9 @@ async def login(body: LoginIn, request: Request, response: Response):
             await sec.audit(u["id"], email, "auth.totp_fail", "", ip_hash(ip), clinic_id=int(u.get("clinic_id") or 1))
             raise HTTPException(401, "Doğrulama kodu hatalı")
         await q("UPDATE staff_users SET totp_last_step=%s WHERE id=%s", step, u["id"])
+    perms_u = resolve_permissions(u["role"], u.get("job_title"), u.get("permissions_json"))
+    if not perms_u.get("view", False):
+        raise HTTPException(403, "Bu personel hesabının yönetim paneli görüntüleme yetkisi bulunmamaktadır")
     raw, h = sec.new_session_token()
     csrf = sec.new_session_token()[0]
     home_cid = int(u.get("clinic_id") or 1)
@@ -317,17 +354,20 @@ async def overview(u: dict = Depends(ANY)):
                           (SELECT count(*) FROM message_log m LEFT JOIN patients p ON p.id=m.patient_id WHERE m.direction='in' AND COALESCE(p.clinic_id, m.clinic_id, 1)=%s AND m.created_at >= d AND m.created_at < d + interval '1 day') AS msgs,
                           (SELECT count(*) FROM appointments a WHERE a.clinic_id=%s AND a.created_at >= d AND a.created_at < d + interval '1 day') AS appts
                         FROM generate_series(%s::timestamptz, %s::timestamptz, interval '1 day') d ORDER BY d""", cid, cid, start, s)
-    return {
+    can_fin_view = bool((u.get("permissions") or {}).get("finance_view", False))
+    res_ov = {
         "today": {"appointments": len(active), "confirmed": sum(1 for a in active if a["status"] == "confirmed"), "occupancy": occ},
         "attendance_30d": {"done": att["done"], "noshow": att["noshow"], "noshow_rate": noshow_rate},
-        "loss": {"noshow_30d_try": tl(att["noshow"] * avg_ticket), "avg_ticket_try": tl(avg_ticket)},
-        "month": {"billed_try": tl(money["billed"]), "paid_try": tl(money["paid"])},
         "tokens_30d": {"replies": tok["total"], "llm_free_pct": round(100 * tok["free"] / tok["total"]) if tok["total"] else None,
                        "tokens": tok["tokens"]},
         "counts": misc,
         "series": [{"day": (start + timedelta(days=i)).strftime("%d.%m"), "msgs": r["msgs"], "appts": r["appts"]}
                    for i, r in enumerate(series)],
     }
+    if can_fin_view:
+        res_ov["loss"] = {"noshow_30d_try": tl(att["noshow"] * avg_ticket), "avg_ticket_try": tl(avg_ticket)}
+        res_ov["month"] = {"billed_try": tl(money["billed"]), "paid_try": tl(money["paid"])}
+    return res_ov
 
 
 # ======================================================================== takvim
@@ -680,9 +720,11 @@ class StatusIn(BaseModel):
 
 
 @router.post("/app/api/appointments/{aid}/status")
-async def appt_status(aid: int, b: StatusIn, u: dict = Depends(ANY)):
+async def appt_status(aid: int, b: StatusIn, u: dict = Depends(require_perm("edit"))):
     cid = u["clinic_id"]
-    a = await q1("SELECT id, patient_id, status, starts_at, duration_min, chair, doctor_id FROM appointments WHERE id=%s AND clinic_id=%s", aid, cid)
+    if b.status == "cancelled" and not (u.get("permissions") or {}).get("delete_cancel", False):
+        raise HTTPException(403, "Randevu iptal etme (delete_cancel) yetkiniz bulunmamaktadır")
+    a = await q1("SELECT id, patient_id, status, starts_at, duration_min, chair, doctor_id, treatment, satisfaction_sent_at FROM appointments WHERE id=%s AND clinic_id=%s", aid, cid)
     if not a:
         raise HTTPException(404, "randevu yok")
     prev_status = a["status"]
@@ -713,8 +755,8 @@ async def appt_status(aid: int, b: StatusIn, u: dict = Depends(ANY)):
         await log(u, "appointment.cancel", f"appointment:{aid}", {"offers": offers["n"]})
         return {"ok": True, "waitlist_offers": offers["n"]}
     await q("UPDATE appointments SET status=%s WHERE id=%s AND clinic_id=%s", b.status, aid, cid)
-    if b.status == "done" and a["patient_id"] and prev_status != "done":
-        await modules.request_feedback(a["patient_id"])
+    if b.status == "done" and a["patient_id"] and not a.get("satisfaction_sent_at"):
+        await modules.request_feedback(a["patient_id"], appt_id=aid, clinic_id=cid, treatment=a.get("treatment") or "tedavi")
     audit_action = "appointment.undo_cancel" if (prev_status == "cancelled" and b.status == "booked") else f"appointment.{b.status}"
     await log(u, audit_action, f"appointment:{aid}", {"from": prev_status, "to": b.status})
     return {"ok": True, "status": b.status}
@@ -761,8 +803,10 @@ async def create_patient(b: PatientIn, u: dict = Depends(ANY)):
 
 
 @router.get("/app/api/patients/{pid}")
-async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
-    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, u["clinic_id"])  # nosec B608
+async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(require_perm("patient_view"))):
+    cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
+    p = await q1(f"SELECT p.*, {BAL_SQL} AS balance FROM patients p WHERE p.id=%s AND p.clinic_id=%s", pid, cid)  # nosec B608
     if not p:
         raise HTTPException(404, "hasta yok")
     phone = dec(p["phone_enc"])
@@ -774,15 +818,25 @@ async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(ANY)):
     consents = await q("SELECT id, kind, text_version, text_sha256, channel, granted_at, revoked_at FROM consents WHERE patient_id=%s ORDER BY granted_at DESC", pid)
     for c in charges + pays:
         c["amount"] = tl(c.pop("amount_kurus"))
-    if u["role"] == "secretary":
+    if u["role"] not in ("owner", "doctor"):
         for a in anam:
             if a.get("red_flags"):
                 a["red_flags"] = ["Klinik Uyarı (Hekim Kontrolü)"]
-    return {"id": p["id"], "name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
-            "active": bool(p.get("active", True)),
-            "phone": phone if reveal else mask_phone(phone), "balance": tl(p["balance"]), "appointments": appts,
-            "charges": charges, "payments": pays, "anamnesis": anam, "consents": consents,
-            "anamnesis_links": {a["id"]: modules.sign(f"/view/anamnez/{a['id']}", ttl=900) for a in anam} if u["role"] != "secretary" else {}}
+    can_fin_view = bool((u.get("permissions") or {}).get("finance_view", False))
+    res_p = {
+        "id": p["id"], "name": p["display_name"], "lang": p["lang"], "channel": p["channel"],
+        "active": bool(p.get("active", True)),
+        "phone": phone if reveal else mask_phone(phone),
+        "balance": tl(p["balance"]) if can_fin_view else 0.0,
+        "finance_summary": {"balance": tl(p["balance"])} if can_fin_view else {"masked": True},
+        "appointments": appts,
+        "payments": pays if can_fin_view else [],
+        "anamnesis": anam, "consents": consents,
+        "anamnesis_links": {a["id"]: modules.sign(f"/view/anamnez/{a['id']}", ttl=900) for a in anam} if u["role"] in ("owner", "doctor") else {},
+    }
+    if can_fin_view:
+        res_p["charges"] = charges
+    return res_p
 
 
 class ConsentRevokeIn(BaseModel):
@@ -1375,7 +1429,7 @@ class VoidIn(BaseModel):
 
 
 @router.post("/app/api/charges")
-async def add_charge(b: ChargeIn, u: dict = Depends(ANY)):
+async def add_charge(b: ChargeIn, u: dict = Depends(require_perm("finance_edit"))):
     if not await limiter.hit(f"chg:{u['id']}", 60, 60):
         raise HTTPException(429, "Çok fazla hizmet ekleme isteği")
     cid = u["clinic_id"]
@@ -1416,7 +1470,7 @@ async def add_charge(b: ChargeIn, u: dict = Depends(ANY)):
 
 
 @router.post("/app/api/payments")
-async def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
+async def add_payment(b: PaymentIn, u: dict = Depends(require_perm("finance_edit"))):
     if not await limiter.hit(f"pay:{u['id']}", 60, 60):
         raise HTTPException(429, "Çok fazla tahsilat isteği")
     cid = u["clinic_id"]
@@ -1454,7 +1508,7 @@ async def add_payment(b: PaymentIn, u: dict = Depends(ANY)):
 
 
 @router.post("/app/api/{kind}/{eid}/void")
-async def void(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dict = Depends(CLINICAL)):
+async def void(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dict = Depends(require_perm("finance_view", "finance_edit", "delete_cancel"))):
     sql = (
         "UPDATE charges SET voided_at=now(), void_reason=%s WHERE id=%s AND clinic_id=%s AND voided_at IS NULL RETURNING id"
         if kind == "charges"
@@ -1468,7 +1522,7 @@ async def void(kind: Literal["charges", "payments"], eid: int, b: VoidIn, u: dic
 
 
 @router.get("/app/api/kasa")
-async def kasa(start: datetime, end: datetime, u: dict = Depends(CLINICAL)):
+async def kasa(start: datetime, end: datetime, u: dict = Depends(require_perm("finance_view"))):
     s_cmp = start if start.tzinfo else start.replace(tzinfo=TZ)
     e_cmp = end if end.tzinfo else end.replace(tzinfo=TZ)
     if s_cmp > e_cmp:
@@ -1896,6 +1950,59 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
     if not await limiter.hit(f"sim:{u['id']}", sim_limit, 60):
         raise HTTPException(429, "Çok fazla simülasyon isteği gönderildi; lütfen 1 dakika bekleyin")
     cid = u["clinic_id"]
+    if b.patient_id is not None:
+        if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", b.patient_id, cid):
+            raise HTTPException(404, "hasta yok")
+        await _enforce_doc_own_patient_pg(cid, b.patient_id, u)
+        m_ref = re.search(r"\[?\bref\s*[:=-]\s*([a-zA-Z0-9_-]{2,64})\]?", b.text or "", re.IGNORECASE)
+        cand_code = m_ref.group(1).strip() if m_ref else ""
+        if cand_code:
+            camp_sim = await q1(
+                "SELECT * FROM campaigns WHERE clinic_id=%s AND (LOWER(code)=LOWER(%s) OR LOWER(utm_campaign)=LOWER(%s)) ORDER BY id DESC LIMIT 1",
+                cid, cand_code, cand_code,
+            )
+            if camp_sim:
+                det_s = detect_acquisition_source(
+                    explicit_source=camp_sim.get("channel") or camp_sim.get("source"),
+                    utm_source=camp_sim.get("utm_source") or "",
+                    utm_medium=camp_sim.get("utm_medium") or "",
+                    default_source="whatsapp",
+                )
+                cp_id_sim = int(camp_sim["id"])
+                us_sim = (camp_sim.get("utm_source") or det_s)[:80]
+                um_sim = (camp_sim.get("utm_medium") or "cpc")[:80]
+                uc_sim = (camp_sim.get("utm_campaign") or camp_sim.get("code") or "")[:120]
+                await q(
+                    """UPDATE patients
+                       SET last_source=%s, campaign_id=COALESCE(campaign_id, %s),
+                           utm_source=CASE WHEN %s<>'' THEN %s ELSE utm_source END,
+                           utm_medium=CASE WHEN %s<>'' THEN %s ELSE utm_medium END,
+                           utm_campaign=CASE WHEN %s<>'' THEN %s ELSE utm_campaign END
+                       WHERE id=%s AND clinic_id=%s""",
+                    det_s, cp_id_sim, us_sim, us_sim, um_sim, um_sim, uc_sim, uc_sim, b.patient_id, cid,
+                )
+                has_ev_sim = await q1(
+                    "SELECT 1 FROM campaign_events WHERE clinic_id=%s AND campaign_id=%s AND patient_id=%s AND event_type='patient_created' LIMIT 1",
+                    cid, cp_id_sim, b.patient_id,
+                )
+                if not has_ev_sim:
+                    await q(
+                        """INSERT INTO campaign_events
+                           (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,is_bot,is_unique,patient_id,created_at)
+                           VALUES (%s,%s,'patient_created',%s,%s,%s,%s,0,1,%s,%s)""",
+                        cid, cp_id_sim, det_s, us_sim, um_sim, uc_sim, b.patient_id, datetime.now(timezone.utc).isoformat(),
+                    )
+                    await q("UPDATE campaigns SET conversations = conversations + 1 WHERE id=%s AND clinic_id=%s", cp_id_sim, cid)
+        sat_sim = await modules.handle_satisfaction_reply(b.patient_id, b.text, clinic_id=cid)
+        if sat_sim:
+            sat_ans, sat_intent = sat_sim
+            await log_msg(b.patient_id, "in", None, "simulator", 0, 0, clinic_id=cid, body=b.text[:1200], delivery_status="received")
+            await log_msg(b.patient_id, "out", "L1-memnuniyet", f"simulator:{sat_intent}", 0, 0, clinic_id=cid, body=sat_ans[:2000], delivery_status="dry_run")
+            await log(u, "conversation.simulate", f"patient:{b.patient_id}", {"lang": b.lang or "tr", "layer": "L1-memnuniyet", "intent": sat_intent})
+            return {
+                "answer": sat_ans, "layer": "L1-memnuniyet", "intent": sat_intent, "lang": b.lang or "tr",
+                "tokens_in": 0, "tokens_out": 0, "alert": None, "handoff": False, "meta": {"patient_id": b.patient_id},
+            }
     c = await q1("SELECT name, address, phone, ai_custom_rules_json FROM clinics WHERE id=%s", cid)
     all_branches = await q("SELECT id, name, city, address, phone FROM clinics WHERE active")
     facts: dict = {
@@ -2057,6 +2164,12 @@ class LeadIn(BaseModel):
     contact: str = Field(min_length=5, max_length=120)
     city: str | None = Field(default=None, max_length=40)
     chairs: int | None = Field(default=None, ge=1, le=200)
+    source: str | None = Field(default=None, max_length=40)
+    utm_source: str = Field("", max_length=80)
+    utm_medium: str = Field("", max_length=80)
+    utm_campaign: str = Field("", max_length=120)
+    click_id: str = Field("", max_length=120)
+    campaign_code: str = Field("", max_length=80)
     kvkk_aydinlatma: bool = False
     yurt_disi_riza: bool = False
     website: str | None = Field(default=None, max_length=200)   # bal küpü: insanlar boş bırakır
@@ -2072,12 +2185,33 @@ async def lead(b: LeadIn, request: Request):
         raise HTTPException(429, "Çok fazla talep")
     texts = sec.kvkk_texts("DentaCore")
     k_hash = sec.kvkk_sha256(texts["lead"])
-    await q(
-        "INSERT INTO leads (clinic, contact_enc, city, chairs, kvkk_version, kvkk_sha256, yurt_disi_riza) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+    det_src = detect_acquisition_source(
+        explicit_source=b.source,
+        utm_source=b.utm_source,
+        utm_medium=b.utm_medium,
+        click_id=b.click_id,
+        referrer=request.headers.get("referer", ""),
+        default_source="website",
+    )
+    t_now = datetime.now(timezone.utc).isoformat()
+    r = await q1(
+        "INSERT INTO leads (clinic, contact_enc, city, chairs, kvkk_version, kvkk_sha256, yurt_disi_riza) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         b.clinic, enc(b.contact), b.city, b.chairs, sec.KVKK_METIN_VER, k_hash, bool(b.yurt_disi_riza),
     )
-    await add_alert(None, "web_talep", f"Web sitesinden demo talebi: {b.clinic} ({b.city or '-'}, {b.chairs or '?'} koltuk)")
-    return {"ok": True}
+    camp_code = b.campaign_code.strip() or b.utm_campaign.strip()
+    camp_row = await q1("SELECT id, clinic_id FROM campaigns WHERE code=%s OR utm_campaign=%s LIMIT 1", camp_code, camp_code) if camp_code else None
+    if camp_row:
+        ua = request.headers.get("user-agent", "")
+        bot_flag = 1 if is_bot_traffic(ua) else 0
+        await q(
+            """INSERT INTO campaign_events
+               (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,click_id,is_bot,is_unique,user_agent_summary,created_at)
+               VALUES (%s,%s,'form_submit',%s,%s,%s,%s,%s,%s,1,%s,%s)""",
+            int(camp_row["clinic_id"]), int(camp_row["id"]), det_src, b.utm_source[:80], b.utm_medium[:80],
+            b.utm_campaign[:120], b.click_id[:120], bot_flag, ua[:160], t_now,
+        )
+    await add_alert(None, "web_talep", f"Web sitesinden demo talebi ({PATIENT_SOURCE_LABELS.get(det_src, det_src)}): {b.clinic} ({b.city or '-'}, {b.chairs or '?'} koltuk)")
+    return {"ok": True, "lead_id": r["id"] if r else None, "source": det_src}
 
 
 @router.get("/app/api/leads")
@@ -2092,7 +2226,7 @@ async def list_leads_pg(u: dict = Depends(HQ_OWNER)):
 
 
 @router.get("/app/api/patients/check-duplicate")
-async def check_duplicate_patient_pg(phone: str = "", name: str = "", u: dict = Depends(ANY)):
+async def check_duplicate_patient_pg(phone: str = "", name: str = "", u: dict = Depends(require_perm("patient_view"))):
     cid = u["clinic_id"]
     matches = []
     if phone.strip():
@@ -2109,21 +2243,41 @@ async def check_duplicate_patient_pg(phone: str = "", name: str = "", u: dict = 
 
 
 @router.post("/app/api/patients/{pid}/media")
-async def upload_patient_media_pg(pid: int, request: Request, u: dict = Depends(ANY)):
+async def upload_patient_media_pg(pid: int, request: Request, u: dict = Depends(require_perm("patient_edit"))):
     cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
     p_row = await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
     if not p_row:
         raise HTTPException(404, "hasta yok")
     data = await request.body()
+    if not data or len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "Geçersiz dosya boyutu (en fazla 15 MB)")
     qp = request.query_params
-    filename = Path(str(qp.get("filename") or "upload.jpg").replace("\\", "/")).name
+    raw_base_fn = Path(str(qp.get("filename") or "upload.jpg").replace("\\", "/")).name
+    safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", raw_base_fn)[:120] or "upload.jpg"
+    category = qp.get("category") if qp.get("category") in ("xray", "photo", "document") else "photo"
+    stage = qp.get("stage") if qp.get("stage") in ("general", "before", "after") else "general"
     try:
-        qc = media.assess_media_file(data, filename=filename)
+        qc = media.assess_media_file(data, filename=safe_filename)
     except ValueError as ve:
         raise HTTPException(400, str(ve))
-    enc_path = media.store_encrypted(pid, data, str(qc.get("mime_type") or "image/jpeg"))
-    await log(u, "patient.media_upload", f"patient:{pid}", {"verdict": qc["verdict"]})
-    return {**qc, "patient_id": pid, "filename": filename, "encrypted_file": Path(enc_path).name}
+    is_dcm = bool(qc.get("is_dicom") or qc.get("kind") == "dicom")
+    eff_mime = str(qc.get("mime_type") or qc.get("mime") or "image/jpeg")
+    enc_path = media.store_encrypted(pid, data, eff_mime)
+    enc_name = Path(enc_path).name
+    m_row = await q1(
+        """INSERT INTO patient_media
+           (clinic_id,patient_id,category,stage,original_filename,mime_type,file_size_bytes,
+            sha256_hash,encrypted_path,is_dicom,width,height,sharpness,brightness,qc_verdict,uploaded_by,created_at)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        cid, pid, "xray" if is_dcm else category, stage, safe_filename, eff_mime, len(data),
+        qc.get("sha256", ""), enc_name, 1 if is_dcm else 0, int(qc.get("w") or 0), int(qc.get("h") or 0),
+        float(qc.get("sharpness") or 0), float(qc.get("brightness") or 0), qc["verdict"], u["id"],
+        datetime.now(timezone.utc).isoformat(),
+    )
+    mid = m_row["id"] if m_row else None
+    await log(u, "patient.media_upload", f"patient:{pid}:media:{mid}", {"verdict": qc["verdict"]})
+    return {**qc, "id": mid, "media_id": mid, "patient_id": pid, "filename": safe_filename, "encrypted_file": enc_name}
 
 
 class PostopSchedPgIn(BaseModel):

@@ -286,6 +286,9 @@ async def submit_anamnesis(token: str, form: dict) -> tuple[bool, str]:
     imza = (form.get("imza") or "").strip()[:80]
     if not (has_ayd and has_saglik and len(imza) >= 2):
         return False, "Lütfen aydınlatma metni ve sağlık verisi açık rıza onay kutularını işaretleyin ve adınızı soyadınızı yazın."
+    claimed = await q1("UPDATE anamnesis_tokens SET used_at=now() WHERE token=%s AND used_at IS NULL AND expires_at > now() RETURNING patient_id", token)
+    if not claimed:
+        return False, "Bu bağlantının süresi dolmuş veya daha önce kullanılmış."
     answers = {k: form.get(k, "") for k, _, _ in ANAMNEZ_SORULAR}
     answers["ilaclar"] = (form.get("ilaclar") or "")[:500]
     flags = [k for k, _, red in ANAMNEZ_SORULAR if red and answers.get(k) == "evet"]
@@ -293,7 +296,6 @@ async def submit_anamnesis(token: str, form: dict) -> tuple[bool, str]:
     signature = hashlib.sha256(f"{pid}|{imza}|{json.dumps(answers, sort_keys=True)}|{now().isoformat()}".encode()).hexdigest()
     row = await q1("""INSERT INTO anamnesis (patient_id, answers_enc, red_flags, signer_name, signature_sha256)
                       VALUES (%s,%s,%s,%s,%s) RETURNING id""", pid, enc(json.dumps(answers, ensure_ascii=False)), flags, imza, signature)
-    await q("UPDATE anamnesis_tokens SET used_at=now() WHERE token=%s", token)
     texts = kvkk_texts(S.clinic)
     await add_consent(pid, "kvkk_aydinlatma", _VER, texts["aydinlatma"], "web_form")
     await add_consent(pid, "saglik_verisi_acik_riza", _VER, texts["saglik"], "web_form")
@@ -394,11 +396,78 @@ async def mine_sleeping_plans(limit: int = 30):
     return len(rows)
 
 
-# ================= 6) Deneyim talebi (filtresiz, herkese eşit) =================
-async def request_feedback(pid: int):
+# ================= 6) İki aşamalı memnuniyet ve Google değerlendirme akışı (Podium / Weave standardı) =================
+async def request_feedback(pid: int, appt_id: int | None = None, clinic_id: int = 1, treatment: str = "tedavi"):
     p = await patient(pid)
-    private = f"{S.public_url}/form/geri-bildirim"
-    await wa.send_template(p["phone"], TPL["feedback"], [S.google_review_url, private])
+    fb_link = sign("/form/geri-bildirim", ttl=7 * 86400)
+    p_name = p.get("display_name") or "Sayın Hastamız"
+    sat_msg = (
+        f"Merhaba {p_name}, bugün kliniğimizi ziyaret ettiğiniz için teşekkür ederiz. "
+        f"Aldığınız {treatment} hizmetimizden memnun kaldınız mı? "
+        f"Yanıt olarak 'Memnun kaldım' veya 'Şikayetim var' yazabilir ya da 1-10 arası puan verebilirsiniz. "
+        f"(Kliniğimize doğrudan özel geri bildirim iletmek için: {fb_link})"
+    )
+    await wa.send_text_or_template(p["phone"], sat_msg, TPL["feedback"], [fb_link])
+    if appt_id is not None:
+        await q("UPDATE appointments SET satisfaction_sent_at=now(), satisfaction_status='asked' WHERE id=%s", appt_id)
+    else:
+        await q(
+            """UPDATE appointments SET satisfaction_sent_at=now(), satisfaction_status='asked'
+               WHERE id=(SELECT id FROM appointments WHERE patient_id=%s AND status='done' ORDER BY starts_at DESC LIMIT 1)""",
+            pid,
+        )
+
+
+async def handle_satisfaction_reply(pid: int, text: str, clinic_id: int = 1) -> tuple[str, str] | None:
+    import re
+    raw_txt = text or ""
+    cleaned = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", normalize(raw_txt))).strip()
+    sat_appt = await q1(
+        """SELECT id, treatment FROM appointments
+           WHERE clinic_id=%s AND patient_id=%s AND status='done'
+             AND satisfaction_sent_at IS NOT NULL AND satisfaction_reply IS NULL
+           ORDER BY id DESC LIMIT 1""",
+        clinic_id, pid,
+    )
+    if not sat_appt:
+        return None
+    neg_phrases = ("memnun degilim", "memnun kalmadim", "sikayet", "kotu", "berbat", "agrim var", "cok agri", "rezalet", "hic memnun", "uzgun", "pisman")
+    pos_phrases = ("memnun kaldim", "cok memnun", "memnunum", "memnun", "cok iyi", "harika", "tesekkur", "super", "mukemmel", "gayet iyi", "elinize saglik")
+    has_neg = any(w in cleaned for w in neg_phrases) or cleaned in {"hayir", "no"}
+    has_pos = not has_neg and (any(w in cleaned for w in pos_phrases) or cleaned in {"evet", "yes", "tamam"})
+    is_num = bool(re.fullmatch(r"\s*(10|[1-9])\s*", raw_txt))
+    active_postop = await q1(
+        "SELECT id FROM postop_checks WHERE patient_id=%s AND sent_at IS NOT NULL AND answered_at IS NULL ORDER BY id DESC LIMIT 1",
+        pid,
+    )
+    num_val = int(raw_txt.strip()) if (is_num and not active_postop) else None
+    is_sat_neg = has_neg or (num_val is not None and 1 <= num_val <= 4)
+    is_sat_pos = has_pos or (num_val is not None and 8 <= num_val <= 10)
+    if not (is_sat_neg or is_sat_pos):
+        return None
+    if is_sat_neg:
+        await q(
+            "UPDATE appointments SET satisfaction_reply=%s, satisfaction_replied_at=now(), satisfaction_status='negative' WHERE id=%s",
+            raw_txt[:400], sat_appt["id"],
+        )
+        p_row = await q1("SELECT display_name FROM patients WHERE id=%s", pid)
+        pname = (p_row and p_row.get("display_name")) or f"Hasta #{pid}"
+        await add_alert(pid, "memnuniyetsiz_hasta", f"MEMNUNİYETSİZ HASTA UYARISI: {pname} (#{pid}) randevu sonrası olumsuz geri bildirim iletti: {raw_txt[:200]}", clinic_id=clinic_id)
+        await add_alert(pid, "sekreter_gorev", f"ACİL YÖNETİCİ / SEKRETER GÖREVİ: Memnuniyetsiz hasta {pname} (#{pid}) ile hemen iletişime geçin.", clinic_id=clinic_id)
+        return (
+            "Yaşadığınız olumsuz deneyim için çok özür dileriz. Bildiriminiz başhekimliğimize ve klinik yöneticimize acil öncelikle iletildi; klinik yöneticimiz sizinle hemen ilgilenecektir.",
+            "memnuniyet_olumsuz",
+        )
+    cl_row = await q1("SELECT google_review_url FROM clinics WHERE id=%s", clinic_id) or {}
+    g_url = (cl_row.get("google_review_url") or S.google_review_url or "https://search.google.com/local/writereview").strip()
+    await q(
+        "UPDATE appointments SET satisfaction_reply=%s, satisfaction_replied_at=now(), satisfaction_status='positive', google_link_sent_at=now() WHERE id=%s",
+        raw_txt[:400], sat_appt["id"],
+    )
+    return (
+        f"Memnuniyetiniz bizi çok mutlu etti, değerli geri bildiriminiz için çok teşekkür ederiz! Deneyiminizi Google Haritalar üzerinde paylaşmanız kliniğimiz için çok değerli: {g_url}",
+        "memnuniyet_olumlu",
+    )
 
 
 # ================= 7) Sabah 08:30 hekim özeti =================

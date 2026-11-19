@@ -293,7 +293,7 @@ ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS utm_source   TEXT NOT NULL DEF
 ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS utm_medium   TEXT NOT NULL DEFAULT 'cpc';
 ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS utm_campaign TEXT NOT NULL DEFAULT '';
 ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS target_url   TEXT NOT NULL DEFAULT '/';
-ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS is_sample    BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE campaigns    ADD COLUMN IF NOT EXISTS is_sample    INT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS campaign_events (
   id                 BIGSERIAL PRIMARY KEY,
@@ -306,13 +306,13 @@ CREATE TABLE IF NOT EXISTS campaign_events (
   utm_campaign       TEXT NOT NULL DEFAULT '',
   click_id           TEXT NOT NULL DEFAULT '',
   visitor_hash       TEXT NOT NULL DEFAULT '',
-  is_bot             BOOLEAN NOT NULL DEFAULT false,
-  is_unique          BOOLEAN NOT NULL DEFAULT false,
+  is_bot             INT NOT NULL DEFAULT 0,
+  is_unique          INT NOT NULL DEFAULT 0,
   patient_id         BIGINT,
   appointment_id     BIGINT,
   idempotency_key    TEXT,
   user_agent_summary TEXT NOT NULL DEFAULT '',
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at         TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS bank_agreements (
@@ -326,11 +326,11 @@ CREATE TABLE IF NOT EXISTS bank_agreements (
   fixed_discount_kurus  BIGINT NOT NULL DEFAULT 0,
   applicable_treatments TEXT NOT NULL DEFAULT 'all',
   max_discount_kurus    BIGINT NOT NULL DEFAULT 0,
-  combinable            BOOLEAN NOT NULL DEFAULT false,
+  combinable            INT NOT NULL DEFAULT 0,
   eligibility_notes     TEXT NOT NULL DEFAULT '',
-  active                BOOLEAN NOT NULL DEFAULT true,
+  active                INT NOT NULL DEFAULT 1,
   created_by            BIGINT,
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at            TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS patient_groups (
@@ -338,10 +338,10 @@ CREATE TABLE IF NOT EXISTS patient_groups (
   clinic_id     BIGINT NOT NULL DEFAULT 1,
   name          TEXT NOT NULL,
   color         TEXT NOT NULL DEFAULT 'teal',
-  is_restricted BOOLEAN NOT NULL DEFAULT false,
+  is_restricted INT NOT NULL DEFAULT 0,
   description   TEXT NOT NULL DEFAULT '',
   created_by    BIGINT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at    TEXT NOT NULL DEFAULT (now()::text),
   UNIQUE(clinic_id, name)
 );
 
@@ -353,24 +353,28 @@ CREATE TABLE IF NOT EXISTS patient_group_members (
   reason        TEXT NOT NULL DEFAULT '',
   added_by      BIGINT,
   added_by_name TEXT NOT NULL DEFAULT '',
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  added_at      TEXT NOT NULL DEFAULT (now()::text),
+  created_at    TEXT NOT NULL DEFAULT (now()::text),
   UNIQUE(clinic_id, patient_id, group_id)
 );
 
 CREATE TABLE IF NOT EXISTS payment_installments (
-  id          BIGSERIAL PRIMARY KEY,
-  clinic_id   BIGINT NOT NULL DEFAULT 1,
-  patient_id  BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-  charge_id   BIGINT,
-  title       TEXT NOT NULL DEFAULT 'Taksit',
-  due_date    TEXT NOT NULL,
-  amount_kurus BIGINT NOT NULL CHECK (amount_kurus > 0),
-  paid_kurus  BIGINT NOT NULL DEFAULT 0,
-  status      TEXT NOT NULL DEFAULT 'pending',
-  paid_at     TIMESTAMPTZ,
-  note        TEXT NOT NULL DEFAULT '',
-  created_by  BIGINT,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                 BIGSERIAL PRIMARY KEY,
+  clinic_id          BIGINT NOT NULL DEFAULT 1,
+  patient_id         BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  charge_id          BIGINT,
+  installment_no     INT NOT NULL DEFAULT 1,
+  total_installments INT NOT NULL DEFAULT 1,
+  title              TEXT NOT NULL DEFAULT 'Taksit',
+  due_date           TEXT NOT NULL,
+  amount_kurus       BIGINT NOT NULL CHECK (amount_kurus > 0),
+  paid_kurus         BIGINT NOT NULL DEFAULT 0,
+  status             TEXT NOT NULL DEFAULT 'pending',
+  paid_payment_id    BIGINT,
+  paid_at            TEXT,
+  note               TEXT NOT NULL DEFAULT '',
+  created_by         BIGINT,
+  created_at         TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS periodontal_exams (
@@ -378,30 +382,40 @@ CREATE TABLE IF NOT EXISTS periodontal_exams (
   clinic_id          BIGINT NOT NULL DEFAULT 1,
   patient_id         BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   doctor_id          BIGINT,
+  exam_date          TEXT NOT NULL DEFAULT '',
+  teeth_json         TEXT NOT NULL DEFAULT '{}',
   measurements_json  TEXT NOT NULL DEFAULT '{}',
+  bop_pct            NUMERIC(5,2) NOT NULL DEFAULT 0,
+  plaque_pct         NUMERIC(5,2) NOT NULL DEFAULT 0,
   plaque_index_pct   NUMERIC(5,2) NOT NULL DEFAULT 0,
   bleeding_index_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+  mean_pd            NUMERIC(5,2) NOT NULL DEFAULT 0,
+  max_pd             INT NOT NULL DEFAULT 0,
+  doctor_approved    INT NOT NULL DEFAULT 1,
+  doctor_note        TEXT NOT NULL DEFAULT '',
   note               TEXT NOT NULL DEFAULT '',
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at         TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS treatment_consents (
-  id              BIGSERIAL PRIMARY KEY,
-  clinic_id       BIGINT NOT NULL DEFAULT 1,
-  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-  doctor_id       BIGINT,
-  treatment_name  TEXT NOT NULL,
-  tooth_fdi       TEXT NOT NULL DEFAULT '',
-  risks_text      TEXT NOT NULL DEFAULT '',
-  body_text       TEXT NOT NULL,
-  text_sha256     TEXT NOT NULL,
-  token           TEXT UNIQUE NOT NULL,
-  status          TEXT NOT NULL DEFAULT 'pending',
-  signer_name     TEXT NOT NULL DEFAULT '',
-  signed_at       TIMESTAMPTZ,
-  signer_ip_hash  TEXT NOT NULL DEFAULT '',
-  approval_type   TEXT NOT NULL DEFAULT 'electronic_form_approval',
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                 BIGSERIAL PRIMARY KEY,
+  clinic_id          BIGINT NOT NULL DEFAULT 1,
+  patient_id         BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id          BIGINT,
+  token              TEXT UNIQUE NOT NULL,
+  plan_summary_json  TEXT NOT NULL DEFAULT '[]',
+  total_amount_kurus BIGINT NOT NULL DEFAULT 0,
+  document_version   TEXT NOT NULL DEFAULT '2026-11-v1',
+  content_sha256     TEXT NOT NULL DEFAULT '',
+  signer_name        TEXT NOT NULL DEFAULT '',
+  signature_text     TEXT NOT NULL DEFAULT '',
+  consent_type       TEXT NOT NULL DEFAULT 'electronic_form_approval',
+  status             TEXT NOT NULL DEFAULT 'pending',
+  signed_ip_hash     TEXT NOT NULL DEFAULT '',
+  signed_user_agent  TEXT NOT NULL DEFAULT '',
+  signed_at          TEXT,
+  expires_at         TEXT,
+  created_at         TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS lab_orders (
@@ -409,62 +423,76 @@ CREATE TABLE IF NOT EXISTS lab_orders (
   clinic_id       BIGINT NOT NULL DEFAULT 1,
   patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   doctor_id       BIGINT,
+  tooth_fdi       INT,
   lab_name        TEXT NOT NULL,
-  work_type       TEXT NOT NULL,
-  tooth_fdi       TEXT NOT NULL DEFAULT '',
+  procedure_type  TEXT NOT NULL DEFAULT '',
+  work_type       TEXT NOT NULL DEFAULT '',
+  shade_color     TEXT NOT NULL DEFAULT 'A2',
   shade           TEXT NOT NULL DEFAULT 'A2',
-  sent_at         TEXT NOT NULL,
+  sent_date       TEXT NOT NULL DEFAULT '',
+  sent_at         TEXT NOT NULL DEFAULT '',
   due_date        TEXT NOT NULL,
-  received_at     TEXT,
+  delivered_date  TEXT,
   delivered_at    TEXT,
   cost_kurus      BIGINT NOT NULL DEFAULT 0,
-  status          TEXT NOT NULL DEFAULT 'ordered',
+  status          TEXT NOT NULL DEFAULT 'sent',
   note            TEXT NOT NULL DEFAULT '',
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_by      BIGINT,
+  created_at      TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS implant_records (
-  id              BIGSERIAL PRIMARY KEY,
-  clinic_id       BIGINT NOT NULL DEFAULT 1,
-  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-  tooth_fdi       INT NOT NULL,
-  brand           TEXT NOT NULL,
-  model           TEXT NOT NULL DEFAULT '',
-  diameter_mm     NUMERIC(5,2) NOT NULL DEFAULT 4.0,
-  length_mm       NUMERIC(5,2) NOT NULL DEFAULT 10.0,
-  lot_number      TEXT NOT NULL,
-  serial_number   TEXT NOT NULL DEFAULT '',
-  barcode_udi     TEXT NOT NULL DEFAULT '',
-  supplier        TEXT NOT NULL DEFAULT '',
-  doctor_id       BIGINT,
-  placed_at       TEXT NOT NULL,
-  torque_ncm      NUMERIC(5,2) NOT NULL DEFAULT 35.0,
-  note            TEXT NOT NULL DEFAULT '',
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                      BIGSERIAL PRIMARY KEY,
+  clinic_id               BIGINT NOT NULL DEFAULT 1,
+  patient_id              BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id               BIGINT,
+  tooth_fdi               INT NOT NULL,
+  brand                   TEXT NOT NULL,
+  model                   TEXT NOT NULL DEFAULT '',
+  diameter_mm             NUMERIC(5,2) NOT NULL DEFAULT 4.1,
+  length_mm               NUMERIC(5,2) NOT NULL DEFAULT 10.0,
+  lot_number              TEXT NOT NULL,
+  serial_number           TEXT NOT NULL DEFAULT '',
+  expiry_date             TEXT NOT NULL DEFAULT '',
+  used_at                 TEXT NOT NULL DEFAULT '',
+  placed_at               TEXT NOT NULL DEFAULT '',
+  supplier                TEXT NOT NULL DEFAULT '',
+  document_ref            TEXT NOT NULL DEFAULT '',
+  uts_barcode             TEXT NOT NULL DEFAULT '',
+  barcode_udi             TEXT NOT NULL DEFAULT '',
+  uts_notification_status TEXT NOT NULL DEFAULT 'not_connected_prepared',
+  torque_ncm              NUMERIC(5,2) NOT NULL DEFAULT 35.0,
+  note                    TEXT NOT NULL DEFAULT '',
+  created_by              BIGINT,
+  created_at              TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS patient_media (
-  id               BIGSERIAL PRIMARY KEY,
-  clinic_id        BIGINT NOT NULL DEFAULT 1,
-  patient_id       BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-  appointment_id   BIGINT,
-  tooth_record_id  BIGINT,
-  category         TEXT NOT NULL DEFAULT 'photo',
-  stage            TEXT NOT NULL DEFAULT 'general',
-  filename         TEXT NOT NULL,
-  mime_type        TEXT NOT NULL,
-  size_bytes       BIGINT NOT NULL,
-  width            INT NOT NULL DEFAULT 0,
-  height           INT NOT NULL DEFAULT 0,
-  sha256           TEXT NOT NULL,
-  encrypted_file   TEXT NOT NULL,
-  qc_verdict       TEXT NOT NULL DEFAULT 'ok',
-  qc_metrics_json  TEXT NOT NULL DEFAULT '{}',
-  note             TEXT NOT NULL DEFAULT '',
-  uploaded_by      BIGINT,
-  deleted_at       TIMESTAMPTZ,
-  delete_reason    TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                BIGSERIAL PRIMARY KEY,
+  clinic_id         BIGINT NOT NULL DEFAULT 1,
+  patient_id        BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  appointment_id    BIGINT,
+  tooth_record_id   BIGINT,
+  category          TEXT NOT NULL DEFAULT 'photo',
+  stage             TEXT NOT NULL DEFAULT 'general',
+  original_filename TEXT NOT NULL DEFAULT '',
+  filename          TEXT NOT NULL DEFAULT '',
+  mime_type         TEXT NOT NULL DEFAULT 'image/jpeg',
+  file_size_bytes   BIGINT NOT NULL DEFAULT 0,
+  size_bytes        BIGINT NOT NULL DEFAULT 0,
+  sha256_hash       TEXT NOT NULL DEFAULT '',
+  sha256            TEXT NOT NULL DEFAULT '',
+  encrypted_path    TEXT NOT NULL DEFAULT '',
+  encrypted_file    TEXT NOT NULL DEFAULT '',
+  is_dicom          INT NOT NULL DEFAULT 0,
+  width             INT NOT NULL DEFAULT 0,
+  height            INT NOT NULL DEFAULT 0,
+  sharpness         NUMERIC(8,2) NOT NULL DEFAULT 0,
+  brightness        NUMERIC(8,2) NOT NULL DEFAULT 0,
+  qc_verdict        TEXT NOT NULL DEFAULT 'ok',
+  note              TEXT NOT NULL DEFAULT '',
+  uploaded_by       BIGINT,
+  created_at        TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -472,28 +500,30 @@ CREATE TABLE IF NOT EXISTS suppliers (
   clinic_id      BIGINT NOT NULL DEFAULT 1,
   name           TEXT NOT NULL,
   category       TEXT NOT NULL DEFAULT 'Genel',
+  contact_name   TEXT NOT NULL DEFAULT '',
   contact_person TEXT NOT NULL DEFAULT '',
   phone          TEXT NOT NULL DEFAULT '',
   email          TEXT NOT NULL DEFAULT '',
   tax_no         TEXT NOT NULL DEFAULT '',
+  note           TEXT NOT NULL DEFAULT '',
   balance_kurus  BIGINT NOT NULL DEFAULT 0,
-  active         BOOLEAN NOT NULL DEFAULT true,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  active         INT NOT NULL DEFAULT 1,
+  created_at     TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS expenses (
   id             BIGSERIAL PRIMARY KEY,
   clinic_id      BIGINT NOT NULL DEFAULT 1,
   supplier_id    BIGINT,
-  category       TEXT NOT NULL DEFAULT 'İşletme Gideri',
+  category       TEXT NOT NULL DEFAULT 'malzeme',
   description    TEXT NOT NULL,
   amount_kurus   BIGINT NOT NULL CHECK (amount_kurus > 0),
   method         TEXT NOT NULL DEFAULT 'havale',
   invoice_no     TEXT NOT NULL DEFAULT '',
   paid_at        TEXT NOT NULL,
   created_by     BIGINT,
-  voided_at      TIMESTAMPTZ,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  voided_at      TEXT,
+  created_at     TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS cash_closings (
@@ -511,7 +541,7 @@ CREATE TABLE IF NOT EXISTS cash_closings (
   diff_kurus             BIGINT NOT NULL DEFAULT 0,
   note                   TEXT NOT NULL DEFAULT '',
   closed_by              BIGINT,
-  closed_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+  closed_at              TEXT NOT NULL DEFAULT (now()::text)
 );
 
 CREATE TABLE IF NOT EXISTS treatment_catalog (
@@ -522,6 +552,6 @@ CREATE TABLE IF NOT EXISTS treatment_catalog (
   category            TEXT NOT NULL DEFAULT 'Genel',
   default_price_kurus BIGINT NOT NULL DEFAULT 0,
   default_status      TEXT NOT NULL DEFAULT 'treated',
-  active              BOOLEAN NOT NULL DEFAULT true,
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+  active              INT NOT NULL DEFAULT 1,
+  created_at          TEXT NOT NULL DEFAULT (now()::text)
 );

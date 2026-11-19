@@ -393,10 +393,9 @@
   }, 5000);
 
   // ------------------------------------------------------------------ giriş ekranı + 3 demo hesap
-  // Demo hesap kutusu yalnız yerel bilgisayarda / aynı Wi-Fi ağında (veya ?demo adresinde) görünür.
-  // Gerçek klinik alan adında (ör. panel.klinikadi.com) parolalar asla ekranda gösterilmez.
-  const IS_DEMO_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname)
-    || new URLSearchParams(location.search).has("demo");
+  // Demo hesap kutusu yalnız yerel bilgisayarda / yerel ağda görünür.
+  // Gerçek klinik alan adında (ör. panel.klinikadi.com) ?demo parametresi verilse dahi parolalar asla ekranda gösterilmez.
+  const IS_DEMO_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
   function renderLogin(msg) {
     S.simResult = null;
     S.simText = "";

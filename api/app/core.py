@@ -53,9 +53,16 @@ def is_compromised_secret(val: str | None) -> bool:
     return bool(val and val.strip() in COMPROMISED_SECRETS_DENYLIST)
 
 
+def assert_no_compromised_secrets() -> None:
+    for env_k in ("DATA_ENCRYPTION_KEY", "PHONE_HMAC_KEY", "ADMIN_TOKEN", "WA_APP_SECRET", "IG_APP_SECRET", "WA_VERIFY_TOKEN", "IG_VERIFY_TOKEN"):
+        if is_compromised_secret(os.environ.get(env_k)):
+            raise RuntimeError(f"Güvenlik ihlali: c4d6a2f sızıntı {env_k} anahtarı kullanılamaz")
+
+
 def fernet() -> Fernet:
     global _fernet
     if _fernet is None:
+        assert_no_compromised_secrets()
         if not S.data_key:
             raise RuntimeError("DATA_ENCRYPTION_KEY tanımlı değil")
         if is_compromised_secret(S.data_key):

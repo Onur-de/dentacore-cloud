@@ -153,7 +153,8 @@ async def robots(request: Request):
 @app.get("/webhooks/whatsapp")
 async def wa_verify(request: Request):
     p = request.query_params
-    if p.get("hub.mode") == "subscribe" and hmac.compare_digest(p.get("hub.verify_token", ""), env("WA_VERIFY_TOKEN")):
+    v_tok = env("WA_VERIFY_TOKEN")
+    if v_tok and p.get("hub.mode") == "subscribe" and hmac.compare_digest(p.get("hub.verify_token", ""), v_tok):
         return PlainTextResponse(p.get("hub.challenge", ""))
     raise HTTPException(403)
 
@@ -220,7 +221,8 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
 @app.get("/webhooks/instagram")
 async def ig_verify(request: Request):
     p = request.query_params
-    if p.get("hub.mode") == "subscribe" and hmac.compare_digest(p.get("hub.verify_token", ""), env("IG_VERIFY_TOKEN") or env("WA_VERIFY_TOKEN")):
+    v_tok = env("IG_VERIFY_TOKEN") or env("WA_VERIFY_TOKEN")
+    if v_tok and p.get("hub.mode") == "subscribe" and hmac.compare_digest(p.get("hub.verify_token", ""), v_tok):
         return PlainTextResponse(p.get("hub.challenge", ""))
     raise HTTPException(403)
 
@@ -282,6 +284,7 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa",
 
     router: TokenRouter = state["router"]
     from .router import detect_lang
+    from .dental_catalog import detect_acquisition_source
     lang = detect_lang(text) if text else "tr"
     if channel == "ig":
         phone = f"ig:{sender}"
@@ -289,6 +292,52 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa",
     else:
         phone = sender
         pid = await upsert_patient(phone, lang=lang, name=profile_name, clinic_id=clinic_id)
+
+    combined_txt = f"{text} {payload}".strip()
+    if combined_txt:
+        m_ref = re.search(r"\[?\bref\s*[:=-]\s*([a-zA-Z0-9_-]{2,64})\]?", combined_txt, re.IGNORECASE)
+        cand_code = m_ref.group(1).strip() if m_ref else ""
+        camp_pg = None
+        if cand_code:
+            camp_pg = await q1(
+                "SELECT * FROM campaigns WHERE clinic_id=%s AND (LOWER(code)=LOWER(%s) OR LOWER(utm_campaign)=LOWER(%s)) ORDER BY id DESC LIMIT 1",
+                clinic_id, cand_code, cand_code,
+            )
+        if camp_pg:
+            def_src = "instagram" if channel == "ig" else "whatsapp"
+            det_src = detect_acquisition_source(
+                explicit_source=camp_pg.get("channel") or camp_pg.get("source"),
+                utm_source=camp_pg.get("utm_source") or "",
+                utm_medium=camp_pg.get("utm_medium") or "",
+                default_source=def_src,
+            )
+            cp_id = int(camp_pg["id"])
+            us = (camp_pg.get("utm_source") or det_src)[:80]
+            um = (camp_pg.get("utm_medium") or "cpc")[:80]
+            uc = (camp_pg.get("utm_campaign") or camp_pg.get("code") or "")[:120]
+            await q(
+                """UPDATE patients
+                   SET last_source=%s,
+                       campaign_id=COALESCE(campaign_id, %s),
+                       utm_source=CASE WHEN COALESCE(utm_source,'')='' THEN %s ELSE utm_source END,
+                       utm_medium=CASE WHEN COALESCE(utm_medium,'')='' THEN %s ELSE utm_medium END,
+                       utm_campaign=CASE WHEN COALESCE(utm_campaign,'')='' THEN %s ELSE utm_campaign END
+                   WHERE id=%s AND clinic_id=%s""",
+                det_src, cp_id, us, um, uc, pid, clinic_id,
+            )
+            has_ev = await q1(
+                "SELECT 1 FROM campaign_events WHERE clinic_id=%s AND campaign_id=%s AND patient_id=%s AND event_type='patient_created' LIMIT 1",
+                clinic_id, cp_id, pid,
+            )
+            if not has_ev:
+                await q(
+                    """INSERT INTO campaign_events
+                       (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,is_bot,is_unique,patient_id,created_at)
+                       VALUES (%s,%s,'patient_created',%s,%s,%s,%s,0,1,%s,%s)""",
+                    clinic_id, cp_id, det_src, us, um, uc, pid, datetime.now(timezone.utc).isoformat(),
+                )
+                await q("UPDATE campaigns SET conversations = conversations + 1 WHERE id=%s AND clinic_id=%s", cp_id, clinic_id)
+
     await log_msg(pid, "in", intent=f"{channel}:{mtype}", clinic_id=clinic_id, body=text or payload, delivery_status="received")
 
     async def reply(body: str, layer: str, intent: str, tin: int = 0, tout: int = 0):
@@ -314,6 +363,11 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa",
         return
 
     # 2) Bağlamsal deterministik cevaplar (0 token)
+    sat_res = await modules.handle_satisfaction_reply(pid, text, clinic_id=clinic_id)
+    if sat_res:
+        sat_ans, sat_intent = sat_res
+        return await reply(sat_ans, "L1-memnuniyet", sat_intent)
+
     if re.fullmatch(r"\s*(10|[1-9])\s*", text):
         post = await modules.handle_postop_reply(pid, text, emergency=router.is_emergency(text))
         if post:
@@ -556,9 +610,9 @@ async def admin_cancel(appt_id: int, x_admin_token: str | None = Header(default=
 @app.post("/admin/appointments/{appt_id}/done")
 async def admin_done(appt_id: int, x_admin_token: str | None = Header(default=None)):
     require_admin(x_admin_token)
-    a = await q1("UPDATE appointments SET status='done' WHERE id=%s RETURNING patient_id", appt_id)
+    a = await q1("UPDATE appointments SET status='done' WHERE id=%s RETURNING id, patient_id, clinic_id, treatment", appt_id)
     if a and a["patient_id"]:
-        await modules.request_feedback(a["patient_id"])
+        await modules.request_feedback(a["patient_id"], appt_id=a["id"], clinic_id=int(a.get("clinic_id") or 1), treatment=a.get("treatment") or "tedavi")
     return {"ok": bool(a)}
 
 

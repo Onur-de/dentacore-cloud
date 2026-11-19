@@ -844,6 +844,15 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     root_dir: Path = ctx["root_dir"]
     fernet_obj = ctx["fernet"]
 
+    def _media_dir() -> Path:
+        custom = os.environ.get("DC_MEDIA_DIR", "").strip()
+        if custom:
+            return Path(custom)
+        db_p = os.environ.get("DC_DB_PATH", "").strip()
+        if db_p:
+            return Path(db_p).resolve().parent / "encrypted_media"
+        return root_dir / "encrypted_media"
+
     def require_perm(*perm_keys: str):
         def dep(u: dict = Depends(current_user)) -> dict:
             perms = u.get("permissions") or resolve_permissions(u.get("role"), u.get("job_title"), u.get("permissions_json"))
@@ -1051,8 +1060,10 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                 "INSERT INTO patient_groups (clinic_id,name,color,is_restricted,description,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
                 cid, b.name.strip(), b.color, 1 if b.is_restricted else 0, b.description.strip(), u["id"], iso_now(),
             )
-        except sqlite3.IntegrityError:
-            raise HTTPException(409, "Bu isimde bir hasta grubu zaten mevcut")
+        except Exception as exc:
+            if isinstance(exc, sqlite3.IntegrityError) or "integrity" in type(exc).__name__.lower() or "unique" in str(exc).lower():
+                raise HTTPException(409, "Bu isimde bir hasta grubu zaten mevcut")
+            raise
         write_audit(u["id"], u["email"], "patient_group.create", f"group:{gid}", u["ip_h"], {"name": b.name}, clinic_id=cid)
         return {"id": gid}
 
@@ -1441,8 +1452,9 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         return {"ok": True, "settlement_id": mid, "charge_id": target_cid, "settled_amount": tl(settle_k), "finance_summary": fin}
 
     @app.get("/app/api/patients/{pid}/installments")
-    def list_patient_installments(pid: int, u: dict = Depends(require_perm("patient_view"))):
+    def list_patient_installments(pid: int, u: dict = Depends(require_perm("patient_view", "finance_view"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(pid, u)
         rows = q("SELECT * FROM payment_installments WHERE clinic_id=? AND patient_id=? ORDER BY installment_no, due_date", cid, pid)
         today_s = date.today().isoformat()
         for r in rows:
@@ -1456,6 +1468,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/patients/{pid}/installments")
     def create_patient_installments(pid: int, b: InstallmentPlanIn, u: dict = Depends(require_perm("finance_edit"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(pid, u)
         if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", pid, cid):
             raise HTTPException(404, "hasta yok")
         if b.charge_id is not None and not q1("SELECT id FROM charges WHERE id=? AND clinic_id=? AND patient_id=? AND voided_at IS NULL", b.charge_id, cid, pid):
@@ -1614,11 +1627,11 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         if q1("SELECT id FROM cash_closings WHERE clinic_id=? AND closing_date=?", cid, c_date):
             raise HTTPException(409, f"{c_date} tarihi için günlük kasa kapanışı zaten yapılmıştır")
         pays = q(
-            "SELECT amount_kurus, method, status FROM payments WHERE clinic_id=? AND voided_at IS NULL AND substr(created_at,1,10)=?",
+            "SELECT amount_kurus, method, status FROM payments WHERE clinic_id=? AND voided_at IS NULL AND substr(CAST(created_at AS TEXT),1,10)=?",
             cid, c_date,
         )
         exps = q(
-            "SELECT amount_kurus, method FROM expenses WHERE clinic_id=? AND voided_at IS NULL AND substr(paid_at,1,10)=?",
+            "SELECT amount_kurus, method FROM expenses WHERE clinic_id=? AND voided_at IS NULL AND substr(CAST(paid_at AS TEXT),1,10)=?",
             cid, c_date,
         )
         cash_in_k = sum(int(p["amount_kurus"]) for p in pays if (p["status"] or "completed") == "completed" and p["method"] == "nakit")
@@ -1761,6 +1774,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.get("/app/api/patients/{pid}/treatment-consents")
     def list_treatment_consents(request: Request, pid: int, u: dict = Depends(require_perm("patient_view"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(pid, u)
         base_url = str(request.base_url).rstrip("/")
         rows = q("SELECT * FROM treatment_consents WHERE clinic_id=? AND patient_id=? ORDER BY id DESC", cid, pid)
         for r in rows:
@@ -1890,8 +1904,15 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             return HTMLResponse("<!doctype html><meta charset=utf-8><body><h2>Lütfen onay kutusunu işaretleyin ve adınızı soyadınızı yazın.</h2></body>", status_code=400)
         t_now = iso_now()
         sig_payload = json.dumps({"signer": signer, "signed_at": t_now, "sha256": tc["content_sha256"]}, ensure_ascii=False)
-        ex("UPDATE treatment_consents SET signer_name=?, signature_svg_enc=?, status='signed', signed_at=? WHERE id=?",
-           signer, enc(sig_payload), t_now, tc["id"])
+        with db_lock:
+            c = db()
+            cur = c.execute(
+                "UPDATE treatment_consents SET signer_name=?, signature_svg_enc=?, status='signed', signed_at=? WHERE id=? AND status='pending'",
+                (signer, enc(sig_payload), t_now, tc["id"]),
+            )
+            c.commit()
+            if cur.rowcount == 0:
+                raise HTTPException(409, "Bu tedavi onam belgesi daha önce imzalanmıştır ve değiştirilemez")
         write_audit(None, f"patient:{tc['patient_id']}", "treatment_consent.sign", f"consent:{tc['id']}",
                     meta={"signer": signer, "version": tc["document_version"]}, clinic_id=tc["clinic_id"])
         return HTMLResponse("<!doctype html><meta charset=utf-8><body><h2>Tedavi planı onayınız başarıyla kaydedildi. Teşekkür ederiz.</h2></body>")
@@ -1900,6 +1921,8 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.get("/app/api/lab-orders")
     def list_lab_orders(patient_id: int | None = None, u: dict = Depends(require_perm("view"))):
         cid = u["clinic_id"]
+        if patient_id is not None:
+            _check_doc_own_patient(patient_id, u)
         sql = """SELECT lo.*, p.display_name AS patient_name, s.full_name AS doctor_name
                  FROM lab_orders lo
                  LEFT JOIN patients p ON p.id=lo.patient_id
@@ -1909,6 +1932,11 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         if patient_id is not None:
             sql += " AND lo.patient_id=?"
             args.append(patient_id)
+        else:
+            perms = u.get("permissions") or resolve_permissions(u.get("role"), u.get("job_title"), u.get("permissions_json"))
+            if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+                sql += " AND (lo.doctor_id=? OR p.primary_doctor_id=?)"
+                args.extend([u["id"], u["id"]])
         sql += " ORDER BY lo.id DESC"
         rows = q(sql, *args)
         today_s = date.today().isoformat()
@@ -1962,6 +1990,8 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.get("/app/api/implants")
     def list_implant_records(patient_id: int | None = None, lot: str = "", u: dict = Depends(require_perm("view"))):
         cid = u["clinic_id"]
+        if patient_id is not None:
+            _check_doc_own_patient(patient_id, u)
         sql = """SELECT ir.*, p.display_name AS patient_name, s.full_name AS doctor_name
                  FROM implant_records ir
                  LEFT JOIN patients p ON p.id=ir.patient_id
@@ -1971,6 +2001,11 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         if patient_id is not None:
             sql += " AND ir.patient_id=?"
             args.append(patient_id)
+        else:
+            perms = u.get("permissions") or resolve_permissions(u.get("role"), u.get("job_title"), u.get("permissions_json"))
+            if perms.get("doctor_own_patients_only") and u.get("role") != "owner":
+                sql += " AND (ir.doctor_id=? OR p.primary_doctor_id=?)"
+                args.extend([u["id"], u["id"]])
         if lot.strip():
             sql += " AND (ir.lot_number LIKE ? OR ir.serial_number LIKE ? OR ir.uts_barcode LIKE ?)"
             lk = f"%{lot.strip()}%"
@@ -2041,29 +2076,39 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         row = q1("SELECT * FROM patient_media WHERE id=? AND patient_id=? AND clinic_id=?", mid, pid, cid)
         if not row:
             raise HTTPException(404, "dosya kaydı bulunamadı")
-        fp = root_dir / "encrypted_media" / Path(row["encrypted_path"]).name
+        enc_fn = Path(row["encrypted_path"]).name
+        fp = _media_dir() / enc_fn
         if not fp.is_file():
-            fp_alt = root_dir / row["encrypted_path"]
-            fp = fp_alt if fp_alt.is_file() else fp
+            fp_root = root_dir / "encrypted_media" / enc_fn
+            fp = fp_root if fp_root.is_file() else (root_dir / row["encrypted_path"])
         if not fp.is_file():
             raise HTTPException(404, "şifreli medya dosyası diskte bulunamadı")
         raw_bytes = fernet_obj.decrypt(fp.read_bytes())
+        mime_t = row.get("mime_type") or "application/octet-stream"
+        disp_mode = "inline" if mime_t.startswith("image/") and "svg" not in mime_t.lower() else "attachment"
+        safe_fn = re.sub(r"[^a-zA-Z0-9._-]", "_", row.get("original_filename") or "media.bin")[:120] or "media.bin"
         return Response(
             content=raw_bytes,
-            media_type=row.get("mime_type") or "application/octet-stream",
-            headers={"content-disposition": f'inline; filename="{row.get("original_filename") or "media.bin"}"'},
+            media_type=mime_t,
+            headers={
+                "content-disposition": f'{disp_mode}; filename="{safe_fn}"',
+                "x-content-type-options": "nosniff",
+            },
         )
 
     @app.delete("/app/api/patients/{pid}/media/{mid}")
     def delete_patient_media(pid: int, mid: int, u: dict = Depends(require_perm("delete_cancel"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(pid, u)
         row = q1("SELECT * FROM patient_media WHERE id=? AND patient_id=? AND clinic_id=?", mid, pid, cid)
         if not row:
             raise HTTPException(404, "dosya kaydı bulunamadı")
         try:
-            fp = root_dir / "encrypted_media" / Path(row["encrypted_path"]).name
-            if fp.is_file():
-                fp.unlink(missing_ok=True)
+            enc_fn = Path(row["encrypted_path"]).name
+            for d_cand in (_media_dir(), root_dir / "encrypted_media"):
+                fp = d_cand / enc_fn
+                if fp.is_file():
+                    fp.unlink(missing_ok=True)
         except Exception:
             pass
         ex("DELETE FROM patient_media WHERE id=? AND clinic_id=?", mid, cid)
@@ -2186,8 +2231,10 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.get("/randevu/{clinic_slug}", response_class=HTMLResponse)
     def public_online_booking_page(clinic_slug: str):
         cl = q1("SELECT id, name, city, address, phone FROM clinics WHERE slug=? AND active=1", clinic_slug)
+        if not cl and clinic_slug in ("merkez", "merkez-poliklinik"):
+            cl = q1("SELECT id, name, city, address, phone, slug FROM clinics WHERE id=1 AND active=1")
         if not cl:
-            cl = q1("SELECT id, name, city, address, phone, slug FROM clinics WHERE id=1")
+            raise HTTPException(404, "klinik bulunamadı")
         return HTMLResponse(f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>{html.escape(cl['name'])} · Online Randevu</title></head>
         <body style="font-family:system-ui;background:#F8FAFC;color:#0A2540;padding:16px">
@@ -2201,7 +2248,9 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     def public_online_book_appointment(clinic_slug: str, b: PublicBookIn, request: Request):
         if not b.kvkk_consent:
             raise HTTPException(400, "KVKK aydınlatma onayı zorunludur")
-        cl = q1("SELECT * FROM clinics WHERE slug=? AND active=1", clinic_slug) or q1("SELECT * FROM clinics WHERE id=1")
+        cl = q1("SELECT * FROM clinics WHERE slug=? AND active=1", clinic_slug)
+        if not cl and clinic_slug in ("merkez", "merkez-poliklinik"):
+            cl = q1("SELECT * FROM clinics WHERE id=1 AND active=1")
         if not cl:
             raise HTTPException(404, "klinik bulunamadı")
         cid = int(cl["id"])
@@ -2289,6 +2338,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/appointments/recurring")
     def create_recurring_appointments(b: RecurringAppointmentIn, u: dict = Depends(require_perm("patient_edit"))):
         cid = u["clinic_id"]
+        _check_doc_own_patient(b.patient_id, u)
         pt = q1("SELECT id, primary_doctor_id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid)
         if not pt:
             raise HTTPException(404, "hasta bulunamadı")
@@ -2316,7 +2366,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             for idx, (s_utc, e_utc) in enumerate(slots):
                 day_prefix = s_utc.astimezone(TZ).strftime("%Y-%m-%d")
                 existing = c.execute(
-                    "SELECT id, starts_at, duration_min, chair, doctor_id FROM appointments WHERE clinic_id=? AND status IN ('booked','confirmed') AND substr(starts_at,1,10)=?",
+                    "SELECT id, starts_at, duration_min, chair, doctor_id FROM appointments WHERE clinic_id=? AND status IN ('booked','confirmed') AND substr(CAST(starts_at AS TEXT),1,10)=?",
                     (cid, day_prefix),
                 ).fetchall()
                 for ex_row in existing:
@@ -2408,31 +2458,88 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
 
 
 def register_enterprise_routes_for_pg(app: FastAPI) -> None:
-    """PostgreSQL bulut katmanı (`api/app/main.py`) ile SQLite (`run_local.py`) arasında %100 uç eşitliği sağlar."""
+    """PostgreSQL bulut katmanı (`api/app/main.py`) ile SQLite (`run_local.py`) arasında %100 uç ve çalışma zamanı eşitliği sağlar."""
     import threading
     from . import core, panel
     _pg_lock = threading.RLock()
     root_dir = Path(__file__).resolve().parents[2]
 
-    def _sql_pg(sql: str) -> str:
-        s = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
-        return s.replace("?", "%s")
+    def _sql_pg(sql: str) -> tuple[str, bool]:
+        s = sql.strip()
+        had_or_ignore = "INSERT OR IGNORE INTO" in s.upper()
+        if had_or_ignore:
+            s = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", s, flags=re.IGNORECASE)
+            if "ON CONFLICT" not in s.upper():
+                s = s.rstrip(";") + " ON CONFLICT DO NOTHING"
+        s = s.replace("?", "%s")
+        is_ins = s.upper().startswith("INSERT ") and "RETURNING" not in s.upper() and not had_or_ignore
+        return s, is_ins
 
-    def _get_conn():
+    class _PgCompatCursor:
+        def __init__(self, cur: Any, lastrowid: int = 0):
+            self._cur = cur
+            self.lastrowid = lastrowid
+            self.rowcount = getattr(cur, "rowcount", 0)
+
+        def fetchone(self):
+            return self._cur.fetchone()
+
+        def fetchall(self):
+            return self._cur.fetchall()
+
+    class _PgCompatConn:
+        def __init__(self, raw_conn: Any, is_pg: bool):
+            self._raw = raw_conn
+            self._is_pg = is_pg
+
+        def execute(self, sql: str, params: Any = ()) -> _PgCompatCursor:
+            if not self._is_pg:
+                cur = self._raw.execute(sql, params)
+                return _PgCompatCursor(cur, int(getattr(cur, "lastrowid", 0) or 0))
+            q_str, add_ret = _sql_pg(sql)
+            if add_ret:
+                cur = self._raw.execute(q_str + " RETURNING id", params)
+                row = cur.fetchone()
+                lid = int(row["id"]) if row and "id" in row else 0
+                return _PgCompatCursor(cur, lid)
+            cur = self._raw.execute(q_str, params)
+            return _PgCompatCursor(cur, 0)
+
+        def commit(self) -> None:
+            self._raw.commit()
+
+        def rollback(self) -> None:
+            self._raw.rollback()
+
+        def close(self) -> None:
+            self._raw.close()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            try:
+                if exc_type is None:
+                    self._raw.commit()
+                else:
+                    self._raw.rollback()
+            finally:
+                self._raw.close()
+
+    def _get_conn() -> _PgCompatConn:
         db_url = os.environ.get("DATABASE_URL", "")
         if db_url.startswith("postgres"):
             import psycopg
             from psycopg.rows import dict_row
-            return psycopg.connect(db_url, row_factory=dict_row)
+            return _PgCompatConn(psycopg.connect(db_url, row_factory=dict_row), True)
         db_p = os.environ.get("DC_DB_PATH") or str(root_dir / "dentacore_local.db")
         c = sqlite3.connect(db_p, check_same_thread=False)
         c.row_factory = sqlite3.Row
-        return c
+        return _PgCompatConn(c, False)
 
     def _q(sql: str, *args: Any) -> list[dict]:
         with _pg_lock, _get_conn() as c:
-            q_str = _sql_pg(sql) if os.environ.get("DATABASE_URL", "").startswith("postgres") else sql
-            rows = c.execute(q_str, args).fetchall()
+            rows = c.execute(sql, args).fetchall()
             return [dict(r) for r in rows]
 
     def _q1(sql: str, *args: Any) -> dict | None:
@@ -2441,19 +2548,18 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
 
     def _ex(sql: str, *args: Any) -> int:
         with _pg_lock, _get_conn() as c:
-            is_pg = os.environ.get("DATABASE_URL", "").startswith("postgres")
-            q_str = _sql_pg(sql) if is_pg else sql
-            if is_pg and q_str.strip().upper().startswith("INSERT ") and "RETURNING" not in q_str.upper():
-                cur = c.execute(q_str + " RETURNING id", args)
-                r = cur.fetchone()
-                c.commit()
-                return int(r["id"]) if r and "id" in r else 0
-            cur = c.execute(q_str, args)
+            cur = c.execute(sql, args)
             c.commit()
-            return int(getattr(cur, "lastrowid", 0) or 0)
+            return int(cur.lastrowid or 0)
 
     def _write_audit(actor_id: Any, actor: str, action: str, target: str = "", ip_h: str = "", meta: dict | None = None, clinic_id: int = 1) -> None:
-        pass
+        try:
+            with _pg_lock, _get_conn() as c:
+                if c._is_pg:
+                    core.write_audit(c._raw, int(actor_id) if str(actor_id or "").isdigit() else None, str(actor), action, target, ip_h, meta, clinic_id=clinic_id)
+                    c.commit()
+        except Exception:
+            pass
 
     register_enterprise_routes(
         app,

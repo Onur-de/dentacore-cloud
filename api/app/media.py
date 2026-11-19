@@ -148,13 +148,35 @@ def assess_media_file(data: bytes, filename: str = "", mime: str = "") -> dict:
             "disclaimer": QC_DISCLAIMER_TR,
         }
 
-    # 2) PDF Belge kontrolü (%PDF- magic header)
+    # 2) PDF Belge kontrolü (%PDF- magic header ve tam dosya aktif içerik / hex-escape taraması)
     if data[:5] == b"%PDF-" or fn_low.endswith(".pdf") or mime_low == "application/pdf":
         if data[:5] != b"%PDF-":
             raise ValueError("Bozuk veya geçersiz PDF dosya başlığı")
-        pdf_scan = data[:65536].lower()
-        if any(tok in pdf_scan for tok in (b"/javascript", b"/js ", b"/js(", b"/launch", b"<script")):
-            raise ValueError("Güvenlik engeli: PDF içinde gömülü betik (/JavaScript) tespit edildi")
+        import re as _re
+        pdf_norm = _re.sub(
+            rb"#([0-9a-fA-F]{2})",
+            lambda m: bytes([int(m.group(1), 16)]),
+            data,
+        ).lower()
+        if any(
+            tok in pdf_norm
+            for tok in (
+                b"/javascript",
+                b"/js ",
+                b"/js(",
+                b"/js<",
+                b"/js/",
+                b"/js\n",
+                b"/js\r",
+                b"/launch",
+                b"/openaction",
+                b"/aa",
+                b"/richmedia",
+                b"/embeddedfiles",
+                b"<script",
+            )
+        ):
+            raise ValueError("Güvenlik engeli: PDF içinde gömülü betik veya aktif eylem (/JavaScript /OpenAction) tespit edildi")
         return {
             "verdict": "document_ok",
             "w": 0,
