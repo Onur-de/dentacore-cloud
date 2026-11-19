@@ -95,29 +95,18 @@ def _push_remote(remote: str) -> None:
 
 
 def sync_once() -> None:
-    """Rebuild standalone bundles if needed, normalize docs/ links, commit diffs, and push serially."""
-    pure_script = SRC_WA / "deploy_pure_1to1.py"
-    if pure_script.exists():
-        res = subprocess.run([PYTHON_EXE, "-X", "utf8", str(pure_script)], cwd=str(SRC_WA), capture_output=True, text=True)
+    """Rebuild standalone bundles via build_cloud_demo_docs.py, commit diffs, and push serially."""
+    cloud_demo_builder = SRC_DENTACORE / "scripts" / "build_cloud_demo_docs.py"
+    if cloud_demo_builder.exists():
+        res = subprocess.run([PYTHON_EXE, "-X", "utf8", str(cloud_demo_builder)], cwd=str(SRC_DENTACORE), capture_output=True, text=True)
         if res.returncode != 0:
-            _log(f"deploy_pure_1to1 failed: {res.stderr.strip()}")
-
-    docs_dir = TARGET / "docs"
-    app_subdir = docs_dir / "app"
-    docs_dir.mkdir(parents=True, exist_ok=True)
-    app_subdir.mkdir(parents=True, exist_ok=True)
-
-    birebir_tanitim = SRC_WA / "1_Birebir_Tanitim_Sitesi.html"
-    birebir_panel = SRC_WA / "2_Birebir_Yonetim_Paneli.html"
-    if birebir_tanitim.exists():
-        html_t = normalize_pages_landing(birebir_tanitim.read_text(encoding="utf-8"))
-        (docs_dir / "index.html").write_text(html_t, encoding="utf-8")
-        (docs_dir / "tanitim.html").write_text(html_t, encoding="utf-8")
-    if birebir_panel.exists():
-        html_p = birebir_panel.read_text(encoding="utf-8")
-        (docs_dir / "panel.html").write_text(html_p, encoding="utf-8")
-        (docs_dir / "app.html").write_text(html_p, encoding="utf-8")
-        (app_subdir / "index.html").write_text(html_p, encoding="utf-8")
+            _log(f"build_cloud_demo_docs failed: {res.stderr.strip()}")
+    else:
+        pure_script = SRC_WA / "deploy_pure_1to1.py"
+        if pure_script.exists():
+            res = subprocess.run([PYTHON_EXE, "-X", "utf8", str(pure_script)], cwd=str(SRC_WA), capture_output=True, text=True)
+            if res.returncode != 0:
+                _log(f"deploy_pure_1to1 failed: {res.stderr.strip()}")
 
     subprocess.run([GIT_EXE, "add", "."], cwd=str(TARGET), capture_output=True)
     st = subprocess.run([GIT_EXE, "status", "--porcelain"], cwd=str(TARGET), capture_output=True, text=True)

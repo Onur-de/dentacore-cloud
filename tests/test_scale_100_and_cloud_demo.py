@@ -207,8 +207,8 @@ def test_100_concurrent_whatsapp_webhooks_async_queue_and_attribution(isolated_e
             avg_lat_ms = sum(latencies) / len(latencies)
             assert avg_lat_ms < 200.0, f"Average webhook response time too high: {avg_lat_ms:.2f}ms"
 
-            # Kuyruğu boşalt ve doğrula
-            r_drain = await ac.post("/app/api/admin/webhook-queue/drain")
+            # Kuyruğu boşalt ve doğrula (OWNER yetkisi ve CSRF zorunlu)
+            r_drain = await ac.post("/app/api/admin/webhook-queue/drain", headers={"X-CSRF-Token": csrf})
             assert r_drain.status_code == 200
             assert r_drain.json()["queue_depth"] == 0
 

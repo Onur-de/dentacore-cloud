@@ -98,11 +98,11 @@ async def send_text_or_template(to: str, text: str, tpl: str, params: list[str])
 async def upload_media(data: bytes, mime: str, filename: str) -> str | None:
     if not ready():
         return None
-    async with httpx.AsyncClient(timeout=60) as c:
-        r = await c.post(f"{GRAPH}/{PHONE_ID}/media", headers={"Authorization": f"Bearer {TOKEN}"},
-                         data={"messaging_product": "whatsapp", "type": mime}, files={"file": (filename, data, mime)})
-        r.raise_for_status()
-        return r.json()["id"]
+    c = get_client()
+    r = await c.post(f"{GRAPH}/{PHONE_ID}/media", headers={"Authorization": f"Bearer {TOKEN}"},
+                     data={"messaging_product": "whatsapp", "type": mime}, files={"file": (filename, data, mime)})
+    r.raise_for_status()
+    return r.json()["id"]
 
 
 async def send_audio(to: str, media_id: str) -> dict:
@@ -110,8 +110,8 @@ async def send_audio(to: str, media_id: str) -> dict:
 
 
 async def download_media(media_id: str) -> tuple[bytes, str]:
-    async with httpx.AsyncClient(timeout=60) as c:
-        meta = (await c.get(f"{GRAPH}/{media_id}", headers={"Authorization": f"Bearer {TOKEN}"})).json()
-        r = await c.get(meta["url"], headers={"Authorization": f"Bearer {TOKEN}"})
-        r.raise_for_status()
-        return r.content, meta.get("mime_type", "application/octet-stream")
+    c = get_client()
+    meta = (await c.get(f"{GRAPH}/{media_id}", headers={"Authorization": f"Bearer {TOKEN}"})).json()
+    r = await c.get(meta["url"], headers={"Authorization": f"Bearer {TOKEN}"})
+    r.raise_for_status()
+    return r.content, meta.get("mime_type", "application/octet-stream")

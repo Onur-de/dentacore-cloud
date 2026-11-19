@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -39,8 +39,11 @@ def _get_sender_lock(key: str) -> asyncio.Lock:
     lk = _SENDER_LOCKS.get(key)
     if lk is None:
         if len(_SENDER_LOCKS) >= 2048:
-            oldest = next(iter(_SENDER_LOCKS))
-            _SENDER_LOCKS.pop(oldest, None)
+            for old_k, old_lk in list(_SENDER_LOCKS.items()):
+                if old_k != key and not old_lk.locked():
+                    _SENDER_LOCKS.pop(old_k, None)
+                    if len(_SENDER_LOCKS) < 1792:
+                        break
         lk = asyncio.Lock()
         _SENDER_LOCKS[key] = lk
     return lk
@@ -276,9 +279,9 @@ async def _dispatch_webhook_job(m: dict, profile_name: str | None, channel: str,
 
 
 @app.post("/app/api/admin/webhook-queue/drain")
-async def drain_webhook_queue_ep():
+async def drain_webhook_queue_ep(u: dict = Depends(panel.OWNER)):
     if _WEBHOOK_QUEUE is not None:
-        await _WEBHOOK_QUEUE.join()
+        await asyncio.wait_for(_WEBHOOK_QUEUE.join(), timeout=15.0)
     return {
         "ok": True,
         "queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
@@ -287,7 +290,7 @@ async def drain_webhook_queue_ep():
 
 
 @app.post("/app/api/demo/simulate-flow")
-async def simulate_demo_flow_pg():
+async def simulate_demo_flow_pg(u: dict = Depends(panel.ANY)):
     if env("DC_ENV", "local") in ("prod", "production"):
         raise HTTPException(403, "Demo simülasyonu yalnızca örnek/demo ortamında çalışır")
     return {
@@ -308,7 +311,7 @@ async def simulate_demo_flow_pg():
 @app.post("/webhook/whatsapp")
 @app.post("/webhooks/whatsapp")
 async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
-    ip = request.client.host if request.client else "-"
+    ip = panel.client_ip(request)
     w_lim = int(os.environ.get("DC_WEBHOOK_RATE_LIMIT", "600"))
     if not await panel.limiter.hit(f"wh:wa:{ip}", w_lim, 60):
         raise HTTPException(429, "Çok fazla webhook isteği")
@@ -331,6 +334,8 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
                 continue
             names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in v.get("contacts", [])}
             for m in v.get("messages", []):
+                if async_mode and _WEBHOOK_QUEUE is not None and _WEBHOOK_QUEUE.full():
+                    raise HTTPException(503, "Webhook kuyruğu dolu, lütfen tekrar deneyin")
                 # Meta webhook'u yeniden deneyebilir: aynı mesajı iki kez işleme
                 if await _is_dup_webhook_msg(str(m.get("id") or "")):
                     dedup += 1
@@ -359,7 +364,7 @@ async def ig_verify(request: Request):
 @app.post("/webhook/instagram")
 @app.post("/webhooks/instagram")
 async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
-    ip = request.client.host if request.client else "-"
+    ip = panel.client_ip(request)
     w_lim = int(os.environ.get("DC_WEBHOOK_RATE_LIMIT", "600"))
     if not await panel.limiter.hit(f"wh:ig:{ip}", w_lim, 60):
         raise HTTPException(429, "Çok fazla webhook isteği")
@@ -383,6 +388,8 @@ async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(
             if not clinic_id:
                 unmapped += 1
                 continue
+            if async_mode and _WEBHOOK_QUEUE is not None and _WEBHOOK_QUEUE.full():
+                raise HTTPException(503, "Webhook kuyruğu dolu, lütfen tekrar deneyin")
             if await _is_dup_webhook_msg(str(msg.get("mid") or "")):
                 dedup += 1
                 continue

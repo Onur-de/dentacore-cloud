@@ -869,6 +869,7 @@ def init_and_seed():
             CREATE INDEX IF NOT EXISTS patients_clinic_phone_idx ON patients(clinic_id, phone_hmac);
             CREATE INDEX IF NOT EXISTS patients_clinic_active_idx ON patients(clinic_id, active, id DESC);
             CREATE INDEX IF NOT EXISTS appointments_clinic_starts_idx ON appointments(clinic_id, starts_at);
+            CREATE INDEX IF NOT EXISTS appointments_clinic_doc_starts_idx ON appointments(clinic_id, doctor_id, starts_at);
             CREATE INDEX IF NOT EXISTS appointments_clinic_chair_status_idx ON appointments(clinic_id, status, chair, starts_at);
             CREATE INDEX IF NOT EXISTS message_log_clinic_patient_idx ON message_log(clinic_id, patient_id, id DESC);
             CREATE INDEX IF NOT EXISTS campaign_events_clinic_camp_idx ON campaign_events(clinic_id, campaign_id, event_type);
@@ -1091,8 +1092,11 @@ def _get_sender_lock(key: str) -> asyncio.Lock:
     lk = _SENDER_LOCKS.get(key)
     if lk is None:
         if len(_SENDER_LOCKS) >= 2048:
-            oldest = next(iter(_SENDER_LOCKS))
-            _SENDER_LOCKS.pop(oldest, None)
+            for old_k, old_lk in list(_SENDER_LOCKS.items()):
+                if old_k != key and not old_lk.locked():
+                    _SENDER_LOCKS.pop(old_k, None)
+                    if len(_SENDER_LOCKS) < 1792:
+                        break
         lk = asyncio.Lock()
         _SENDER_LOCKS[key] = lk
     return lk
@@ -1152,6 +1156,7 @@ async def _on_shutdown():
     _WEBHOOK_WORKERS.clear()
     _WEBHOOK_QUEUE = None
     await wa.close_client()
+    await ig.close_client()
 
 
 @app.get("/health")
@@ -1166,7 +1171,6 @@ def health():
         "webhook_queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
         "webhook_processed_total": _WEBHOOK_PROCESSED_TOTAL,
         "workers_ready": len([w for w in _WEBHOOK_WORKERS if not w.done()]),
-        "gateway": os.environ.get("LLM_BASE_URL"),
     }
 
 
@@ -4389,9 +4393,9 @@ async def _dispatch_webhook_local(
 
 
 @app.post("/app/api/admin/webhook-queue/drain")
-async def drain_webhook_queue_local():
+async def drain_webhook_queue_local(u: dict = Depends(OWNER)):
     if _WEBHOOK_QUEUE is not None:
-        await _WEBHOOK_QUEUE.join()
+        await asyncio.wait_for(_WEBHOOK_QUEUE.join(), timeout=15.0)
     return {
         "ok": True,
         "queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
@@ -4480,6 +4484,9 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
                 continue
             names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in v.get("contacts", []) if isinstance(c, dict)}
             for m in v.get("messages", []):
+                q_obj = _ensure_webhook_workers()
+                if async_mode and q_obj.full():
+                    raise HTTPException(503, "Webhook kuyruğu dolu, lütfen tekrar deneyin")
                 mid = str(m.get("id") or "")
                 if mid and _SEEN_WEBHOOK_IDS.seen_or_add(mid):
                     dedup += 1
@@ -4543,6 +4550,9 @@ async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = H
             if not clinic_id:
                 unmapped += 1
                 continue
+            q_obj = _ensure_webhook_workers()
+            if async_mode and q_obj.full():
+                raise HTTPException(503, "Webhook kuyruğu dolu, lütfen tekrar deneyin")
             mid = str(msg.get("mid") or "")
             if mid and _SEEN_WEBHOOK_IDS.seen_or_add(mid):
                 dedup += 1
