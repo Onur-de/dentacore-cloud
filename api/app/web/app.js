@@ -2039,6 +2039,31 @@
       }, "Gruba Ekle");
     }
 
+    const drawerTabDefs = [
+      ["all", "Tümü (Tam Görünüm)"],
+      ["summary", "1. Özet & İletişim"],
+      ["odo", "2. Diş Haritası & Perio"],
+      ["finance", "3. Finans & Avans & İade"],
+      ["clinical", "4. Onam / Lab / İmplant / Röntgen"],
+    ];
+    const drawerTabsBar = h("div", { class: "drawer-tabs", role: "tablist", "aria-label": "Hasta kartı bölümleri" },
+      drawerTabDefs.map(([tk, tlbl]) => h("button", {
+        type: "button",
+        role: "tab",
+        class: "drawer-tab" + (tk === "all" ? " active" : ""),
+        "data-tk": tk,
+        on: {
+          click: () => {
+            drawerTabsBar.querySelectorAll(".drawer-tab").forEach((b) => b.classList.toggle("active", b.dataset.tk === tk));
+            drawer.querySelectorAll("[data-dtab]").forEach((secEl) => {
+              const tags = (secEl.getAttribute("data-dtab") || "").split(" ");
+              secEl.classList.toggle("hidden", tk !== "all" && !tags.includes(tk));
+            });
+          },
+        },
+      }, tlbl))
+    );
+
     const drawer = h("div", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-label": p.name || `Hasta #${p.id}` },
       h("div", { class: "top" },
         h("div", null,
@@ -2074,7 +2099,8 @@
           h("button", { class: "btn btn-ghost btn-sm", type: "button", on: { click: close } }, "Kapat")
         )
       ),
-      h("div", { class: "kv" },
+      drawerTabsBar,
+      h("div", { class: "kv", "data-dtab": "summary" },
         h("span", { text: "Telefon" }),
         h("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:wrap" },
           h("b", { class: "mono", text: p.phone }),
@@ -2094,7 +2120,7 @@
         )
       ),
       // 10 Kalemlik Finansal Özet Kutusu (Bölüm 11)
-      h("div", { class: "cal-box", style: "margin:10px 0" },
+      h("div", { class: "cal-box", style: "margin:10px 0", "data-dtab": "finance summary" },
         h("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px" },
           h("b", { text: "10 Kalem Hasta Finans & Muhasebe Özeti (Kuruş Kesinliğinde)" }),
           fin.available_advance > 0 && fin.net_remaining_debt > 0 ? h("button", {
@@ -2385,8 +2411,8 @@
           },
         }, "İmplant / Lot")
       ),
-      odoSection,
-      (p.periodontal_exams || []).length || (p.lab_orders || []).length || (p.implant_records || []).length ? h("div", { class: "cal-box", style: "margin:10px 0" },
+      h("div", { "data-dtab": "odo" }, odoSection),
+      (p.periodontal_exams || []).length || (p.lab_orders || []).length || (p.implant_records || []).length ? h("div", { class: "cal-box", style: "margin:10px 0", "data-dtab": "odo clinical" },
         (p.periodontal_exams || []).length ? [
           h("div", { class: "section-t", style: "margin-top:0", text: `Periodontal Muayeneler (${p.periodontal_exams.length})` }),
           ...p.periodontal_exams.map((pe) => h("div", { style: "font-size:13px;margin-bottom:4px" },
@@ -2406,76 +2432,84 @@
           )),
         ] : null
       ) : null,
-      h("div", { class: "section-t", text: `Röntgen, DICOM, Fotoğraf (Öncesi/Sonrası) & Belgeler (${(p.media_files || []).length})` }),
-      (p.media_files || []).length ? tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Tür / Aşama", "Dosya", "Kalite Kontrol (Teşhissiz)", "Tarih", "İşlem"].map((t) => h("th", { text: t })))),
-        h("tbody", null, (p.media_files || []).map((mf) => h("tr", null,
-          h("td", null, tag(`${mf.category} · ${mf.stage}`, mf.category === "xray" ? "teal" : "green")),
-          h("td", { text: `${mf.filename} (${Math.round((mf.size_bytes || 0) / 1024)} KB)` }),
-          h("td", null, tag(mf.qc_verdict === "ok" ? "Teknik Kalite Uygun" : mf.qc_verdict, mf.qc_verdict === "ok" ? "green" : "amber")),
-          h("td", { text: fmtDT(mf.created_at) }),
-          h("td", null, h("button", {
-            class: "btn btn-sm btn-danger",
-            type: "button",
-            on: {
-              click: async () => {
-                await run(() => api(`/app/api/patients/${pid}/media/${mf.id}`, { method: "DELETE" }), "Dosya silindi");
-                openPatient(pid, reveal);
+      h("div", { "data-dtab": "clinical" },
+        h("div", { class: "section-t", text: `Röntgen, DICOM, Fotoğraf (Öncesi/Sonrası) & Belgeler (${(p.media_files || []).length})` }),
+        (p.media_files || []).length ? tblWrap(h("table", { class: "table" },
+          h("thead", null, h("tr", null, ["Tür / Aşama", "Dosya", "Kalite Kontrol (Teşhissiz)", "Tarih", "İşlem"].map((t) => h("th", { text: t })))),
+          h("tbody", null, (p.media_files || []).map((mf) => h("tr", null,
+            h("td", null, tag(`${mf.category} · ${mf.stage}`, mf.category === "xray" ? "teal" : "green")),
+            h("td", { text: `${mf.filename} (${Math.round((mf.size_bytes || 0) / 1024)} KB)` }),
+            h("td", null, tag(mf.qc_verdict === "ok" ? "Teknik Kalite Uygun" : mf.qc_verdict, mf.qc_verdict === "ok" ? "green" : "amber")),
+            h("td", { text: fmtDT(mf.created_at) }),
+            h("td", null, h("button", {
+              class: "btn btn-sm btn-danger",
+              type: "button",
+              on: {
+                click: async () => {
+                  await run(() => api(`/app/api/patients/${pid}/media/${mf.id}`, { method: "DELETE" }), "Dosya silindi");
+                  openPatient(pid, reveal);
+                },
               },
-            },
-          }, "Sil"))
-        )))
-      ), "Hasta dosyaları tablosu") : h("div", { class: "empty", text: "Henüz yüklenmiş röntgen veya fotoğraf yok." }),
-      h("div", { class: "section-t", text: "Anamnez" }),
-      p.anamnesis.length ? p.anamnesis.map((a) => h("div", { class: "alert-item" },
-        h("div", { class: "k" }, a.red_flags.length ? tag(`${a.red_flags.length} kırmızı bayrak`, "red") : tag("Temiz", "green")),
-        h("div", { class: "d" }, a.red_flags.join(", ") || "Risk işareti yok", h("small", { text: fmtDT(a.signed_at) })),
-        p.anamnesis_links && p.anamnesis_links[a.id] ? h("a", { class: "btn btn-sm btn-ghost", href: p.anamnesis_links[a.id], target: "_blank", rel: "noopener noreferrer" }, "Aç") : null
-      )) : h("div", { class: "empty", text: "Henüz anamnez yok." }),
-      h("div", { class: "section-t", text: "Onamlar (KVKK & Dijital Tedavi Planı)" }),
-      p.consents.length || (p.treatment_consents || []).length ? [
-        ...p.consents.map((c) => h("div", { class: "alert-item" },
-          h("div", { class: "d" }, consentNames[c.kind] || c.kind, h("small", { text: `Sürüm ${c.text_version} · ${fmtDT(c.granted_at)}` })),
-          c.revoked_at ? tag("Geri alındı", "red") : tag("Geçerli", "green")
-        )),
-        ...(p.treatment_consents || []).map((tc) => h("div", { class: "alert-item" },
-          h("div", { class: "d" }, `Dijital Tedavi Planı Onamı (${tc.document_version})`, h("small", { text: tc.signed_at ? `Onaylayan: ${tc.signer_name} · ${fmtDT(tc.signed_at)}` : "Hasta onayı bekleniyor" })),
-          tag(tc.status === "signed" ? "İmzalandı" : "Bekliyor", tc.status === "signed" ? "green" : "yellow")
-        )),
-      ] : h("div", { class: "empty", text: "Onam kaydı yok." }),
-      h("div", { class: "section-t", text: "Randevular" }),
-      p.appointments.length ? tblWrap(h("table", { class: "table" }, h("tbody", null, p.appointments.map((a) =>
-        h("tr", null, h("td", { text: fmtDT(a.starts_at) }), h("td", { text: `${a.treatment}${a.doctor_name ? " · " + a.doctor_name : ""}` }), h("td", null, tag(...(STATUS[a.status] || [a.status, ""]))))
-      ))), "Hasta randevuları tablosu") : h("div", { class: "empty", text: "Randevu yok." }),
-      h("div", { class: "section-t", text: "Hesap hareketleri" }),
-      ledger.length ? tblWrap(h("table", { class: "table" }, h("tbody", null, ledger.map((e) =>
-        h("tr", { style: e.voided_at ? "opacity:.45;text-decoration:line-through" : "" },
-          h("td", { text: fmtD(e.created_at) }),
-          h("td", { text: `${e.t}: ${e.info}` }),
-          h("td", { class: "num", text: (e.t === "Tahsilat" ? "-" : "") + fmtTL(e.amount) }),
-          h("td", null, e.t === "Tahsilat" && !e.voided_at && e.status === "completed" && S.user.role !== "secretary" ? h("button", {
-            class: "btn btn-sm btn-ghost",
-            type: "button",
-            on: {
-              click: () => modal("Tahsilat İadesi", [
-                fld("İade Tutarı (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", max: String(e.amount), value: String(e.amount), required: true })),
-                fld("İade Gerekçesi *", inp("reason", { required: true, minLength: 3, placeholder: "İade nedenini giriniz", value: "" })),
-              ], async (f) => {
-                await api(`/app/api/payments/${e.id}/refund`, {
-                  method: "POST",
-                  body: { amount: f.get("amount"), reason: f.get("reason") },
-                });
-                toast("İade işlemi denetim kaydıyla tamamlandı");
-                openPatient(pid, reveal);
-              }, "İade Et"),
-            },
-          }, "İade") : null)
-        )
-      ))), "Hasta hesap hareketleri tablosu") : h("div", { class: "empty", text: "Hareket yok." }),
-      h("div", { class: "section-t", text: `Kronolojik Hasta Zaman Çizelgesi (${(p.timeline || []).length})` }),
-      (p.timeline || []).length ? h("div", null, (p.timeline || []).slice(0, 25).map((tlItem) => h("div", { class: "alert-item" },
-        h("div", { class: "d" }, h("strong", { text: tlItem.title }), " — ", tlItem.detail, h("small", { text: fmtDT(tlItem.ts) }))
-      ))) : h("div", { class: "empty", text: "Zaman çizelgesi kaydı yok." })
+            }, "Sil"))
+          )))
+        ), "Hasta dosyaları tablosu") : h("div", { class: "empty", text: "Henüz yüklenmiş röntgen veya fotoğraf yok." }),
+        h("div", { class: "section-t", text: "Anamnez" }),
+        p.anamnesis.length ? p.anamnesis.map((a) => h("div", { class: "alert-item" },
+          h("div", { class: "k" }, a.red_flags.length ? tag(`${a.red_flags.length} kırmızı bayrak`, "red") : tag("Temiz", "green")),
+          h("div", { class: "d" }, a.red_flags.join(", ") || "Risk işareti yok", h("small", { text: fmtDT(a.signed_at) })),
+          p.anamnesis_links && p.anamnesis_links[a.id] ? h("a", { class: "btn btn-sm btn-ghost", href: p.anamnesis_links[a.id], target: "_blank", rel: "noopener noreferrer" }, "Aç") : null
+        )) : h("div", { class: "empty", text: "Henüz anamnez yok." }),
+        h("div", { class: "section-t", text: "Onamlar (KVKK & Dijital Tedavi Planı)" }),
+        p.consents.length || (p.treatment_consents || []).length ? [
+          ...p.consents.map((c) => h("div", { class: "alert-item" },
+            h("div", { class: "d" }, consentNames[c.kind] || c.kind, h("small", { text: `Sürüm ${c.text_version} · ${fmtDT(c.granted_at)}` })),
+            c.revoked_at ? tag("Geri alındı", "red") : tag("Geçerli", "green")
+          )),
+          ...(p.treatment_consents || []).map((tc) => h("div", { class: "alert-item" },
+            h("div", { class: "d" }, `Dijital Tedavi Planı Onamı (${tc.document_version})`, h("small", { text: tc.signed_at ? `Onaylayan: ${tc.signer_name} · ${fmtDT(tc.signed_at)}` : "Hasta onayı bekleniyor" })),
+            tag(tc.status === "signed" ? "İmzalandı" : "Bekliyor", tc.status === "signed" ? "green" : "yellow")
+          )),
+        ] : h("div", { class: "empty", text: "Onam kaydı yok." })
+      ),
+      h("div", { "data-dtab": "summary" },
+        h("div", { class: "section-t", text: "Randevular" }),
+        p.appointments.length ? tblWrap(h("table", { class: "table" }, h("tbody", null, p.appointments.map((a) =>
+          h("tr", null, h("td", { text: fmtDT(a.starts_at) }), h("td", { text: `${a.treatment}${a.doctor_name ? " · " + a.doctor_name : ""}` }), h("td", null, tag(...(STATUS[a.status] || [a.status, ""]))))
+        ))), "Hasta randevuları tablosu") : h("div", { class: "empty", text: "Randevu yok." })
+      ),
+      h("div", { "data-dtab": "finance" },
+        h("div", { class: "section-t", text: "Hesap hareketleri" }),
+        ledger.length ? tblWrap(h("table", { class: "table" }, h("tbody", null, ledger.map((e) =>
+          h("tr", { style: e.voided_at ? "opacity:.45;text-decoration:line-through" : "" },
+            h("td", { text: fmtD(e.created_at) }),
+            h("td", { text: `${e.t}: ${e.info}` }),
+            h("td", { class: "num", text: (e.t === "Tahsilat" ? "-" : "") + fmtTL(e.amount) }),
+            h("td", null, e.t === "Tahsilat" && !e.voided_at && e.status === "completed" && S.user.role !== "secretary" ? h("button", {
+              class: "btn btn-sm btn-ghost",
+              type: "button",
+              on: {
+                click: () => modal("Tahsilat İadesi", [
+                  fld("İade Tutarı (TL)", inp("amount", { type: "number", step: "0.01", min: "0.01", max: String(e.amount), value: String(e.amount), required: true })),
+                  fld("İade Gerekçesi *", inp("reason", { required: true, minLength: 3, placeholder: "İade nedenini giriniz", value: "" })),
+                ], async (f) => {
+                  await api(`/app/api/payments/${e.id}/refund`, {
+                    method: "POST",
+                    body: { amount: f.get("amount"), reason: f.get("reason") },
+                  });
+                  toast("İade işlemi denetim kaydıyla tamamlandı");
+                  openPatient(pid, reveal);
+                }, "İade Et"),
+              },
+            }, "İade") : null)
+          )
+        ))), "Hasta hesap hareketleri tablosu") : h("div", { class: "empty", text: "Hareket yok." })
+      ),
+      h("div", { "data-dtab": "summary" },
+        h("div", { class: "section-t", text: `Kronolojik Hasta Zaman Çizelgesi (${(p.timeline || []).length})` }),
+        (p.timeline || []).length ? h("div", null, (p.timeline || []).slice(0, 25).map((tlItem) => h("div", { class: "alert-item" },
+          h("div", { class: "d" }, h("strong", { text: tlItem.title }), " — ", tlItem.detail, h("small", { text: fmtDT(tlItem.ts) }))
+        ))) : h("div", { class: "empty", text: "Zaman çizelgesi kaydı yok." })
+      )
     );
     const wrap = h("div", { class: "drawer-wrap" },
       h("div", { class: "overlay", on: { click: () => close(true) } }),
