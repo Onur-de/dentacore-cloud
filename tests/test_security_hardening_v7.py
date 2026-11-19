@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -362,6 +363,46 @@ def test_role_change_revokes_old_session_immediately(env):
 # ---------------------------------------------------------------------------
 # 10) RATE LIMIT TESTLERİ (EN SONDA)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------- Tedarik zinciri ve imaj hijyeni
+_DC_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _read_pins(rel: str) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for raw in (_DC_ROOT / rel).read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        m = re.match(r"^([A-Za-z0-9_.\-]+)(?:\[[^\]]*\])?==([0-9][^\s;]*)$", line)
+        if m:
+            pins[m.group(1).lower().replace("_", "-")] = m.group(2)
+    return pins
+
+
+def _ver(v: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in re.findall(r"\d+", v)[:3])
+
+
+@pytest.mark.parametrize("rel", ["requirements.txt", "api/requirements.txt"])
+def test_requirements_pin_patched_starlette(rel):
+    """fastapi==0.115.6 starlette<0.42'ye zorlar (OSV: 14 açık, 3'ü HIGH: multipart DoS, FileResponse Range DoS,
+    request.form() limit atlatma). Düzeltilmiş taban açıkça sabitlenmeli; geçişli bağımlılığa güvenilmez."""
+    pins = _read_pins(rel)
+    assert "starlette" in pins, f"{rel}: starlette açıkça sabitlenmeli"
+    assert _ver(pins["starlette"]) >= (1, 3, 1), f"{rel}: starlette {pins['starlette']} bilinen HIGH açıklara sahip"
+
+
+def test_requirement_files_do_not_drift():
+    assert _read_pins("requirements.txt") == _read_pins("api/requirements.txt")
+
+
+def test_dockerignore_keeps_secrets_and_live_db_out_of_image():
+    """Kök Dockerfile `COPY . .` yapar; .dockerignore yoksa canı DB ve sırlar imaja girer (CWE-538)."""
+    path = _DC_ROOT / ".dockerignore"
+    assert path.exists(), ".dockerignore yok: canı DB ve sırlar imaja kopyalanır"
+    rules = {ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")}
+    for must in (".env", ".env.*", ".local_secrets.json", "dentacore_local.db", "dentacore_local.db-*", "*.pem", "*.key"):
+        assert must in rules, f".dockerignore '{must}' içermeli"
+
+
 def test_zz_rate_limit_geri_bildirim_429(env):
     import html as _html
     c = _client()
