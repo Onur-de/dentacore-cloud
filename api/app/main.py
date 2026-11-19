@@ -252,9 +252,47 @@ async def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
     return None
 
 
+def _is_async_webhook(request: Request) -> bool:
+    if request.query_params.get("sync") in ("1", "true"):
+        return False
+    if request.query_params.get("async") in ("1", "true"):
+        return True
+    if request.headers.get("x-webhook-async") == "1":
+        return True
+    return os.environ.get("DC_WEBHOOK_ASYNC") == "1"
+
+
+async def _dispatch_webhook_job(m: dict, profile_name: str | None, channel: str, clinic_id: int, async_mode: bool) -> None:
+    if _WEBHOOK_QUEUE is not None and _WEBHOOK_WORKERS:
+        if async_mode:
+            _WEBHOOK_QUEUE.put_nowait((m, profile_name, channel, clinic_id, None))
+            return
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        await _WEBHOOK_QUEUE.put((m, profile_name, channel, clinic_id, fut))
+        await fut
+    else:
+        await _run_webhook_job(m, profile_name, channel, clinic_id)
+
+
+@app.post("/app/api/admin/webhook-queue/drain")
+async def drain_webhook_queue_ep():
+    if _WEBHOOK_QUEUE is not None:
+        await _WEBHOOK_QUEUE.join()
+    return {
+        "ok": True,
+        "queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
+        "processed_total": _WEBHOOK_PROCESSED_TOTAL,
+    }
+
+
 @app.post("/webhook/whatsapp")
 @app.post("/webhooks/whatsapp")
 async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
+    ip = request.client.host if request.client else "-"
+    w_lim = int(os.environ.get("DC_WEBHOOK_RATE_LIMIT", "600"))
+    if not await panel.limiter.hit(f"wh:wa:{ip}", w_lim, 60):
+        raise HTTPException(429, "Çok fazla webhook isteği")
     raw = await request.body()
     if not wa.verify_signature(raw, x_hub_signature_256):
         raise HTTPException(401, "imza geçersiz")
@@ -262,7 +300,8 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
         body = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(400, "Geçersiz JSON gövdesi")
-    processed, dedup, unmapped = 0, 0, 0
+    async_mode = _is_async_webhook(request)
+    processed, queued, dedup, unmapped = 0, 0, 0, 0
     for entry in body.get("entry", []):
         for ch in entry.get("changes", []):
             v = ch.get("value", {})
@@ -278,11 +317,13 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
                     dedup += 1
                     continue
                 try:
-                    await handle_message(m, names.get(m.get("from")), clinic_id=clinic_id)
+                    await _dispatch_webhook_job(m, names.get(m.get("from")), "wa", clinic_id, async_mode)
                     processed += 1
+                    if async_mode:
+                        queued += 1
                 except Exception:
                     log.exception("mesaj işlenemedi")
-    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
+    return {"ok": True, "processed": processed, "queued": queued, "dedup": dedup, "unmapped": unmapped}
 
 
 # ======================= Instagram DM webhook =======================
@@ -299,6 +340,10 @@ async def ig_verify(request: Request):
 @app.post("/webhook/instagram")
 @app.post("/webhooks/instagram")
 async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
+    ip = request.client.host if request.client else "-"
+    w_lim = int(os.environ.get("DC_WEBHOOK_RATE_LIMIT", "600"))
+    if not await panel.limiter.hit(f"wh:ig:{ip}", w_lim, 60):
+        raise HTTPException(429, "Çok fazla webhook isteği")
     raw = await request.body()
     if not ig.verify_signature(raw, x_hub_signature_256):
         raise HTTPException(401, "imza geçersiz")
@@ -306,7 +351,8 @@ async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(
         body = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(400, "Geçersiz JSON gövdesi")
-    processed, dedup, unmapped = 0, 0, 0
+    async_mode = _is_async_webhook(request)
+    processed, queued, dedup, unmapped = 0, 0, 0, 0
     for entry in body.get("entry", []):
         entry_id = str(entry.get("id") or "").strip()
         for ev in entry.get("messaging", []):
@@ -322,12 +368,14 @@ async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(
                 dedup += 1
                 continue
             try:
-                await handle_message({"from": ev["sender"]["id"], "type": "text", "text": {"body": msg["text"]}},
-                                     None, channel="ig", clinic_id=clinic_id)
+                m_obj = {"from": ev["sender"]["id"], "type": "text", "text": {"body": msg["text"]}}
+                await _dispatch_webhook_job(m_obj, None, "ig", clinic_id, async_mode)
                 processed += 1
+                if async_mode:
+                    queued += 1
             except Exception:
                 log.exception("IG mesajı işlenemedi")
-    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
+    return {"ok": True, "processed": processed, "queued": queued, "dedup": dedup, "unmapped": unmapped}
 
 
 async def handle_message(m: dict, profile_name: str | None, channel: str = "wa", clinic_id: int = 1):

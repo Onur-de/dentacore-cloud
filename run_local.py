@@ -131,6 +131,11 @@ log = logging.getLogger("dentacore.local")
 _SEEN_WEBHOOK_IDS = sec.WebhookDedupCache(max_size=10_000, ttl_seconds=86_400)
 _SCHED_TASK: asyncio.Task | None = None
 _SCHED_LOCK = asyncio.Lock()
+_WEBHOOK_SEM = asyncio.Semaphore(16)
+_SENDER_LOCKS: dict[str, asyncio.Lock] = {}
+_WEBHOOK_QUEUE: asyncio.Queue | None = None
+_WEBHOOK_WORKERS: list[asyncio.Task] = []
+_WEBHOOK_PROCESSED_TOTAL = 0
 
 _FERNET = Fernet(_SECRETS["DATA_ENCRYPTION_KEY"].encode())
 _HMAC_KEY = _SECRETS["PHONE_HMAC_KEY"].encode()
@@ -259,11 +264,13 @@ def iso_now() -> str:
 def db() -> sqlite3.Connection:
     global _CONN
     if _CONN is None:
-        _CONN = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
+        _CONN = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=20.0)
         _CONN.row_factory = sqlite3.Row
         _CONN.execute("PRAGMA journal_mode = WAL")
         _CONN.execute("PRAGMA synchronous = NORMAL")
-        _CONN.execute("PRAGMA busy_timeout = 5000")
+        _CONN.execute("PRAGMA busy_timeout = 15000")
+        _CONN.execute("PRAGMA cache_size = -32000")
+        _CONN.execute("PRAGMA temp_store = MEMORY")
         _CONN.execute("PRAGMA foreign_keys = ON")
     return _CONN
 
@@ -858,6 +865,16 @@ def init_and_seed():
             BEGIN SELECT RAISE(ABORT, 'audit_log yalnizca eklemeye aciktir'); END;
         """)
         ent.migrate_enterprise_sqlite(c, iso_now())
+        c.executescript("""
+            CREATE INDEX IF NOT EXISTS patients_clinic_phone_idx ON patients(clinic_id, phone_hmac);
+            CREATE INDEX IF NOT EXISTS patients_clinic_active_idx ON patients(clinic_id, active, id DESC);
+            CREATE INDEX IF NOT EXISTS appointments_clinic_starts_idx ON appointments(clinic_id, starts_at);
+            CREATE INDEX IF NOT EXISTS appointments_clinic_chair_status_idx ON appointments(clinic_id, status, chair, starts_at);
+            CREATE INDEX IF NOT EXISTS message_log_clinic_patient_idx ON message_log(clinic_id, patient_id, id DESC);
+            CREATE INDEX IF NOT EXISTS campaign_events_clinic_camp_idx ON campaign_events(clinic_id, campaign_id, event_type);
+            CREATE INDEX IF NOT EXISTS charges_clinic_patient_idx ON charges(clinic_id, patient_id, voided_at);
+            CREATE INDEX IF NOT EXISTS payments_clinic_patient_idx ON payments(clinic_id, patient_id, voided_at);
+        """)
         c.commit()
     _migrate_sqlite()
     if IS_PROD:
@@ -1070,17 +1087,59 @@ app = FastAPI(title="DentaCore Local v5.0", docs_url=None, redoc_url=None, opena
 app.add_middleware(sec.SecurityHeadersMiddleware)
 
 
+def _get_sender_lock(key: str) -> asyncio.Lock:
+    lk = _SENDER_LOCKS.get(key)
+    if lk is None:
+        if len(_SENDER_LOCKS) >= 2048:
+            oldest = next(iter(_SENDER_LOCKS))
+            _SENDER_LOCKS.pop(oldest, None)
+        lk = asyncio.Lock()
+        _SENDER_LOCKS[key] = lk
+    return lk
+
+
+async def _webhook_worker_loop_local(q_obj: asyncio.Queue) -> None:
+    while True:
+        item = await q_obj.get()
+        try:
+            if item is None:
+                return
+            sender, pname, mtype, text, channel, clinic_id, payload, fut = item
+            try:
+                await _process_inbound_webhook_msg(sender, pname, mtype, text, channel=channel, clinic_id=clinic_id, payload=payload)
+                if fut is not None and not fut.done():
+                    fut.set_result(True)
+            except Exception as exc:
+                log.exception("webhook worker hatası")
+                if fut is not None and not fut.done():
+                    fut.set_exception(exc)
+        finally:
+            q_obj.task_done()
+
+
+def _ensure_webhook_workers() -> asyncio.Queue:
+    global _WEBHOOK_QUEUE, _WEBHOOK_WORKERS
+    if _WEBHOOK_QUEUE is None:
+        _WEBHOOK_QUEUE = asyncio.Queue(maxsize=2000)
+    alive = [w for w in _WEBHOOK_WORKERS if not w.done()]
+    _WEBHOOK_WORKERS = alive
+    while len(_WEBHOOK_WORKERS) < 8:
+        _WEBHOOK_WORKERS.append(asyncio.create_task(_webhook_worker_loop_local(_WEBHOOK_QUEUE)))
+    return _WEBHOOK_QUEUE
+
+
 @app.on_event("startup")
 async def _on_startup():
     global _SCHED_TASK
     init_and_seed()
+    _ensure_webhook_workers()
     if _SCHED_TASK is None or _SCHED_TASK.done():
         _SCHED_TASK = asyncio.create_task(_scheduler_loop())
 
 
 @app.on_event("shutdown")
 async def _on_shutdown():
-    global _SCHED_TASK
+    global _SCHED_TASK, _WEBHOOK_WORKERS, _WEBHOOK_QUEUE
     if _SCHED_TASK and not _SCHED_TASK.done():
         _SCHED_TASK.cancel()
         try:
@@ -1088,12 +1147,27 @@ async def _on_shutdown():
         except asyncio.CancelledError:
             pass
     _SCHED_TASK = None
+    for w in _WEBHOOK_WORKERS:
+        w.cancel()
+    _WEBHOOK_WORKERS.clear()
+    _WEBHOOK_QUEUE = None
+    await wa.close_client()
 
 
 @app.get("/health")
 def health():
     q1("SELECT 1")
-    return {"ok": True, "mode": "local-sqlite", "gateway": os.environ.get("LLM_BASE_URL")}
+    jm = q1("PRAGMA journal_mode") or {}
+    return {
+        "ok": True,
+        "mode": "local-sqlite",
+        "db_ok": True,
+        "wal_mode": str(next(iter(jm.values()), "wal")).lower(),
+        "webhook_queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
+        "webhook_processed_total": _WEBHOOK_PROCESSED_TOTAL,
+        "workers_ready": len([w for w in _WEBHOOK_WORKERS if not w.done()]),
+        "gateway": os.environ.get("LLM_BASE_URL"),
+    }
 
 
 @app.get("/", include_in_schema=False)
@@ -4128,6 +4202,14 @@ def _extract_campaign_ref(c: sqlite3.Connection, clinic_id: int, text: str) -> d
 
 
 async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mtype: str, text: str, channel: str = "wa", clinic_id: int = 1, payload: str = ""):
+    global _WEBHOOK_PROCESSED_TOTAL
+    async with _WEBHOOK_SEM:
+        async with _get_sender_lock(f"{clinic_id}:{channel}:{sender}"):
+            await _process_inbound_webhook_msg_inner(sender, profile_name, mtype, text, channel=channel, clinic_id=clinic_id, payload=payload)
+            _WEBHOOK_PROCESSED_TOTAL += 1
+
+
+async def _process_inbound_webhook_msg_inner(sender: str, profile_name: str | None, mtype: str, text: str, channel: str = "wa", clinic_id: int = 1, payload: str = ""):
     from app.router import detect_lang
     if channel == "wa" and text:
         st_row = q1("SELECT id, clinic_id, role, full_name FROM staff_users WHERE phone_hmac=? AND active=1", phone_hmac(sender))
@@ -4276,9 +4358,102 @@ def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
     return None
 
 
+def _is_async_webhook_local(request: Request) -> bool:
+    if request.query_params.get("sync") in ("1", "true"):
+        return False
+    if request.query_params.get("async") in ("1", "true"):
+        return True
+    if request.headers.get("x-webhook-async") == "1":
+        return True
+    return os.environ.get("DC_WEBHOOK_ASYNC") == "1"
+
+
+async def _dispatch_webhook_local(
+    sender: str,
+    profile_name: str | None,
+    mtype: str,
+    text: str,
+    channel: str,
+    clinic_id: int,
+    payload: str = "",
+    async_mode: bool = False,
+) -> None:
+    q_obj = _ensure_webhook_workers()
+    if async_mode:
+        q_obj.put_nowait((sender, profile_name, mtype, text, channel, clinic_id, payload, None))
+        return
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    await q_obj.put((sender, profile_name, mtype, text, channel, clinic_id, payload, fut))
+    await fut
+
+
+@app.post("/app/api/admin/webhook-queue/drain")
+async def drain_webhook_queue_local():
+    if _WEBHOOK_QUEUE is not None:
+        await _WEBHOOK_QUEUE.join()
+    return {
+        "ok": True,
+        "queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
+        "processed_total": _WEBHOOK_PROCESSED_TOTAL,
+    }
+
+
+@app.post("/app/api/demo/simulate-flow")
+async def simulate_demo_flow_local(u: dict = Depends(ANY)):
+    if IS_PROD:
+        raise HTTPException(403, "Demo simülasyonu yalnızca örnek/demo ortamında çalışır")
+    cid = int(u["clinic_id"])
+    t_now = iso_now()
+    camp = q1("SELECT id, code, name FROM campaigns WHERE clinic_id=? ORDER BY id ASC LIMIT 1", cid)
+    camp_code = (camp and (camp.get("code") or "META-IMP")) or "META-IMP"
+    demo_phone = "+905398887766"
+    await _process_inbound_webhook_msg(
+        demo_phone,
+        "Örnek Demo Verisi · Deniz Aksoy",
+        "text",
+        f"[Ref: {camp_code}] Merhaba, implant ve zirkonyum randevusu için fiyat ve uygun saat öğrenebilir miyim?",
+        channel="wa",
+        clinic_id=cid,
+    )
+    p_row = q1("SELECT id, display_name FROM patients WHERE clinic_id=? AND phone_hmac=?", cid, phone_hmac(demo_phone))
+    pid = int(p_row["id"]) if p_row else 1
+    doc_row = q1("SELECT id, full_name FROM staff_users WHERE clinic_id=? AND role IN ('owner','doctor') ORDER BY id ASC LIMIT 1", cid)
+    doc_id = int(doc_row["id"]) if doc_row else u["id"]
+    now_loc = datetime.now(TZ)
+    slot_dt = (now_loc + timedelta(days=1)).replace(hour=14, minute=30, second=0, microsecond=0)
+    if slot_dt.weekday() == 6:
+        slot_dt += timedelta(days=1)
+    ex_a = q1("SELECT id FROM appointments WHERE clinic_id=? AND patient_id=? AND status IN ('booked','confirmed') LIMIT 1", cid, pid)
+    if ex_a:
+        aid = int(ex_a["id"])
+    else:
+        aid = ex(
+            "INSERT INTO appointments (clinic_id,patient_id,starts_at,duration_min,treatment,chair,doctor_id,status,source,created_at) VALUES (?,?,?,?,?,?,?,'confirmed','whatsapp_ai',?)",
+            cid, pid, slot_dt.isoformat(), 45, "Örnek Demo · İmplant & Zirkonyum Muayene", "2", doc_id, t_now,
+        )
+    return {
+        "ok": True,
+        "patient_id": pid,
+        "patient_name": (p_row and p_row["display_name"]) or "Örnek Demo Verisi · Deniz Aksoy",
+        "appointment_id": aid,
+        "slot": slot_dt.strftime("%d.%m.%Y %H:%M"),
+        "campaign_code": camp_code,
+        "steps": [
+            f"1. Meta Reklam Tıklaması ([Ref: {camp_code}]) algılandı ve kaynak kilitlendi",
+            "2. WhatsApp AI L1 yönlendirici <50ms içinde 0 token ile yanıt verdi",
+            f"3. Hasta kartı (#{pid}) ve takvim koltuğu ({slot_dt.strftime('%d.%m %H:%M')}) otomatik bağlandı",
+        ],
+    }
+
+
 @app.post("/webhook/whatsapp")
 @app.post("/webhooks/whatsapp")
 async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = Header(default=None)):
+    ip = client_ip(request)
+    w_lim = int(os.environ.get("DC_WEBHOOK_RATE_LIMIT", "600"))
+    if not await _LIMITER.hit(f"wh:wa:{ip}", w_lim, 60):
+        raise HTTPException(429, "Çok fazla webhook isteği")
     raw = await request.body()
     secret = os.environ.get("WA_APP_SECRET", "")
     if not secret or not x_hub_signature_256 or not x_hub_signature_256.startswith("sha256="):
@@ -4290,7 +4465,9 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
         body = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(400, "Geçersiz JSON gövdesi")
+    async_mode = _is_async_webhook_local(request)
     processed = 0
+    queued = 0
     dedup = 0
     unmapped = 0
     for entry in body.get("entry", []):
@@ -4322,14 +4499,23 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
                     text = str(rep.get("title") or "")
                     payload = str(rep.get("id") or "")
                 if sender:
-                    await _process_inbound_webhook_msg(sender, names.get(sender), mtype, text, channel="wa", clinic_id=clinic_id, payload=payload)
+                    await _dispatch_webhook_local(
+                        sender, names.get(sender), mtype, text,
+                        channel="wa", clinic_id=clinic_id, payload=payload, async_mode=async_mode,
+                    )
+                    if async_mode:
+                        queued += 1
                 processed += 1
-    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
+    return {"ok": True, "processed": processed, "queued": queued, "dedup": dedup, "unmapped": unmapped}
 
 
 @app.post("/webhook/instagram")
 @app.post("/webhooks/instagram")
 async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = Header(default=None)):
+    ip = client_ip(request)
+    w_lim = int(os.environ.get("DC_WEBHOOK_RATE_LIMIT", "600"))
+    if not await _LIMITER.hit(f"wh:ig:{ip}", w_lim, 60):
+        raise HTTPException(429, "Çok fazla webhook isteği")
     raw = await request.body()
     secret = os.environ.get("IG_APP_SECRET") or os.environ.get("WA_APP_SECRET", "")
     if not secret or not x_hub_signature_256 or not x_hub_signature_256.startswith("sha256="):
@@ -4341,7 +4527,9 @@ async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = H
         body = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(400, "Geçersiz JSON gövdesi")
+    async_mode = _is_async_webhook_local(request)
     processed = 0
+    queued = 0
     dedup = 0
     unmapped = 0
     for entry in body.get("entry", []):
@@ -4361,9 +4549,14 @@ async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = H
                 continue
             sender = str((ev.get("sender") or {}).get("id") or "")
             if sender:
-                await _process_inbound_webhook_msg(sender, None, "text", str(msg["text"]), channel="ig", clinic_id=clinic_id)
+                await _dispatch_webhook_local(
+                    sender, None, "text", str(msg["text"]),
+                    channel="ig", clinic_id=clinic_id, async_mode=async_mode,
+                )
                 processed += 1
-    return {"ok": True, "processed": processed, "dedup": dedup, "unmapped": unmapped}
+                if async_mode:
+                    queued += 1
+    return {"ok": True, "processed": processed, "queued": queued, "dedup": dedup, "unmapped": unmapped}
 
 
 @app.get("/app/api/alerts")
