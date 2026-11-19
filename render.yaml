@@ -5,10 +5,13 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python run_cloud.py
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.12.7
       - key: TZ
         value: Europe/Istanbul
-      - key: DC_ALLOW_HTTP_LOCAL
+      - key: TRUSTED_PROXY
         value: "1"
+      - key: WEB_CONCURRENCY
+        value: "2"
