@@ -1,5 +1,139 @@
 -- DentaCore platform katmanı: personel girişi, oturum, değiştirilemez denetim kaydı, envanter, kasa, kanal.
 -- Idempotent: API her açılışta bu dosyayı çalıştırır; mevcut veriyi bozmaz.
+-- Sıfırdan (Render / Railway / Bulut PostgreSQL) kurulumlar için çekirdek tablolar önce IF NOT EXISTS ile güvenceye alınır:
+
+CREATE TABLE IF NOT EXISTS patients (
+  id            BIGSERIAL PRIMARY KEY,
+  clinic_id     BIGINT NOT NULL DEFAULT 1,
+  phone_hmac    TEXT NOT NULL,
+  phone_enc     TEXT NOT NULL,
+  display_name  TEXT,
+  lang          TEXT NOT NULL DEFAULT 'tr',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (clinic_id, phone_hmac)
+);
+
+CREATE TABLE IF NOT EXISTS consents (
+  id           BIGSERIAL PRIMARY KEY,
+  patient_id   BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('kvkk_aydinlatma','saglik_verisi_acik_riza','iletisim','yurt_disi_aktarim')),
+  text_version TEXT NOT NULL,
+  text_sha256  TEXT NOT NULL,
+  channel      TEXT NOT NULL,
+  granted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS consents_patient_kind_idx ON consents (patient_id, kind);
+
+CREATE TABLE IF NOT EXISTS appointments (
+  id               BIGSERIAL PRIMARY KEY,
+  patient_id       BIGINT REFERENCES patients(id) ON DELETE SET NULL,
+  starts_at        TIMESTAMPTZ NOT NULL,
+  duration_min     INT NOT NULL DEFAULT 30,
+  treatment        TEXT NOT NULL,
+  chair            TEXT NOT NULL DEFAULT '1',
+  status           TEXT NOT NULL DEFAULT 'booked' CHECK (status IN ('booked','confirmed','cancelled','done','noshow','open')),
+  reminder_sent_at TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS appointments_starts_at_idx ON appointments (starts_at);
+
+CREATE TABLE IF NOT EXISTS waitlist (
+  id          BIGSERIAL PRIMARY KEY,
+  patient_id  BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  treatment   TEXT NOT NULL,
+  earliest    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  active      BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS slot_offers (
+  id             BIGSERIAL PRIMARY KEY,
+  appointment_id BIGINT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+  waitlist_id    BIGINT NOT NULL REFERENCES waitlist(id) ON DELETE CASCADE,
+  wave           INT NOT NULL,
+  sent_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status         TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent','won','lost','expired'))
+);
+
+CREATE TABLE IF NOT EXISTS anamnesis (
+  id               BIGSERIAL PRIMARY KEY,
+  patient_id       BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  answers_enc      TEXT NOT NULL,
+  red_flags        TEXT[] NOT NULL DEFAULT '{}',
+  signer_name      TEXT NOT NULL,
+  signature_sha256 TEXT NOT NULL,
+  signed_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS anamnesis_tokens (
+  token       TEXT PRIMARY KEY,
+  patient_id  BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS postop_checks (
+  id          BIGSERIAL PRIMARY KEY,
+  patient_id  BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  procedure   TEXT NOT NULL,
+  due_at      TIMESTAMPTZ NOT NULL,
+  stage       TEXT NOT NULL CHECK (stage IN ('2s','24s','72s')),
+  sent_at     TIMESTAMPTZ,
+  pain_score  INT,
+  answered_at TIMESTAMPTZ,
+  alarm       BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS postop_checks_due_idx ON postop_checks (due_at) WHERE sent_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS treatment_plans (
+  id              BIGSERIAL PRIMARY KEY,
+  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  treatment       TEXT NOT NULL,
+  planned_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','declined','lost')),
+  last_contact_at TIMESTAMPTZ,
+  followups_sent  INT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS message_log (
+  id          BIGSERIAL PRIMARY KEY,
+  clinic_id   BIGINT NOT NULL DEFAULT 1,
+  patient_id  BIGINT REFERENCES patients(id) ON DELETE SET NULL,
+  direction   TEXT NOT NULL CHECK (direction IN ('in','out')),
+  layer       TEXT,
+  intent      TEXT,
+  tokens_in   INT NOT NULL DEFAULT 0,
+  tokens_out  INT NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS message_log_created_at_idx ON message_log (created_at);
+
+CREATE TABLE IF NOT EXISTS alerts (
+  id              BIGSERIAL PRIMARY KEY,
+  clinic_id       BIGINT NOT NULL DEFAULT 1,
+  patient_id      BIGINT REFERENCES patients(id) ON DELETE SET NULL,
+  kind            TEXT NOT NULL,
+  detail          TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  acknowledged_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS tooth_records (
+  id              BIGSERIAL PRIMARY KEY,
+  clinic_id       BIGINT NOT NULL DEFAULT 1,
+  patient_id      BIGINT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  tooth_fdi       INT NOT NULL CHECK ((tooth_fdi BETWEEN 11 AND 48) OR (tooth_fdi BETWEEN 51 AND 85)),
+  surface         TEXT NOT NULL DEFAULT 'FULL' CHECK (surface IN ('M','D','O','B','L','FULL')),
+  status          TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('healthy','caries','planned','treated','implant','crown','root_canal','missing','extraction')),
+  procedure_code  TEXT NOT NULL DEFAULT '',
+  procedure_name  TEXT NOT NULL DEFAULT '',
+  amount_kurus    BIGINT NOT NULL DEFAULT 0 CHECK (amount_kurus >= 0),
+  doctor_id       BIGINT,
+  note            TEXT NOT NULL DEFAULT '',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS tooth_records_patient_idx ON tooth_records (clinic_id, patient_id, tooth_fdi);
 
 ALTER TABLE patients     ADD COLUMN IF NOT EXISTS channel   TEXT NOT NULL DEFAULT 'wa';
 ALTER TABLE patients     ADD COLUMN IF NOT EXISTS notes_enc TEXT;
@@ -594,6 +728,7 @@ ALTER TABLE treatment_catalog ADD COLUMN IF NOT EXISTS default_status TEXT NOT N
 CREATE INDEX IF NOT EXISTS patients_clinic_phone_idx ON patients(clinic_id, phone_hmac);
 CREATE INDEX IF NOT EXISTS patients_clinic_active_idx ON patients(clinic_id, active, id DESC);
 CREATE INDEX IF NOT EXISTS appointments_clinic_starts_idx ON appointments(clinic_id, starts_at);
+CREATE INDEX IF NOT EXISTS appointments_clinic_doc_starts_idx ON appointments(clinic_id, doctor_id, starts_at);
 CREATE INDEX IF NOT EXISTS appointments_clinic_chair_status_idx ON appointments(clinic_id, status, chair, starts_at);
 CREATE INDEX IF NOT EXISTS message_log_clinic_patient_idx ON message_log(clinic_id, patient_id, id DESC);
 CREATE INDEX IF NOT EXISTS campaign_events_clinic_camp_idx ON campaign_events(clinic_id, campaign_id, event_type);
