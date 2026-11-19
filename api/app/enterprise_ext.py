@@ -842,7 +842,44 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     now_utc = ctx["now_utc"]
     client_ip = ctx["client_ip"]
     root_dir: Path = ctx["root_dir"]
-    fernet_obj = ctx["fernet"]
+    fernet_obj = ctx.get("fernet")
+    _fernet_factory = ctx.get("fernet_factory")
+    _limiter = ctx.get("limiter") or sec.RateLimiter()
+    _vh_raw = ctx.get("phone_hmac_key")
+    # Ziyaretçi özet anahtarı: çalışma zamanı PHONE_HMAC_KEY; yoksa süreç başına rastgele (sabit metin yok, CWE-798)
+    _visitor_key: bytes = (_vh_raw.encode() if isinstance(_vh_raw, str) else _vh_raw) or secrets.token_bytes(32)
+    _csrf_key: bytes = hmac.new(_visitor_key, b"dc-form-csrf-v1", hashlib.sha256).digest()
+
+    def _get_fernet():
+        nonlocal fernet_obj
+        if fernet_obj is None and _fernet_factory is not None:
+            fernet_obj = _fernet_factory()
+        if fernet_obj is None:
+            raise HTTPException(503, "Şifreleme anahtarı yapılandırılmamış")
+        return fernet_obj
+
+    def _rate_limit(key: str, limit: int, window: int) -> None:
+        if not _limiter.hit_sync(key, limit, window):
+            raise HTTPException(429, "Çok fazla istek gönderildi; lütfen daha sonra tekrar deneyin")
+
+    def hq_owner(u: dict = Depends(current_user)) -> dict:
+        if not u.get("is_hq") or u.get("role") != "owner":
+            raise HTTPException(403, "Bu işlem yalnızca Merkez (HQ) yöneticisi yetkisindedir")
+        return u
+
+    def _form_csrf(token: str, exp: int) -> str:
+        sig = hmac.new(_csrf_key, f"tc:{token}:{exp}".encode(), hashlib.sha256).hexdigest()
+        return f"{exp}.{sig}"
+
+    def _verify_form_csrf(token: str, value: str) -> bool:
+        try:
+            exp_s, sig = str(value or "").split(".", 1)
+            exp = int(exp_s)
+        except ValueError:
+            return False
+        if exp < int(datetime.now(timezone.utc).timestamp()):
+            return False
+        return hmac.compare_digest(_form_csrf(token, exp), f"{exp}.{sig}")
 
     def _media_dir() -> Path:
         custom = os.environ.get("DC_MEDIA_DIR", "").strip()
@@ -897,27 +934,32 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/patients/import-csv")
     def import_patients_csv(b: CsvImportIn, u: dict = Depends(require_perm("patient_edit", "create"))):
         cid = u["clinic_id"]
-        reader = csv.DictReader(io.StringIO(b.csv_text.strip()))
+        # Ayrıştırma ve doğrulama global kilidin DIŞINDA yapılır; satır sınırı DoS'u engeller (CWE-400)
+        rows_in = list(csv.DictReader(io.StringIO(b.csv_text.strip())))
+        if len(rows_in) > 500:
+            raise HTTPException(422, "Tek seferde en fazla 500 hasta satırı içe aktarılabilir")
         imported = 0
         duplicates = 0
         invalid = 0
         t_now = iso_now()
         def_src = normalize_source(b.default_source, "other")
-        with db_lock:
-            c = db()
-            for row in reader:
-                norm_row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
-                name = norm_row.get("name") or norm_row.get("ad_soyad") or norm_row.get("ad") or ""
-                phone = norm_row.get("phone") or norm_row.get("telefon") or ""
-                src = normalize_source(norm_row.get("source") or norm_row.get("kaynak"), def_src)
-                lang = (norm_row.get("lang") or norm_row.get("dil") or "tr").lower()
-                if lang not in ("tr", "en", "de", "ar", "ru", "fr", "nl", "es", "it", "fa", "az", "uk", "bg", "ro", "el", "he"):
-                    lang = "tr"
-                notes = (norm_row.get("notes") or norm_row.get("not") or "")[:400]
-                np = norm_phone(phone)
-                if len(name) < 2 or len(np) < 10:
-                    invalid += 1
-                    continue
+        prepared: list[tuple] = []
+        for row in rows_in:
+            norm_row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items() if isinstance(v, str) or v is None}
+            name = norm_row.get("name") or norm_row.get("ad_soyad") or norm_row.get("ad") or ""
+            phone = norm_row.get("phone") or norm_row.get("telefon") or ""
+            src = normalize_source(norm_row.get("source") or norm_row.get("kaynak"), def_src)
+            lang = (norm_row.get("lang") or norm_row.get("dil") or "tr").lower()
+            if lang not in ("tr", "en", "de", "ar", "ru", "fr", "nl", "es", "it", "fa", "az", "uk", "bg", "ro", "el", "he"):
+                lang = "tr"
+            notes = (norm_row.get("notes") or norm_row.get("not") or "")[:400]
+            np = norm_phone(phone)
+            if len(name) < 2 or len(np) < 10:
+                invalid += 1
+                continue
+            prepared.append((name, np, src, lang, notes))
+        with db_lock, db() as c:
+            for name, np, src, lang, notes in prepared:
                 ph = phone_hmac(np)
                 if c.execute("SELECT 1 FROM patients WHERE clinic_id=? AND phone_hmac=?", (cid, ph)).fetchone():
                     duplicates += 1

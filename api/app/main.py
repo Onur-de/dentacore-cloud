@@ -108,7 +108,8 @@ async def lifespan(app: FastAPI):
     await db_close()
 
 
-app = FastAPI(title="DentaCore", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="DentaCore", lifespan=lifespan, docs_url=None, redoc_url=None,
+              openapi_url="/openapi.json" if os.environ.get("DC_ENABLE_OPENAPI") == "1" else None)
 app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(panel.router)
 
@@ -120,6 +121,13 @@ def require_admin(token: str | None):
 
 @app.get("/health")
 async def health():
+    """Public liveness: iç operasyon metriği sızdırmaz (CWE-200)."""
+    await q1("SELECT 1")
+    return {"ok": True, "db_ok": True}
+
+
+@app.get("/app/api/admin/health")
+async def admin_health(u: dict = Depends(panel.HQ_OWNER)):
     await q1("SELECT 1")
     redis_ok = True
     if state.get("redis") is not None:
@@ -279,7 +287,7 @@ async def _dispatch_webhook_job(m: dict, profile_name: str | None, channel: str,
 
 
 @app.post("/app/api/admin/webhook-queue/drain")
-async def drain_webhook_queue_ep(u: dict = Depends(panel.OWNER)):
+async def drain_webhook_queue_ep(u: dict = Depends(panel.HQ_OWNER)):
     if _WEBHOOK_QUEUE is not None:
         await asyncio.wait_for(_WEBHOOK_QUEUE.join(), timeout=15.0)
     return {
@@ -678,6 +686,8 @@ async def feedback_submit(request: Request):
     tok_p = parse_qs(str(f.get("csrf_token", "")))
     if not verify_sig("/form/geri-bildirim", (tok_p.get("exp") or [""])[0], (tok_p.get("sig") or [""])[0]):
         raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş")
+    if not await panel.limiter.hit(f"fb:{panel.client_ip(request)}", 5, 3600):
+        raise HTTPException(429, "Çok fazla geri bildirim gönderildi; lütfen daha sonra tekrar deneyin")
     msg = str(f.get("mesaj", ""))[:1500]
     if not msg.strip():
         return HTMLResponse(

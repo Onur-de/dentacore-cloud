@@ -19,6 +19,7 @@ import secrets
 import sqlite3
 import sys
 import threading
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -244,13 +245,8 @@ def mask_phone(p: str) -> str:
 
 
 def client_ip(request: Request) -> str:
-    if os.environ.get("TRUSTED_PROXY") == "1":
-        xff = (request.headers.get("x-forwarded-for") or "").strip()
-        if xff:
-            first = xff.split(",")[0].strip()
-            if first:
-                return first[:64]
-    return request.client.host if request.client else "-"
+    # XFF sağdan okunur (TRUSTED_PROXY_HOPS); sola eklenen sahte IP'ler rate-limit'i atlatamaz (CWE-290).
+    return sec.client_ip_from(request.headers.get("x-forwarded-for"), request.client.host if request.client else None)
 
 
 def now_utc() -> datetime:
@@ -1084,7 +1080,8 @@ def _enforce_doc_own_patient(cid: int, pid: int, u: dict) -> None:
             if not owns:
                 raise HTTPException(403, "Yalnızca kendi sorumluluğunuzdaki veya tedavisini yaptığınız hastaları görüntüleyebilirsiniz")
 
-app = FastAPI(title="DentaCore Local v5.0", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="DentaCore Local v5.0", docs_url=None, redoc_url=None,
+              openapi_url="/openapi.json" if os.environ.get("DC_ENABLE_OPENAPI") == "1" else None)
 app.add_middleware(sec.SecurityHeadersMiddleware)
 
 
@@ -1132,35 +1129,43 @@ def _ensure_webhook_workers() -> asyncio.Queue:
     return _WEBHOOK_QUEUE
 
 
-@app.on_event("startup")
-async def _on_startup():
-    global _SCHED_TASK
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    global _SCHED_TASK, _WEBHOOK_WORKERS, _WEBHOOK_QUEUE
     init_and_seed()
     _ensure_webhook_workers()
     if _SCHED_TASK is None or _SCHED_TASK.done():
         _SCHED_TASK = asyncio.create_task(_scheduler_loop())
+    try:
+        yield
+    finally:
+        if _SCHED_TASK and not _SCHED_TASK.done():
+            _SCHED_TASK.cancel()
+            try:
+                await _SCHED_TASK
+            except asyncio.CancelledError:
+                pass
+        _SCHED_TASK = None
+        for w in _WEBHOOK_WORKERS:
+            w.cancel()
+        _WEBHOOK_WORKERS.clear()
+        _WEBHOOK_QUEUE = None
+        await wa.close_client()
+        await ig.close_client()
 
 
-@app.on_event("shutdown")
-async def _on_shutdown():
-    global _SCHED_TASK, _WEBHOOK_WORKERS, _WEBHOOK_QUEUE
-    if _SCHED_TASK and not _SCHED_TASK.done():
-        _SCHED_TASK.cancel()
-        try:
-            await _SCHED_TASK
-        except asyncio.CancelledError:
-            pass
-    _SCHED_TASK = None
-    for w in _WEBHOOK_WORKERS:
-        w.cancel()
-    _WEBHOOK_WORKERS.clear()
-    _WEBHOOK_QUEUE = None
-    await wa.close_client()
-    await ig.close_client()
+app.router.lifespan_context = _lifespan
 
 
 @app.get("/health")
 def health():
+    """Public liveness: iç operasyon metriği sızdırmaz (CWE-200)."""
+    q1("SELECT 1")
+    return {"ok": True, "db_ok": True}
+
+
+@app.get("/app/api/admin/health")
+def admin_health(u: dict = Depends(HQ_OWNER)):
     q1("SELECT 1")
     jm = q1("PRAGMA journal_mode") or {}
     return {
@@ -4006,6 +4011,8 @@ async def feedback_submit(request: Request):
     tok_p = parse_qs(str(f.get("csrf_token", "")))
     if not verify_sig("/form/geri-bildirim", (tok_p.get("exp") or [""])[0], (tok_p.get("sig") or [""])[0]):
         raise HTTPException(403, "Form oturumu geçersiz veya süresi dolmuş")
+    if not await _LIMITER.hit(f"fb:{client_ip(request)}", 5, 3600):
+        raise HTTPException(429, "Çok fazla geri bildirim gönderildi; lütfen daha sonra tekrar deneyin")
     msg = str(f.get("mesaj", "")).strip()[:1500]
     if not msg:
         return _patient_page(
@@ -4393,7 +4400,7 @@ async def _dispatch_webhook_local(
 
 
 @app.post("/app/api/admin/webhook-queue/drain")
-async def drain_webhook_queue_local(u: dict = Depends(OWNER)):
+async def drain_webhook_queue_local(u: dict = Depends(HQ_OWNER)):
     if _WEBHOOK_QUEUE is not None:
         await asyncio.wait_for(_WEBHOOK_QUEUE.join(), timeout=15.0)
     return {
@@ -5490,7 +5497,7 @@ async def _probe_http(url: str) -> bool:
 
 
 @app.get("/app/api/ecosystem-status")
-async def ecosystem_status(u: dict = Depends(ANY)):
+async def ecosystem_status(u: dict = Depends(HQ_OWNER)):
     omni_url = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:20128/v1").rstrip("/")
     omni_base = omni_url[:-3] if omni_url.endswith("/v1") else omni_url
     headroom_url = os.environ.get("HEADROOM_URL", "http://127.0.0.1:8787").rstrip("/")
@@ -5941,6 +5948,8 @@ ent.register_enterprise_routes(
         "client_ip": client_ip,
         "root_dir": ROOT,
         "fernet": _FERNET,
+        "phone_hmac_key": _HMAC_KEY,
+        "limiter": _LIMITER,
     },
 )
 

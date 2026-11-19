@@ -37,7 +37,24 @@ BASE_HEADERS = [
     (b"cross-origin-embedder-policy", b"require-corp"),
     (b"x-permitted-cross-domain-policies", b"none"),
 ]
-NO_STORE_PREFIXES = ("/app/api", "/auth", "/form", "/view", "/admin")
+NO_STORE_PREFIXES = ("/app/api", "/auth", "/form", "/view", "/admin", "/calendar", "/api/public")
+
+
+def client_ip_from(xff: str | None, peer: str | None) -> str:
+    """Güvenilir proxy zincirinde gerçek istemci IP'si (CWE-290).
+
+    X-Forwarded-For listesi SAĞDAN okunur: son `TRUSTED_PROXY_HOPS` girdi güvenilir proxy'lerin yazdığı
+    değerlerdir; istemcinin sola eklediği sahte IP'ler hesaba katılmaz. TRUSTED_PROXY=1 değilse başlık yok sayılır.
+    """
+    if _os.environ.get("TRUSTED_PROXY") == "1":
+        parts = [p.strip() for p in (xff or "").split(",") if p.strip()]
+        if parts:
+            try:
+                hops = max(1, int(_os.environ.get("TRUSTED_PROXY_HOPS", "1")))
+            except ValueError:
+                hops = 1
+            return (parts[-hops] if len(parts) >= hops else parts[0])[:64]
+    return peer or "-"
 STRIP = {b"server", b"x-powered-by"}
 
 
@@ -168,6 +185,8 @@ def clear_cookie_header() -> str:
 
 
 # ---------------------------------------------------------------- Hız sınırı (Redis, yoksa bellek)
+_RL_SYNC_LOCK = threading.Lock()
+
 class RateLimiter:
     def __init__(self, redis=None):
         self.redis = redis
@@ -190,6 +209,19 @@ class RateLimiter:
         n += 1
         self.mem[key] = (n, exp)
         return n <= limit
+
+    def hit_sync(self, key: str, limit: int, window: int) -> bool:
+        """Senkron uçlar için süreç içi sayaç (thread güvenli). True: izin var."""
+        with _RL_SYNC_LOCK:
+            now = time.time()
+            if len(self.mem) > 2048:
+                self.mem = {k: v for k, v in self.mem.items() if v[1] > now}
+            n, exp = self.mem.get(key, (0, now + window))
+            if now > exp:
+                n, exp = 0, now + window
+            n += 1
+            self.mem[key] = (n, exp)
+            return n <= limit
 
     async def reset(self, key: str):
         if self.redis:

@@ -48,13 +48,8 @@ def mask_phone(p: str) -> str:
 
 
 def client_ip(request: Request) -> str:
-    if os.environ.get("TRUSTED_PROXY") == "1":
-        xff = (request.headers.get("x-forwarded-for") or "").strip()
-        if xff:
-            first = xff.split(",")[0].strip()
-            if first:
-                return first[:64]
-    return request.client.host if request.client else "-"
+    # XFF sağdan okunur (TRUSTED_PROXY_HOPS); sola eklenen sahte IP'ler rate-limit'i atlatamaz (CWE-290).
+    return sec.client_ip_from(request.headers.get("x-forwarded-for"), request.client.host if request.client else None)
 
 
 # ======================================================================== kimlik doğrulama
@@ -2140,7 +2135,7 @@ async def _probe_http(url: str) -> bool:
 
 
 @router.get("/app/api/ecosystem-status")
-async def ecosystem_status(u: dict = Depends(ANY)):
+async def ecosystem_status(u: dict = Depends(HQ_OWNER)):
     omni_url = env("LLM_BASE_URL", "http://127.0.0.1:20128/v1").rstrip("/")
     omni_base = omni_url[:-3] if omni_url.endswith("/v1") else omni_url
     headroom_url = env("HEADROOM_URL", "http://127.0.0.1:8787").rstrip("/")
