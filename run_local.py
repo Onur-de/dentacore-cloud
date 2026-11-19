@@ -2239,6 +2239,7 @@ async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
                     if not int(row["active"] if row["active"] is not None else 1):
                         raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
                     pid = row["id"]
+                    _enforce_doc_own_patient(cid, pid, u)
                     p_phone_enc = row["phone_enc"]
                     p_name = row["display_name"]
                 else:

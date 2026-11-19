@@ -2573,12 +2573,14 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
     def _write_audit(actor_id: Any, actor: str, action: str, target: str = "", ip_h: str = "", meta: dict | None = None, clinic_id: int = 1) -> None:
         from . import security as sec_mod
         ts = datetime.now(TZ).isoformat(timespec="seconds")
-        m_json = json.dumps(meta or {}, ensure_ascii=False, sort_keys=True)
+        m_json = json.dumps(meta or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         act_id = int(actor_id) if str(actor_id or "").isdigit() else None
         with _pg_lock, _get_conn() as c:
+            if c._is_pg:
+                c.execute("SELECT pg_advisory_xact_lock(74210001)")
             prev_row = c.execute("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
             prev_h = (prev_row["hash"] if prev_row and prev_row["hash"] else "0" * 64)
-            h = sec_mod.chain_hash(prev_h, ts, str(actor), action, target, m_json)
+            h = sec_mod.audit_digest(prev_h, ts, str(actor), action, target, m_json)
             c.execute(
                 "INSERT INTO audit_log (clinic_id,ts,actor_id,actor,action,target,ip_hash,meta,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (clinic_id, ts, act_id, str(actor), action, target, ip_h, m_json, prev_h, h),

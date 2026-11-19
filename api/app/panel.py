@@ -643,6 +643,7 @@ async def create_appt(b: ApptCreate, u: dict = Depends(ANY)):
             if not ex_p.get("active", True):
                 raise HTTPException(409, "Arşivlenmiş hasta için yeni işlem oluşturulamaz; önce aktifleştirin")
             pid = ex_p["id"]
+            await _enforce_doc_own_patient_pg(cid, pid, u)
     buf_min = max(0, int((cinfo and cinfo.get("buffer_min")) or 0))
     ends = starts + timedelta(minutes=b.duration_min + buf_min)
     async with tx() as t:
@@ -1614,7 +1615,7 @@ async def staff(u: dict = Depends(ANY)):
 
 
 @router.post("/app/api/staff")
-async def add_staff(b: StaffIn, u: dict = Depends(require_perm("staff_manage"))):
+async def add_staff(b: StaffIn, u: dict = Depends(OWNER)):
     email = b.email.strip().lower()
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(400, "Geçerli e-posta girin")
