@@ -5,6 +5,7 @@ import asyncio
 import hmac
 import json
 import logging
+import os
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -24,13 +25,58 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("api")
 state: dict = {}
 _MEM_WEBHOOK_DEDUP = WebhookDedupCache(max_size=10_000, ttl_seconds=86_400)
+_WEBHOOK_SEM = asyncio.Semaphore(16)
+_SENDER_LOCKS: dict[str, asyncio.Lock] = {}
+_WEBHOOK_QUEUE: asyncio.Queue | None = None
+_WEBHOOK_WORKERS: list[asyncio.Task] = []
+_WEBHOOK_PROCESSED_TOTAL = 0
 HERE = Path(__file__).parent
 WEB = HERE / "web"
 MIGRATION = Path(env("MIGRATION_FILE", str(HERE / "migrations" / "002_platform.sql")))
 
 
+def _get_sender_lock(key: str) -> asyncio.Lock:
+    lk = _SENDER_LOCKS.get(key)
+    if lk is None:
+        if len(_SENDER_LOCKS) >= 2048:
+            oldest = next(iter(_SENDER_LOCKS))
+            _SENDER_LOCKS.pop(oldest, None)
+        lk = asyncio.Lock()
+        _SENDER_LOCKS[key] = lk
+    return lk
+
+
+async def _run_webhook_job(m: dict, profile_name: str | None, channel: str, clinic_id: int) -> None:
+    global _WEBHOOK_PROCESSED_TOTAL
+    sender = str(m.get("from") or "")
+    async with _WEBHOOK_SEM:
+        async with _get_sender_lock(f"{clinic_id}:{channel}:{sender}"):
+            await handle_message(m, profile_name, channel=channel, clinic_id=clinic_id)
+            _WEBHOOK_PROCESSED_TOTAL += 1
+
+
+async def _webhook_worker_loop(q_obj: asyncio.Queue) -> None:
+    while True:
+        item = await q_obj.get()
+        try:
+            if item is None:
+                return
+            m, profile_name, channel, clinic_id, fut = item
+            try:
+                await _run_webhook_job(m, profile_name, channel, clinic_id)
+                if fut is not None and not fut.done():
+                    fut.set_result(True)
+            except Exception as exc:
+                log.exception("webhook worker hatası")
+                if fut is not None and not fut.done():
+                    fut.set_exception(exc)
+        finally:
+            q_obj.task_done()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _WEBHOOK_QUEUE, _WEBHOOK_WORKERS
     from .core import assert_no_compromised_secrets
     for k in ("DATA_ENCRYPTION_KEY", "PHONE_HMAC_KEY", "ADMIN_TOKEN", "DATABASE_URL"):
         if not env(k):
@@ -46,9 +92,16 @@ async def lifespan(app: FastAPI):
     state["redis"] = redis
     panel.limiter.redis = redis
     state["router"] = TokenRouter(redis=redis)
+    _WEBHOOK_QUEUE = asyncio.Queue(maxsize=2000)
+    _WEBHOOK_WORKERS = [asyncio.create_task(_webhook_worker_loop(_WEBHOOK_QUEUE)) for _ in range(8)]
     task = asyncio.create_task(modules.scheduler_loop(redis))
     yield
     task.cancel()
+    for w in _WEBHOOK_WORKERS:
+        w.cancel()
+    _WEBHOOK_WORKERS.clear()
+    await wa.close_client()
+    await ig.close_client()
     await db_close()
 
 
@@ -65,7 +118,21 @@ def require_admin(token: str | None):
 @app.get("/health")
 async def health():
     await q1("SELECT 1")
-    return {"ok": True}
+    redis_ok = True
+    if state.get("redis") is not None:
+        try:
+            await state["redis"].ping()
+        except Exception:
+            redis_ok = False
+    return {
+        "ok": True,
+        "mode": "cloud-postgres",
+        "db_ok": True,
+        "redis_ok": redis_ok,
+        "webhook_queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
+        "webhook_processed_total": _WEBHOOK_PROCESSED_TOTAL,
+        "workers_ready": len(_WEBHOOK_WORKERS),
+    }
 
 
 # ======================= Web sitesi ve panel (statik, dış kaynak yok) =======================

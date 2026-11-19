@@ -589,3 +589,14 @@ ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS contact_name TEXT NOT NULL DEFAUL
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS balance_kurus BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE treatment_catalog ADD COLUMN IF NOT EXISTS default_price_kurus BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE treatment_catalog ADD COLUMN IF NOT EXISTS default_status TEXT NOT NULL DEFAULT 'treated';
+
+-- High-concurrency composite indexes (100+ concurrent users / webhooks / calendar slots)
+CREATE INDEX IF NOT EXISTS patients_clinic_phone_idx ON patients(clinic_id, phone_hmac);
+CREATE INDEX IF NOT EXISTS patients_clinic_active_idx ON patients(clinic_id, active, id DESC);
+CREATE INDEX IF NOT EXISTS appointments_clinic_starts_idx ON appointments(clinic_id, starts_at);
+CREATE INDEX IF NOT EXISTS appointments_clinic_chair_status_idx ON appointments(clinic_id, status, chair, starts_at);
+CREATE INDEX IF NOT EXISTS message_log_clinic_patient_idx ON message_log(clinic_id, patient_id, id DESC);
+CREATE INDEX IF NOT EXISTS campaign_events_clinic_camp_idx ON campaign_events(clinic_id, campaign_id, event_type);
+CREATE INDEX IF NOT EXISTS charges_clinic_patient_idx ON charges(clinic_id, patient_id, voided_at);
+CREATE INDEX IF NOT EXISTS payments_clinic_patient_idx ON payments(clinic_id, patient_id, voided_at);
+
