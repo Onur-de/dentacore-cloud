@@ -363,12 +363,18 @@ def test_role_change_revokes_old_session_immediately(env):
 # 10) RATE LIMIT TESTLERİ (EN SONDA)
 # ---------------------------------------------------------------------------
 def test_zz_rate_limit_geri_bildirim_429(env):
+    import html as _html
     c = _client()
+    g = c.get("/form/geri-bildirim")
+    assert g.status_code == 200
+    m = re.search(r'name=csrf_token value="([^"]+)"', g.text) or re.search(r'name="csrf_token" value="([^"]+)"', g.text)
+    assert m, "Geri bildirim formunda csrf_token bulunamadı"
+    csrf_tok = _html.unescape(m.group(1))
     statuses = [
-        c.post("/form/geri-bildirim", data={"rating": "5", "comment": f"Test yorum {i}"}).status_code
-        for i in range(60)
+        c.post("/form/geri-bildirim", data={"csrf_token": csrf_tok, "mesaj": f"Test yorum {i}", "iletisim": "05320000000"}).status_code
+        for i in range(10)
     ]
-    assert 429 in statuses, f"/form/geri-bildirim hız sınırı 429 dönmeli: {set(statuses)}"
+    assert 429 in statuses, f"/form/geri-bildirim hız sınırı 429 dönmeli: {statuses}"
 
 
 def test_zz_rate_limit_public_book_429(env):
