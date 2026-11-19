@@ -4991,10 +4991,12 @@ textarea.input { min-height: 84px; }
     }
     const k = new URLSearchParams(location.hash.split("?")[1] || "").get("r") || "ay";
     const [s, e] = range(k);
-    const [d, banks, exps] = await Promise.all([
+    const [d, banks, exps, suppliers, docRev] = await Promise.all([
       api(`/app/api/kasa?start=${encodeURIComponent(s.toISOString())}&end=${encodeURIComponent(e.toISOString())}`),
       api("/app/api/bank-agreements").catch(() => []),
       api("/app/api/expenses").catch(() => []),
+      api("/app/api/suppliers").catch(() => []),
+      api("/app/api/doctors/revenue-report").catch(() => []),
     ]);
     const canVoid = S.user.role !== "secretary";
     const voidBtn = (en) => h("button", {
@@ -5019,6 +5021,28 @@ textarea.input { min-height: 84px; }
           class: "btn btn-ghost",
           type: "button",
           on: {
+            click: () => modal("Yeni Tedarikçi Kaydet", [
+              fld("Tedarikçi / Firma Adı *", inp("name", { required: true, minLength: 2, placeholder: "Örn. Ege Dental Medikal A.Ş.", value: "" })),
+              h("div", { class: "row" },
+                fld("İlgili Kişi", inp("contact_name", { placeholder: "Ahmet Bey", value: "" })),
+                fld("Telefon", inp("phone", { placeholder: "0216 xxx xx xx", value: "" }))
+              ),
+              h("div", { class: "row" },
+                fld("E-posta", inp("email", { placeholder: "info@firma.com", value: "" })),
+                fld("Vergi No / VKN", inp("tax_no", { placeholder: "1234567890", value: "" }))
+              ),
+              fld("Not", inp("note", { placeholder: "İmplant ve sarf malzeme tedarikçisi", value: "" })),
+            ], async (f) => {
+              await api("/app/api/suppliers", { method: "POST", body: Object.fromEntries(f) });
+              toast("Tedarikçi kaydedildi");
+              route();
+            }, "Kaydet"),
+          },
+        }, "+ Tedarikçi Ekle"),
+        h("button", {
+          class: "btn btn-ghost",
+          type: "button",
+          on: {
             click: () => modal("Klinik Gideri Kaydet", [
               h("div", { class: "row" },
                 fld("Kategori", sel("category", [
@@ -5035,10 +5059,14 @@ textarea.input { min-height: 84px; }
                   ["nakit", "Nakit"],
                 ], "havale"))
               ),
+              suppliers.length ? fld("Tedarikçi (İsteğe Bağlı)", sel("supplier_id", [["", "Tedarikçi seçilmedi"], ...suppliers.map((sp) => [String(sp.id), sp.name])], "")) : null,
               fld("Açıklama *", inp("description", { required: true, minLength: 2, placeholder: "Aylık sarf malzeme ödemesi", value: "" })),
               fld("Tutar (TL) *", inp("amount", { type: "number", step: "0.01", min: "0.01", required: true, placeholder: "Örn. 4500", value: "" })),
             ], async (f) => {
-              await api("/app/api/expenses", { method: "POST", body: Object.fromEntries(f) });
+              const payload = Object.fromEntries(f);
+              if (payload.supplier_id) payload.supplier_id = Number(payload.supplier_id);
+              else delete payload.supplier_id;
+              await api("/app/api/expenses", { method: "POST", body: payload });
               toast("Gider kaydedildi");
               route();
             }, "Kaydet"),
@@ -5074,7 +5102,25 @@ textarea.input { min-height: 84px; }
       ) : h("div", { class: "cal-box", style: "margin-top:12px;font-size:12.5px;color:var(--muted)" },
         "Şirket Ünvanı, Kurum/Banka Anlaşmaları ve Sanal POS şu an Taslak Modundadır. Bilgileriniz 3_BENIM_DOSYALARIM klasöründeki forma girildiğinde otomatik aktifleşir."
       ),
-      d.shares && d.shares.length ? h("div", { class: "card", style: "margin-top:14px" },
+      (docRev && docRev.length) ? h("div", { class: "card", style: "margin-top:14px" },
+        h("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px" },
+          h("h3", { style: "margin:0", text: "Doktor Hakediş ve Gelir Raporu (Sorumlu vs Tedaviyi Yapan Hekim)" }),
+          h("a", { class: "btn btn-sm btn-ghost", href: "/app/api/export/doctor_shares.csv", download: "dentacore-doktor-hakedis.csv" }, "Hakediş CSV İndir")
+        ),
+        tblWrap(h("table", { class: "table" },
+          h("thead", null, h("tr", null, ["Hekim", "Pay Oranı", "Sorumlu Hasta", "Yapılan İşlem", "Brüt Hizmet", "Net Hizmet", "Hekim Hakediş", "Klinik Payı"].map((t, i) => h("th", { class: i ? "num" : "", text: t })))),
+          h("tbody", null, docRev.map((x) => h("tr", null,
+            h("td", { text: x.full_name }),
+            h("td", { class: "num", text: `%${Number(x.share_pct)}` }),
+            h("td", { class: "num", text: String(x.owned_patients_count || 0) }),
+            h("td", { class: "num", text: String(x.performed_procedures_count || 0) }),
+            h("td", { class: "num", text: fmtTL(x.gross_billed || 0) }),
+            h("td", { class: "num", text: fmtTL(x.net_billed || 0) }),
+            h("td", { class: "num", text: fmtTL(x.doctor_hakedis || 0) }),
+            h("td", { class: "num", text: fmtTL(x.clinic_share || 0) })
+          )))
+        ), "Doktor hakediş ve gelir raporu tablosu")
+      ) : (d.shares && d.shares.length ? h("div", { class: "card", style: "margin-top:14px" },
         h("h3", { text: "Hekim payları" }),
         tblWrap(h("table", { class: "table" },
           h("thead", null, h("tr", null, ["Hekim", "Pay oranı", "Hizmet", "Hak ediş"].map((t, i) => h("th", { class: i ? "num" : "", text: t })))),
@@ -5085,6 +5131,24 @@ textarea.input { min-height: 84px; }
             h("td", { class: "num", text: fmtTL(x.share_try) })
           )))
         ), "Hekim payları tablosu")
+      ) : null),
+      (suppliers.length || exps.length) ? h("div", { class: "card", style: "margin-top:14px" },
+        h("h3", { text: `Tedarikçi Yönetimi (${suppliers.length}) & Klinik Giderleri (${exps.length})` }),
+        suppliers.length ? h("div", { style: "font-size:13px;margin-bottom:8px;color:var(--ink-2)" },
+          h("b", { text: "Kayıtlı Tedarikçiler: " }),
+          suppliers.map((sp) => `${sp.name}${sp.contact_name ? " (" + sp.contact_name + ")" : ""}${sp.phone ? " · " + sp.phone : ""}`).join(" | ")
+        ) : null,
+        exps.length ? tblWrap(h("table", { class: "table" },
+          h("thead", null, h("tr", null, ["Tarih", "Kategori", "Tedarikçi", "Açıklama", "Yöntem", "Tutar"].map((t, i) => h("th", { class: i === 5 ? "num" : "", text: t })))),
+          h("tbody", null, exps.slice(0, 15).map((ex) => h("tr", null,
+            h("td", { text: fmtDT(ex.paid_at || ex.created_at) }),
+            h("td", null, tag(ex.category || "gider", "amber")),
+            h("td", { text: ex.supplier_name || "-" }),
+            h("td", { text: ex.description }),
+            h("td", { text: ex.method }),
+            h("td", { class: "num", text: fmtTL(ex.amount) })
+          )))
+        ), "Klinik giderleri tablosu") : null
       ) : null,
       h("div", { class: "card card-flush", style: "margin-top:14px" }, tblWrap(h("table", { class: "table" },
         h("thead", null, h("tr", null, ["Tarih", "Tür", "Hasta", "Açıklama", "Tutar", "İşlemler"].map((t, i) => h("th", { class: i === 4 ? "num" : "", text: t })))),
@@ -5677,7 +5741,7 @@ textarea.input { min-height: 84px; }
         (rep && rep.measurement_honesty_notice_tr) || "Sunucu tarafı gerçek tıklama, bot filtresi ve kasa tahsilatı eşleştirmesi aktiftir; iOS gizlilik ve reklam engelleyiciler nedeniyle %100 reklam tıklama garantisi verilemez."
       ),
       h("div", { class: "card card-flush", style: "margin-top:14px" }, tblWrap(h("table", { class: "table" },
-        h("thead", null, h("tr", null, ["Kampanya & Takip Linki", "Kanal", "Tekil Tık (Bot Hariç)", "Form", "Hasta", "Randevu", "Gerçek Kasa Tahsilatı"].map((t, i) => h("th", { class: i > 1 ? "num" : "", text: t })))),
+        h("thead", null, h("tr", null, ["Kampanya & Takip Linki", "Kanal", "Tekil Tık (Bot Hariç)", "Form", "Hasta", "Randevu", "Muayene", "Gerçek Kasa Tahsilatı"].map((t, i) => h("th", { class: i > 1 ? "num" : "", text: t })))),
         h("tbody", null, campRows.length ? campRows.map((c) => h("tr", null,
           h("td", null,
             h("b", { text: c.name }),
@@ -5692,8 +5756,9 @@ textarea.input { min-height: 84px; }
           h("td", { class: "num", text: c.form_submits !== undefined ? `${c.form_submits}/${c.form_starts || 0}` : "-" }),
           h("td", { class: "num", text: c.patients_created !== undefined ? c.patients_created : (c.conversations || 0) }),
           h("td", { class: "num", text: c.appointments_booked || 0 }),
+          h("td", { class: "num", text: c.visits_done !== undefined ? c.visits_done : (c.visits_completed || 0) }),
           h("td", { class: "num", text: fmtTL(c.collected_revenue_try !== undefined ? c.collected_revenue_try : c.revenue_try) })
-        )) : h("tr", null, h("td", { colSpan: 7, class: "empty", text: "Henüz kampanya kaydı yok." })))
+        )) : h("tr", null, h("td", { colSpan: 8, class: "empty", text: "Henüz kampanya kaydı yok." })))
       ), "Reklam kampanyaları tablosu"))
     );
   };

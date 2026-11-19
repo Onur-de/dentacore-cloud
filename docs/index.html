@@ -3230,19 +3230,72 @@ code {
   });
   calc();
 
-  // Kampanya ve UTM kaynak yakalama + Demo formu (POST /lead)
+  // Kampanya ve UTM kaynak yakalama (Multi-Touch Attribution: dc_first_touch & dc_last_touch) + Demo formu (POST /lead)
   const urlParams = new URLSearchParams(window.location.search || "");
-  const utmSource = urlParams.get("utm_source") || "";
-  const utmMedium = urlParams.get("utm_medium") || "";
-  const utmCampaign = urlParams.get("utm_campaign") || "";
-  const campaignCode = urlParams.get("dc_code") || utmCampaign || "";
-  const clickId = urlParams.get("gclid")
-    ? "gclid:" + urlParams.get("gclid")
-    : urlParams.get("fbclid")
-      ? "fbclid:" + urlParams.get("fbclid")
-      : urlParams.get("ttclid")
-        ? "ttclid:" + urlParams.get("ttclid")
-        : "";
+  const rawUtmSource = urlParams.get("utm_source") || "";
+  const rawUtmMedium = urlParams.get("utm_medium") || "";
+  const rawUtmCampaign = urlParams.get("utm_campaign") || "";
+  const rawSource = urlParams.get("source") || "";
+  const rawCampaignCode = urlParams.get("dc_code") || urlParams.get("campaign_code") || rawUtmCampaign || "";
+  const rawClickId = urlParams.get("click_id")
+    || (urlParams.get("gclid") ? "gclid:" + urlParams.get("gclid") : "")
+    || (urlParams.get("fbclid") ? "fbclid:" + urlParams.get("fbclid") : "")
+    || (urlParams.get("ttclid") ? "ttclid:" + urlParams.get("ttclid") : "");
+
+  const hasUrlAttribution = Boolean(rawUtmSource || rawUtmMedium || rawUtmCampaign || rawCampaignCode || rawClickId || rawSource);
+  const currentTouch = {
+    source: rawSource || rawUtmSource || "website",
+    utm_source: rawUtmSource,
+    utm_medium: rawUtmMedium,
+    utm_campaign: rawUtmCampaign,
+    campaign_code: rawCampaignCode,
+    click_id: rawClickId,
+    ts: new Date().toISOString()
+  };
+
+  function safeParseJSON(raw) {
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (_) { return null; }
+  }
+
+  let firstTouch = null;
+  let lastTouch = null;
+  try {
+    firstTouch = safeParseJSON(window.localStorage.getItem("dc_first_touch"));
+    lastTouch = safeParseJSON(window.sessionStorage.getItem("dc_last_touch"));
+    if (hasUrlAttribution) {
+      if (!firstTouch) {
+        firstTouch = currentTouch;
+        window.localStorage.setItem("dc_first_touch", JSON.stringify(firstTouch));
+      }
+      lastTouch = currentTouch;
+      window.sessionStorage.setItem("dc_last_touch", JSON.stringify(lastTouch));
+    }
+  } catch (_) {}
+
+  const effFirst = firstTouch || currentTouch;
+  const effLast = lastTouch || firstTouch || currentTouch;
+  const utmSource = effLast.utm_source || effFirst.utm_source || "";
+  const utmMedium = effLast.utm_medium || effFirst.utm_medium || "";
+  const utmCampaign = effLast.utm_campaign || effFirst.utm_campaign || "";
+  const campaignCode = effLast.campaign_code || effFirst.campaign_code || utmCampaign || "";
+  const clickId = effLast.click_id || effFirst.click_id || "";
+  const firstSource = effFirst.source || effFirst.utm_source || "";
+
+  // WhatsApp iletişim butonlarına aktif kampanya referansı ([Ref: KAMPANYA_KODU]) otomatik ekleme
+  if (campaignCode) {
+    const refTag = `[Ref: ${campaignCode}]`;
+    document.querySelectorAll('a[href*="wa.me"], a[href*="whatsapp.com"], a[data-wa-link]').forEach((a) => {
+      try {
+        const u = new URL(a.href, window.location.origin);
+        const curText = u.searchParams.get("text") || "Merhaba, DentaCore hakkında bilgi almak istiyorum.";
+        if (!curText.includes("[Ref:")) {
+          u.searchParams.set("text", `${curText} ${refTag}`.trim());
+          a.href = u.toString();
+        }
+      } catch (_) {}
+    });
+  }
 
   const form = $("lead");
   const msg = $("lead-msg");
@@ -3291,6 +3344,7 @@ code {
         contact,
         city: String(f.get("city") || "").trim() || null,
         chairs: f.get("chairs") ? Number(f.get("chairs")) : null,
+        source: firstSource || effLast.source || null,
         utm_source: utmSource,
         utm_medium: utmMedium,
         utm_campaign: utmCampaign,
