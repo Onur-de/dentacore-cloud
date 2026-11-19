@@ -82,9 +82,10 @@ def normalize_pages_landing(html: str) -> str:
 def _push_remote(remote: str) -> None:
     res = subprocess.run([GIT_EXE, "push", remote, "main:main"], cwd=str(TARGET), capture_output=True, text=True)
     if res.returncode != 0:
-        _log(f"push fast-forward failed for {remote}: {res.stderr.strip()}; retrying with --force-with-lease")
+        _log(f"push fast-forward failed for {remote}: {res.stderr.strip()}; pulling with rebase and retrying without force")
+        subprocess.run([GIT_EXE, "pull", "--rebase", remote, "main"], cwd=str(TARGET), capture_output=True, text=True)
         res2 = subprocess.run(
-            [GIT_EXE, "push", remote, "main:main", "--force-with-lease"],
+            [GIT_EXE, "push", remote, "main:main"],
             cwd=str(TARGET),
             capture_output=True,
             text=True,

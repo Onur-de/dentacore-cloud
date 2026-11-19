@@ -58,7 +58,8 @@ def main() -> None:
     run_git("commit", "-m", "chore: update DentaCore v6.2 cloud bundle")
     push_proc = subprocess.run([GIT_EXE, "push", "-u", "origin", "main"], cwd=str(REPO_DIR))
     if push_proc.returncode != 0:
-        push_proc = subprocess.run([GIT_EXE, "push", "-u", "origin", "main", "--force-with-lease"], cwd=str(REPO_DIR))
+        subprocess.run([GIT_EXE, "pull", "--rebase", "origin", "main"], cwd=str(REPO_DIR))
+        push_proc = subprocess.run([GIT_EXE, "push", "-u", "origin", "main"], cwd=str(REPO_DIR))
 
     if push_proc.returncode == 0:
         clean_url = remote_url[:-4] if remote_url.endswith(".git") else remote_url
