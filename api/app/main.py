@@ -286,6 +286,25 @@ async def drain_webhook_queue_ep():
     }
 
 
+@app.post("/app/api/demo/simulate-flow")
+async def simulate_demo_flow_pg():
+    if env("DC_ENV", "local") in ("prod", "production"):
+        raise HTTPException(403, "Demo simülasyonu yalnızca örnek/demo ortamında çalışır")
+    return {
+        "ok": True,
+        "patient_id": 1,
+        "patient_name": "Örnek Demo Verisi · Deniz Aksoy",
+        "appointment_id": 1,
+        "slot": "Yarın 14:30",
+        "campaign_code": "META-IMP",
+        "steps": [
+            "1. Meta Reklam Tıklaması ([Ref: META-IMP]) algılandı ve kaynak kilitlendi",
+            "2. WhatsApp AI L1 yönlendirici <50ms içinde 0 token ile yanıt verdi",
+            "3. Hasta kartı ve takvim koltuğu otomatik bağlandı",
+        ],
+    }
+
+
 @app.post("/webhook/whatsapp")
 @app.post("/webhooks/whatsapp")
 async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
