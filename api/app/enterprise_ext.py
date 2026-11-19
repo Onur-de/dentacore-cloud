@@ -1414,8 +1414,20 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     @app.post("/app/api/payments/{pay_id}/refund")
     def refund_payment(pay_id: int, b: RefundIn, u: dict = Depends(require_perm("finance_view", "finance_edit"))):
         cid = u["clinic_id"]
-        with db_lock:
-            c = db()
+        pre = q1("SELECT patient_id FROM payments WHERE id=? AND clinic_id=?", pay_id, cid)
+        if pre and pre.get("patient_id"):
+            _check_doc_own_patient(int(pre["patient_id"]), u)
+        with db_lock, db() as c:
+            if b.idempotency_key:
+                dup = c.execute(
+                    "SELECT id, amount_kurus, refund_of_id FROM payments WHERE clinic_id=? AND idempotency_key=?",
+                    (cid, b.idempotency_key),
+                ).fetchone()
+                if dup:
+                    if dup["refund_of_id"] != pay_id:
+                        raise HTTPException(409, "Bu idempotency anahtarı başka bir işlem için kullanılmış")
+                    return {"ok": True, "refund_id": dup["id"], "refunded_amount": tl(dup["amount_kurus"]),
+                            "idempotent_replay": True}
             orig = c.execute(
                 "SELECT * FROM payments WHERE id=? AND clinic_id=? AND voided_at IS NULL AND COALESCE(status,'completed')='completed' AND method<>'avans_mahsup'",
                 (pay_id, cid),
@@ -1448,8 +1460,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     def settle_patient_advance(pid: int, b: AdvanceSettleIn, u: dict = Depends(require_perm("finance_edit"))):
         cid = u["clinic_id"]
         _check_doc_own_patient(pid, u)
-        with db_lock:
-            c = db()
+        with db_lock, db() as c:
             if b.charge_id is not None:
                 ch = c.execute("SELECT * FROM charges WHERE id=? AND clinic_id=? AND patient_id=? AND voided_at IS NULL", (b.charge_id, cid, pid)).fetchone()
             else:
@@ -1535,8 +1546,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             raise HTTPException(422, "Geçersiz taksit başlangıç tarihi (YYYY-MM-DD olmalıdır)")
         t_now = iso_now()
         ids = []
-        with db_lock:
-            c = db()
+        with db_lock, db() as c:
             for i in range(cnt):
                 amt_i = base_k + (rem_k if i == cnt - 1 else 0)
                 due_i = (start_d + timedelta(days=30 * i)).isoformat()
@@ -1558,8 +1568,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         inst_chk = q1("SELECT patient_id FROM payment_installments WHERE id=? AND clinic_id=?", iid, cid)
         if inst_chk and inst_chk.get("patient_id"):
             _check_doc_own_patient(int(inst_chk["patient_id"]), u)
-        with db_lock:
-            c = db()
+        with db_lock, db() as c:
             inst = c.execute("SELECT * FROM payment_installments WHERE id=? AND clinic_id=?", (iid, cid)).fetchone()
             if not inst or inst["status"] in ("paid", "voided"):
                 raise HTTPException(404, "Ödenecek açık taksit bulunamadı")
