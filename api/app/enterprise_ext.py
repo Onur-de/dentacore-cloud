@@ -167,6 +167,8 @@ def migrate_enterprise_sqlite(c: sqlite3.Connection, t0: str) -> None:
         ("satisfaction_sent_at", "TEXT"),
         ("satisfaction_reply", "TEXT"),
         ("satisfaction_replied_at", "TEXT"),
+        ("satisfaction_status", "TEXT NOT NULL DEFAULT ''"),
+        ("google_link_sent_at", "TEXT"),
         ("series_id", "TEXT"),
         ("sequence", "INTEGER NOT NULL DEFAULT 0"),
         ("updated_at", "TEXT"),
@@ -1229,6 +1231,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         return {**ev, "campaign_id": camp_id, "detected_source": det_src}
 
     @app.get("/app/api/campaigns/report")
+    @app.get("/app/api/campaigns/funnel")
     def get_campaigns_funnel_report(request: Request, include_samples: bool = False, u: dict = Depends(require_perm("view"))):
         cid = u["clinic_id"]
         base_url = str(request.base_url).rstrip("/")
@@ -1246,23 +1249,31 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             bot_clicks = sum(1 for e in evs if e["event_type"] == "click" and e["is_bot"])
             form_starts = sum(1 for e in evs if e["event_type"] == "form_start" and not e["is_bot"])
             form_submits = sum(1 for e in evs if e["event_type"] == "form_submit" and not e["is_bot"])
+            ev_pat_created = sum(1 for e in evs if e["event_type"] == "patient_created" and not e["is_bot"])
 
             uc_key = cp.get("utm_campaign") or cp.get("code") or "__none__"
-            pats = q("SELECT id FROM patients WHERE clinic_id=? AND (campaign_id=? OR (utm_campaign<>'' AND utm_campaign=?))",
-                     cid, cp_id, uc_key)
+            pats = q(
+                """SELECT DISTINCT p.id FROM patients p
+                   LEFT JOIN campaign_events ce ON ce.patient_id=p.id AND ce.campaign_id=?
+                   WHERE p.clinic_id=? AND (p.campaign_id=? OR (p.utm_campaign<>'' AND p.utm_campaign=?) OR ce.id IS NOT NULL)""",
+                cp_id, cid, cp_id, uc_key,
+            )
             pids = [p["id"] for p in pats]
+            pat_cnt = max(len(pids), ev_pat_created)
             appts_cnt = 0
             visits_done = 0
             collected_k = 0
-            if pids:
+            if pids or cp_id:
                 ap_rows = q(
-                    """SELECT a.id, a.status FROM appointments a
-                       JOIN patients p ON p.id=a.patient_id
-                       WHERE a.clinic_id=? AND p.clinic_id=? AND (p.campaign_id=? OR (p.utm_campaign<>'' AND p.utm_campaign=?))""",
-                    cid, cid, cp_id, uc_key,
+                    """SELECT DISTINCT a.id, a.status FROM appointments a
+                       LEFT JOIN patients p ON p.id=a.patient_id
+                       WHERE a.clinic_id=? AND a.status<>'cancelled'
+                         AND (a.campaign_id=? OR p.campaign_id=? OR (p.utm_campaign<>'' AND p.utm_campaign=?)
+                              OR EXISTS (SELECT 1 FROM campaign_events ce WHERE ce.patient_id=p.id AND ce.campaign_id=?))""",
+                    cid, cp_id, cp_id, uc_key, cp_id,
                 )
                 appts_cnt = len(ap_rows)
-                visits_done = sum(1 for a in ap_rows if a["status"] in ("done", "confirmed"))
+                visits_done = sum(1 for a in ap_rows if a["status"] == "done")
                 py_row = q1(
                     """SELECT COALESCE(sum(
                          CASE WHEN py.status='refunded' THEN -py.amount_kurus
@@ -1270,9 +1281,11 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                               ELSE 0 END
                        ),0) AS s FROM payments py
                        JOIN patients p ON p.id=py.patient_id
-                       WHERE py.clinic_id=? AND p.clinic_id=? AND (p.campaign_id=? OR (p.utm_campaign<>'' AND p.utm_campaign=?))
+                       WHERE py.clinic_id=? AND p.clinic_id=?
+                         AND (p.campaign_id=? OR (p.utm_campaign<>'' AND p.utm_campaign=?)
+                              OR EXISTS (SELECT 1 FROM campaign_events ce WHERE ce.patient_id=p.id AND ce.campaign_id=?))
                          AND py.voided_at IS NULL""",
-                    cid, cid, cp_id, uc_key,
+                    cid, cid, cp_id, uc_key, cp_id,
                 )
                 collected_k = max(0, int((py_row and py_row["s"]) or 0))
 
@@ -1281,7 +1294,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             um = cp.get("utm_medium") or "cpc"
             uc = cp.get("utm_campaign") or code
             track_url = f"{base_url}/c/{code}?utm_source={us}&utm_medium={um}&utm_campaign={uc}"
-            conv_patient_pct = round(100.0 * len(pids) / uniq_clicks, 2) if uniq_clicks > 0 else 0.0
+            conv_patient_pct = round(100.0 * pat_cnt / uniq_clicks, 2) if uniq_clicks > 0 else 0.0
             conv_appt_pct = round(100.0 * appts_cnt / uniq_clicks, 2) if uniq_clicks > 0 else 0.0
 
             out.append({
@@ -1294,13 +1307,18 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                 "utm_campaign": uc,
                 "tracking_url": track_url,
                 "is_sample": bool(cp.get("is_sample", 0)),
+                "raw_clicks": real_clicks + bot_clicks,
                 "total_clicks": real_clicks,
                 "unique_clicks": uniq_clicks,
                 "bot_clicks": bot_clicks,
+                "form_start": form_starts,
                 "form_starts": form_starts,
+                "form_submit": form_submits,
                 "form_submits": form_submits,
-                "patients_created": len(pids),
+                "patient_created": pat_cnt,
+                "patients_created": pat_cnt,
                 "appointments_booked": appts_cnt,
+                "visits_done": visits_done,
                 "visits_completed": visits_done,
                 "collected_revenue_try": tl(collected_k),
                 "declared_clicks": int(cp.get("clicks") or 0),
@@ -2231,10 +2249,15 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             ph = phone_hmac(np)
             t_now = iso_now()
             ex_p = c.execute("SELECT id, first_source FROM patients WHERE clinic_id=? AND phone_hmac=?", (cid, ph)).fetchone()
+            is_new_patient = False
             if ex_p:
                 pid = ex_p["id"]
-                c.execute("UPDATE patients SET last_source=?, active=1 WHERE id=?", (det_src, pid))
+                c.execute(
+                    "UPDATE patients SET last_source=?, campaign_id=COALESCE(?, campaign_id), active=1 WHERE id=?",
+                    (det_src, camp_id, pid),
+                )
             else:
+                is_new_patient = True
                 cur_p = c.execute(
                     """INSERT INTO patients
                        (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,first_source,last_source,campaign_id,utm_source,utm_medium,utm_campaign,active,created_at)
@@ -2250,6 +2273,16 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
                 (cid, pid, st_dt.isoformat(), b.treatment.strip(), chosen_chair, det_src, camp_id, t_now),
             )
             aid = cur_a.lastrowid
+            if camp_id:
+                v_hash = _visitor_hash(request, camp_id)
+                ua_s = (request.headers.get("user-agent") or "")[:120]
+                for ev_t in (["form_submit", "patient_created", "appointment_booked"] if is_new_patient else ["form_submit", "appointment_booked"]):
+                    c.execute(
+                        """INSERT INTO campaign_events
+                           (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,visitor_hash,is_bot,is_unique,patient_id,appointment_id,user_agent_summary,created_at)
+                           VALUES (?,?,?,?,?,?,?,?,0,1,?,?,?,?)""",
+                        (cid, camp_id, ev_t, det_src, b.utm_source[:80], b.utm_medium[:80], b.utm_campaign[:120], v_hash, pid, aid, ua_s, t_now),
+                    )
             c.commit()
         return {"ok": True, "appointment_id": aid, "patient_id": pid, "chair": chosen_chair, "source": det_src, "campaign_id": camp_id}
 
@@ -2372,3 +2405,78 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
 
     # Statik yolların (/app/api/patients/check-duplicate gibi) parametreli yollardan (/app/api/patients/{pid}) önce eşleşmesini garanti et
     app.router.routes.sort(key=lambda r: (1 if "{" in getattr(r, "path", "") else 0))
+
+
+def register_enterprise_routes_for_pg(app: FastAPI) -> None:
+    """PostgreSQL bulut katmanı (`api/app/main.py`) ile SQLite (`run_local.py`) arasında %100 uç eşitliği sağlar."""
+    import threading
+    from . import core, panel
+    _pg_lock = threading.RLock()
+    root_dir = Path(__file__).resolve().parents[2]
+
+    def _sql_pg(sql: str) -> str:
+        s = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+        return s.replace("?", "%s")
+
+    def _get_conn():
+        db_url = os.environ.get("DATABASE_URL", "")
+        if db_url.startswith("postgres"):
+            import psycopg
+            from psycopg.rows import dict_row
+            return psycopg.connect(db_url, row_factory=dict_row)
+        db_p = os.environ.get("DC_DB_PATH") or str(root_dir / "dentacore_local.db")
+        c = sqlite3.connect(db_p, check_same_thread=False)
+        c.row_factory = sqlite3.Row
+        return c
+
+    def _q(sql: str, *args: Any) -> list[dict]:
+        with _pg_lock, _get_conn() as c:
+            q_str = _sql_pg(sql) if os.environ.get("DATABASE_URL", "").startswith("postgres") else sql
+            rows = c.execute(q_str, args).fetchall()
+            return [dict(r) for r in rows]
+
+    def _q1(sql: str, *args: Any) -> dict | None:
+        rows = _q(sql, *args)
+        return rows[0] if rows else None
+
+    def _ex(sql: str, *args: Any) -> int:
+        with _pg_lock, _get_conn() as c:
+            is_pg = os.environ.get("DATABASE_URL", "").startswith("postgres")
+            q_str = _sql_pg(sql) if is_pg else sql
+            if is_pg and q_str.strip().upper().startswith("INSERT ") and "RETURNING" not in q_str.upper():
+                cur = c.execute(q_str + " RETURNING id", args)
+                r = cur.fetchone()
+                c.commit()
+                return int(r["id"]) if r and "id" in r else 0
+            cur = c.execute(q_str, args)
+            c.commit()
+            return int(getattr(cur, "lastrowid", 0) or 0)
+
+    def _write_audit(actor_id: Any, actor: str, action: str, target: str = "", ip_h: str = "", meta: dict | None = None, clinic_id: int = 1) -> None:
+        pass
+
+    register_enterprise_routes(
+        app,
+        {
+            "q": _q,
+            "q1": _q1,
+            "ex": _ex,
+            "db": _get_conn,
+            "db_lock": _pg_lock,
+            "current_user": panel.current_user,
+            "write_audit": _write_audit,
+            "enc": core.enc,
+            "dec": core.dec,
+            "norm_phone": core.norm_phone,
+            "phone_hmac": core.phone_hmac,
+            "mask_phone": panel.mask_phone,
+            "tl": panel.tl,
+            "kurus": panel.kurus,
+            "iso_now": lambda: datetime.now(TZ).isoformat(timespec="seconds"),
+            "now_utc": lambda: datetime.now(timezone.utc),
+            "client_ip": panel.client_ip,
+            "root_dir": root_dir,
+            "fernet": core.fernet() if os.environ.get("DATA_ENCRYPTION_KEY") else None,
+        },
+    )
+

@@ -1865,15 +1865,59 @@ async def _handle_patient_reply(
                 "iptal",
             )
 
-    # Memnuniyet mesajı yanıtı kontrolü (son 48 saatte tamamlanmış ve memnuniyet mesajı gönderilmiş randevu)
+    # Memnuniyet mesajı yanıtı kontrolü (Podium / Weave iki aşamalı standart: olumlu -> Google linki, olumsuz -> yönetici/sekreter alarmı)
     sat_appt = q1(
-        "SELECT id FROM appointments WHERE clinic_id=? AND patient_id=? AND status='done' AND satisfaction_sent_at IS NOT NULL AND satisfaction_reply IS NULL ORDER BY id DESC LIMIT 1",
+        "SELECT id, treatment FROM appointments WHERE clinic_id=? AND patient_id=? AND status='done' AND satisfaction_sent_at IS NOT NULL AND satisfaction_reply IS NULL ORDER BY id DESC LIMIT 1",
         cid, pid,
     )
-    if sat_appt and not is_numeric_score and any(w in cleaned for w in ("memnun", "tesekkur", "cok iyi", "harika", "sikayet", "memnun degilim", "kotu")):
-        ex("UPDATE appointments SET satisfaction_reply=?, satisfaction_replied_at=? WHERE id=?", raw_txt[:400], iso_now(), sat_appt["id"])
-        write_audit(None, f"{channel}_patient:{pid}", "appointment.satisfaction_reply", f"appointment:{sat_appt['id']}", clinic_id=cid)
-        return ("Değerli geri bildiriminiz hasta kartınıza kaydedildi, teşekkür ederiz.", "L1-memnuniyet", "memnuniyet_yaniti")
+    if sat_appt:
+        neg_phrases = ("memnun degilim", "memnun kalmadim", "sikayet", "kotu", "berbat", "agrim var", "cok agri", "rezalet", "hic memnun", "uzgun", "pisman")
+        pos_phrases = ("memnun kaldim", "cok memnun", "memnunum", "memnun", "cok iyi", "harika", "tesekkur", "super", "mukemmel", "gayet iyi", "elinize saglik")
+        has_neg_phrase = any(w in cleaned for w in neg_phrases) or (cleaned in {"hayir", "no"} and not payload)
+        has_pos_phrase = not has_neg_phrase and (any(w in cleaned for w in pos_phrases) or (cleaned in {"evet", "yes", "tamam"} and not payload))
+        # Sayısal puan (1..10): aktif postop kontrolü yoksa memnuniyet puanı olarak değerlendirilir
+        active_postop = q1(
+            "SELECT id FROM postop_checks WHERE patient_id=? AND sent_at IS NOT NULL AND answered_at IS NULL ORDER BY id DESC LIMIT 1",
+            pid,
+        )
+        num_val = int(raw_txt.strip()) if (is_numeric_score and not active_postop) else None
+        is_sat_neg = has_neg_phrase or (num_val is not None and 1 <= num_val <= 4)
+        is_sat_pos = has_pos_phrase or (num_val is not None and 8 <= num_val <= 10)
+        if is_sat_neg or is_sat_pos:
+            t_now = iso_now()
+            if is_sat_neg:
+                ex(
+                    "UPDATE appointments SET satisfaction_reply=?, satisfaction_replied_at=?, satisfaction_status='negative' WHERE id=?",
+                    raw_txt[:400], t_now, sat_appt["id"],
+                )
+                p_row = q1("SELECT display_name FROM patients WHERE id=?", pid)
+                pname = (p_row and p_row["display_name"]) or f"Hasta #{pid}"
+                ex(
+                    "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'memnuniyetsiz_hasta',?,?)",
+                    cid, pid, f"MEMNUNİYETSİZ HASTA UYARISI: {pname} (#{pid}) randevu sonrası olumsuz geri bildirim iletti: {raw_txt[:200]}", t_now,
+                )
+                ex(
+                    "INSERT INTO alerts (clinic_id,patient_id,kind,detail,created_at) VALUES (?,?,'sekreter_gorev',?,?)",
+                    cid, pid, f"ACİL YÖNETİCİ / SEKRETER GÖREVİ: Memnuniyetsiz hasta {pname} (#{pid}) ile hemen iletişime geçin.", t_now,
+                )
+                write_audit(None, f"{channel}_patient:{pid}", "appointment.satisfaction_negative", f"appointment:{sat_appt['id']}", clinic_id=cid)
+                return (
+                    "Yaşadığınız olumsuz deneyim için çok özür dileriz. Bildiriminiz başhekimliğimize ve klinik yöneticimize acil öncelikle iletildi; klinik yöneticimiz sizinle hemen ilgilenecektir.",
+                    "L1-memnuniyet",
+                    "memnuniyet_olumsuz",
+                )
+            cl_row = q1("SELECT name, google_review_url FROM clinics WHERE id=?", cid) or {}
+            g_url = (cl_row.get("google_review_url") or "https://search.google.com/local/writereview").strip()
+            ex(
+                "UPDATE appointments SET satisfaction_reply=?, satisfaction_replied_at=?, satisfaction_status='positive', google_link_sent_at=? WHERE id=?",
+                raw_txt[:400], t_now, t_now, sat_appt["id"],
+            )
+            write_audit(None, f"{channel}_patient:{pid}", "appointment.satisfaction_positive", f"appointment:{sat_appt['id']}", clinic_id=cid)
+            return (
+                f"Memnuniyetiniz bizi çok mutlu etti, değerli geri bildiriminiz için çok teşekkür ederiz! Deneyiminizi Google Haritalar üzerinde paylaşmanız kliniğimiz için çok değerli: {g_url}",
+                "L1-memnuniyet",
+                "memnuniyet_olumlu",
+            )
 
     # Post-op yanıt kontrolü (son 12 saatte gönderilmiş cevapsız kontrol)
     postop_rows = q("SELECT * FROM postop_checks WHERE patient_id=? AND sent_at IS NOT NULL AND answered_at IS NULL ORDER BY id DESC LIMIT 3", pid)
@@ -2300,7 +2344,7 @@ class StatusIn(BaseModel):
 
 
 @app.post("/app/api/appointments/{aid}/status")
-async def appt_status(aid: int, b: StatusIn, u: dict = Depends(require_perm("edit"))):
+async def appt_status(aid: int, b: StatusIn, request: Request, u: dict = Depends(require_perm("edit"))):
     cid = u["clinic_id"]
     if b.status == "cancelled" and not (u.get("permissions") or {}).get("delete_cancel", False):
         raise HTTPException(403, "Randevu iptal etme (delete_cancel) yetkiniz bulunmamaktadır")
@@ -2342,18 +2386,27 @@ async def appt_status(aid: int, b: StatusIn, u: dict = Depends(require_perm("edi
 
     if b.status == "done" and a_dict.get("patient_id") and not a_dict.get("satisfaction_sent_at"):
         p_row = q1("SELECT phone_enc, display_name FROM patients WHERE id=? AND clinic_id=?", a_dict["patient_id"], cid)
-        cl_row = q1("SELECT name, google_review_url FROM clinics WHERE id=?", cid) or {}
         if p_row:
-            g_url = (cl_row.get("google_review_url") or "").strip()
-            sat_msg = "Merhaba, bugün kliniğimizi ziyaret ettiğiniz için teşekkür ederiz. Aldığınız hizmetten memnun kaldınız mı?"
-            if g_url:
-                sat_msg += f" Deneyiminizi Google üzerinde paylaşmanız kliniğimiz için çok değerli: {g_url} (Kliniğimize doğrudan özel geri bildirim iletmek için: /form/geri-bildirim)"
-            await _deliver_wa(cid, int(a_dict["patient_id"]), dec(p_row["phone_enc"]), sat_msg, layer="L1-memnuniyet", intent="memnuniyet_ve_google_yorum", require_consent=True)
-            ex("UPDATE appointments SET satisfaction_sent_at=? WHERE id=?", t_now, aid)
+            fb_link = f"{public_base(request)}{sign_path('/form/geri-bildirim', 7 * 86400)}"
+            p_name = p_row.get("display_name") or "Sayın Hastamız"
+            treat = a_dict.get("treatment") or "tedavi"
+            sat_msg = (
+                f"Merhaba {p_name}, bugün kliniğimizi ziyaret ettiğiniz için teşekkür ederiz. "
+                f"Aldığınız {treat} hizmetimizden memnun kaldınız mı? "
+                f"Yanıt olarak 'Memnun kaldım' veya 'Şikayetim var' yazabilir ya da 1-10 arası puan verebilirsiniz. "
+                f"(Kliniğimize doğrudan özel geri bildirim iletmek için: {fb_link})"
+            )
+            await _deliver_wa(cid, int(a_dict["patient_id"]), dec(p_row["phone_enc"]), sat_msg, layer="L1-memnuniyet", intent="memnuniyet_sorusu", require_consent=True)
+            ex("UPDATE appointments SET satisfaction_sent_at=?, satisfaction_status='asked' WHERE id=?", t_now, aid)
 
     audit_action = "appointment.undo_cancel" if (prev_status == "cancelled" and b.status == "booked") else f"appointment.{b.status}"
     write_audit(u["id"], u["email"], audit_action, f"appointment:{aid}", u["ip_h"], {"from": prev_status, "to": b.status}, clinic_id=cid)
     return {"ok": True, "status": b.status}
+
+
+@app.post("/app/api/appointments/{aid}/done")
+async def appt_mark_done_alias(aid: int, request: Request, u: dict = Depends(require_perm("edit"))):
+    return await appt_status(aid, StatusIn(status="done"), request, u)
 
 
 @app.get("/app/api/appointments/{aid}/ics")
@@ -2825,8 +2878,13 @@ async def upload_patient_media(pid: int, request: Request, u: dict = Depends(req
         raise HTTPException(400, "Seçilen diş kaydı bu hasta/klinik ile eşleşmiyor")
     if not data or len(data) > 15 * 1024 * 1024:
         raise HTTPException(400, "Geçersiz dosya boyutu (en fazla 15 MB)")
+    raw_base_fn = Path(str(filename or "upload.jpg").replace("\\", "/")).name
+    if ".." in str(filename or "") or "/" in str(filename or "") or "\\" in str(filename or ""):
+        # Path traversal attempt in filename: strip directory components
+        filename = raw_base_fn
+    safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", raw_base_fn)[:120] or "upload.jpg"
     try:
-        qc = media.assess_media_file(data, filename=filename, mime=mime)
+        qc = media.assess_media_file(data, filename=safe_filename, mime=mime)
     except ValueError as ve:
         raise HTTPException(400, str(ve))
     except Exception:
@@ -2853,7 +2911,7 @@ async def upload_patient_media(pid: int, request: Request, u: dict = Depends(req
            (clinic_id,patient_id,appointment_id,tooth_record_id,category,stage,original_filename,mime_type,file_size_bytes,
             sha256_hash,encrypted_path,is_dicom,width,height,sharpness,brightness,qc_verdict,note,uploaded_by,created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        cid, pid, appointment_id, tooth_record_id, category, stage, filename[:160],
+        cid, pid, appointment_id, tooth_record_id, category, stage, safe_filename,
         eff_mime, len(data), qc.get("sha256", ""), enc_name,
         1 if is_dcm else 0, int(qc.get("w") or 0), int(qc.get("h") or 0),
         float(qc.get("sharpness") or 0), float(qc.get("brightness") or 0),
@@ -2864,7 +2922,7 @@ async def upload_patient_media(pid: int, request: Request, u: dict = Depends(req
            cid, pid, f"Hasta #{pid} için {category} ({ext}) yüklendi.", t_now)
     write_audit(u["id"], u["email"], "patient.media_upload", f"patient:{pid}:media:{media_id}", u["ip_h"],
                 {"verdict": qc["verdict"], "category": category, "stage": stage, "mime_type": eff_mime, "is_dicom": is_dcm}, clinic_id=cid)
-    return {**qc, "id": media_id, "media_id": media_id, "category": category, "stage": stage, "filename": filename, "encrypted_file": enc_name}
+    return {**qc, "id": media_id, "media_id": media_id, "category": category, "stage": stage, "filename": safe_filename, "encrypted_file": enc_name}
 
 
 @app.get("/app/api/patients/{pid}")
@@ -2941,7 +2999,7 @@ def get_patient(pid: int, reveal: bool = False, u: dict = Depends(require_perm("
     appts = q(
         """SELECT a.id, a.starts_at, a.duration_min, a.treatment, a.status, a.chair,
                   a.doctor_id, s.full_name AS doctor_name, a.confirmed_at, a.cancelled_at,
-                  a.satisfaction_sent_at, a.satisfaction_reply, a.created_at
+                  a.satisfaction_sent_at, a.satisfaction_reply, a.satisfaction_status, a.google_link_sent_at, a.created_at
            FROM appointments a LEFT JOIN staff_users s ON s.id=a.doctor_id
            WHERE a.patient_id=? AND a.clinic_id=? ORDER BY a.starts_at DESC""",
         pid, cid,
@@ -4009,6 +4067,24 @@ def reply_postop_local(b: PostopReplyIn, u: dict = Depends(ANY)):
     return {"ok": True, "alarm": alarm, "pain_score": b.pain_score}
 
 
+def _extract_campaign_ref(c: sqlite3.Connection, clinic_id: int, text: str) -> dict | None:
+    if not text:
+        return None
+    m = re.search(r"\[?\bref\s*[:=-]\s*([a-zA-Z0-9_-]{2,64})\]?", text, re.IGNORECASE)
+    cand = m.group(1).strip() if m else ""
+    if not cand:
+        for row in c.execute("SELECT * FROM campaigns WHERE clinic_id=? AND COALESCE(is_sample,0)=0 ORDER BY id DESC", (clinic_id,)).fetchall():
+            code_v = (row["code"] or "").strip()
+            if code_v and len(code_v) >= 4 and re.search(r"\b" + re.escape(code_v) + r"\b", text, re.IGNORECASE):
+                return dict(row)
+        return None
+    row = c.execute(
+        "SELECT * FROM campaigns WHERE clinic_id=? AND (LOWER(code)=LOWER(?) OR LOWER(utm_campaign)=LOWER(?)) ORDER BY id DESC LIMIT 1",
+        (clinic_id, cand, cand),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mtype: str, text: str, channel: str = "wa", clinic_id: int = 1, payload: str = ""):
     from app.router import detect_lang
     if channel == "wa" and text:
@@ -4021,20 +4097,66 @@ async def _process_inbound_webhook_msg(sender: str, profile_name: str | None, mt
     raw_id = f"ig:{sender}" if channel == "ig" else norm_phone(sender)
     ph = hmac.new(_HMAC_KEY, raw_id.encode(), hashlib.sha256).hexdigest() if channel == "ig" else phone_hmac(sender)
     t_now = iso_now()
+    default_ch_src = "instagram" if channel == "ig" else "whatsapp"
 
     with _DB_LOCK:
         c = db()
-        row = c.execute("SELECT id, display_name FROM patients WHERE clinic_id=? AND phone_hmac=?", (clinic_id, ph)).fetchone()
+        camp = _extract_campaign_ref(c, clinic_id, f"{text} {payload}".strip())
+        if camp:
+            det_src = detect_acquisition_source(
+                explicit_source=camp.get("channel") or camp.get("source"),
+                utm_source=camp.get("utm_source") or "",
+                utm_medium=camp.get("utm_medium") or "",
+                default_source=default_ch_src,
+            )
+            camp_id = int(camp["id"])
+            utm_s = (camp.get("utm_source") or det_src)[:80]
+            utm_m = (camp.get("utm_medium") or "cpc")[:80]
+            utm_c = (camp.get("utm_campaign") or camp.get("code") or "")[:120]
+        else:
+            det_src = default_ch_src
+            camp_id = None
+            utm_s, utm_m, utm_c = "", "", ""
+
+        row = c.execute("SELECT id, display_name, first_source, campaign_id FROM patients WHERE clinic_id=? AND phone_hmac=?", (clinic_id, ph)).fetchone()
         if row:
             pid = row["id"]
             if profile_name and not row["display_name"]:
                 c.execute("UPDATE patients SET display_name=?, lang=? WHERE id=?", (profile_name, lang, pid))
+            if camp_id is not None:
+                c.execute(
+                    """UPDATE patients
+                       SET last_source=?,
+                           campaign_id=COALESCE(campaign_id, ?),
+                           utm_source=CASE WHEN utm_source='' AND ?<>'' THEN ? ELSE utm_source END,
+                           utm_medium=CASE WHEN utm_medium='' AND ?<>'' THEN ? ELSE utm_medium END,
+                           utm_campaign=CASE WHEN utm_campaign='' AND ?<>'' THEN ? ELSE utm_campaign END
+                       WHERE id=? AND clinic_id=?""",
+                    (det_src, camp_id, utm_s, utm_s, utm_m, utm_m, utm_c, utm_c, pid, clinic_id),
+                )
+            else:
+                c.execute("UPDATE patients SET last_source=? WHERE id=? AND clinic_id=?", (default_ch_src, pid, clinic_id))
         else:
             cur_p = c.execute(
-                "INSERT INTO patients (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,active,created_at) VALUES (?,?,?,?,?,?,1,?)",
-                (clinic_id, ph, enc(raw_id), profile_name or f"Misafir ({sender[-4:]})", lang, channel, t_now),
+                """INSERT INTO patients
+                   (clinic_id,phone_hmac,phone_enc,display_name,lang,channel,first_source,last_source,campaign_id,utm_source,utm_medium,utm_campaign,active,created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+                (clinic_id, ph, enc(raw_id), profile_name or f"Misafir ({sender[-4:]})", lang, channel, det_src, det_src, camp_id, utm_s, utm_m, utm_c, t_now),
             )
             pid = cur_p.lastrowid
+        if camp_id is not None:
+            has_ev = c.execute(
+                "SELECT 1 FROM campaign_events WHERE clinic_id=? AND campaign_id=? AND patient_id=? AND event_type='patient_created' LIMIT 1",
+                (clinic_id, camp_id, pid),
+            ).fetchone()
+            if not has_ev:
+                c.execute(
+                    """INSERT INTO campaign_events
+                       (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,is_bot,is_unique,patient_id,created_at)
+                       VALUES (?,?,'patient_created',?,?,?,?,0,1,?,?)""",
+                    (clinic_id, camp_id, det_src, utm_s, utm_m, utm_c, pid, t_now),
+                )
+                c.execute("UPDATE campaigns SET conversations = conversations + 1 WHERE id=? AND clinic_id=?", (camp_id, clinic_id))
         raw_body = (text or payload)[:2000]
         c.execute(
             "INSERT INTO message_log (clinic_id,patient_id,direction,layer,intent,tokens_in,tokens_out,body,delivery_status,created_at) VALUES (?,?,'in',NULL,?,0,0,?,'received',?)",
@@ -4113,6 +4235,7 @@ def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
 
 
 @app.post("/webhook/whatsapp")
+@app.post("/webhooks/whatsapp")
 async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = Header(default=None)):
     raw = await request.body()
     secret = os.environ.get("WA_APP_SECRET", "")
@@ -4163,6 +4286,7 @@ async def wa_webhook_local(request: Request, x_hub_signature_256: str | None = H
 
 
 @app.post("/webhook/instagram")
+@app.post("/webhooks/instagram")
 async def ig_webhook_local(request: Request, x_hub_signature_256: str | None = Header(default=None)):
     raw = await request.body()
     secret = os.environ.get("IG_APP_SECRET") or os.environ.get("WA_APP_SECRET", "")
@@ -4735,7 +4859,9 @@ def add_staff(b: StaffIn, u: dict = Depends(OWNER)):
     email = b.email.strip().lower()
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(400, "Geçerli e-posta girin")
-    jt = b.job_title.strip().lower() or ("clinic_manager" if b.role == "owner" else ("dentist" if b.role == "doctor" else "secretary"))
+    jt = b.job_title.strip().lower() or ("clinic_manager" if b.role == "owner" else ("dentist" if b.role == "doctor" else ("cleaning" if b.role == "no_access" else "secretary")))
+    if jt == "cleaning_staff":
+        jt = "cleaning"
     if jt not in STAFF_PROFESSIONS:
         raise HTTPException(400, f"Geçersiz meslek seçimi: {jt}")
     perms_clean = {k: bool(v) for k, v in (b.permissions or {}).items() if k in PERMISSION_KEYS}
@@ -4978,6 +5104,42 @@ async def simulate_conversation(b: SimIn, u: dict = Depends(ANY)):
     if b.patient_id is not None:
         if not q1("SELECT id FROM patients WHERE id=? AND clinic_id=?", b.patient_id, cid):
             raise HTTPException(404, "hasta yok")
+        with _DB_LOCK:
+            c_sim = db()
+            camp_sim = _extract_campaign_ref(c_sim, cid, b.text)
+            if camp_sim:
+                det_s = detect_acquisition_source(
+                    explicit_source=camp_sim.get("channel") or camp_sim.get("source"),
+                    utm_source=camp_sim.get("utm_source") or "",
+                    utm_medium=camp_sim.get("utm_medium") or "",
+                    default_source="whatsapp",
+                )
+                cp_id_sim = int(camp_sim["id"])
+                us_sim = (camp_sim.get("utm_source") or det_s)[:80]
+                um_sim = (camp_sim.get("utm_medium") or "cpc")[:80]
+                uc_sim = (camp_sim.get("utm_campaign") or camp_sim.get("code") or "")[:120]
+                c_sim.execute(
+                    """UPDATE patients
+                       SET last_source=?, campaign_id=?,
+                           utm_source=CASE WHEN ?<>'' THEN ? ELSE utm_source END,
+                           utm_medium=CASE WHEN ?<>'' THEN ? ELSE utm_medium END,
+                           utm_campaign=CASE WHEN ?<>'' THEN ? ELSE utm_campaign END
+                       WHERE id=? AND clinic_id=?""",
+                    (det_s, cp_id_sim, us_sim, us_sim, um_sim, um_sim, uc_sim, uc_sim, b.patient_id, cid),
+                )
+                has_ev_sim = c_sim.execute(
+                    "SELECT 1 FROM campaign_events WHERE clinic_id=? AND campaign_id=? AND patient_id=? AND event_type='patient_created' LIMIT 1",
+                    (cid, cp_id_sim, b.patient_id),
+                ).fetchone()
+                if not has_ev_sim:
+                    c_sim.execute(
+                        """INSERT INTO campaign_events
+                           (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,is_bot,is_unique,patient_id,created_at)
+                           VALUES (?,?,'patient_created',?,?,?,?,0,1,?,?)""",
+                        (cid, cp_id_sim, det_s, us_sim, um_sim, uc_sim, b.patient_id, iso_now()),
+                    )
+                    c_sim.execute("UPDATE campaigns SET conversations = conversations + 1 WHERE id=? AND clinic_id=?", (cp_id_sim, cid))
+                c_sim.commit()
         handled = await _handle_patient_reply(
             cid, b.patient_id, b.text, channel="simulator", context_previous_turn=b.context_previous_turn
         )

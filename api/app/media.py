@@ -92,6 +92,14 @@ def assess_image(data: bytes) -> dict:
     }
 
 
+_FORBIDDEN_EXTS = {
+    ".exe", ".dll", ".bat", ".cmd", ".sh", ".php", ".phtml", ".jsp", ".asp", ".aspx",
+    ".html", ".htm", ".xhtml", ".svg", ".js", ".mjs", ".py", ".vbs", ".ps1", ".scr",
+    ".com", ".jar", ".war", ".cgi", ".pl", ".msi", ".hta", ".swf",
+}
+_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".pgm", ".ppm", ".pdf", ".dcm", ".dicom"}
+
+
 def assess_media_file(data: bytes, filename: str = "", mime: str = "") -> dict:
     """Röntgen (JPEG/PNG/WebP/DICOM), ağız içi fotoğraf ve PDF belge bütünlük + kalite kontrolü.
     Tıbbi teşhis koymaz; yalnızca dosya bütünlüğünü ve teknik görüntü kalitesini denetler.
@@ -101,11 +109,28 @@ def assess_media_file(data: bytes, filename: str = "", mime: str = "") -> dict:
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValueError(f"Dosya boyutu çok büyük (maksimum {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
     sha = hashlib.sha256(data).hexdigest()
-    fn_low = (filename or "").strip().lower()
+    raw_fn = (filename or "").strip()
+    clean_fn = Path(raw_fn.replace("\\", "/")).name
+    fn_low = clean_fn.lower()
     mime_low = (mime or "").strip().lower()
 
+    # Güvenlik: Yasaklı uzantı, çift uzantı (örn. evil.php.jpg) veya HTML/PE/ELF/Script magic byte kontrolü
+    if clean_fn:
+        suffixes = [s.lower() for s in Path(clean_fn).suffixes]
+        if any(s in _FORBIDDEN_EXTS for s in suffixes):
+            raise ValueError("Güvenlik engeli: Çalıştırılabilir veya betik uzantılı dosya yüklenemez")
+        if suffixes and suffixes[-1] not in _ALLOWED_EXTS:
+            raise ValueError("Güvenlik engeli: Yalnızca JPEG, PNG, WebP, PDF ve DICOM uzantıları kabul edilir")
+    head_low = data[:256].lstrip().lower()
+    if (
+        data[:2] == b"MZ"
+        or data[:4] == b"\x7fELF"
+        or head_low.startswith((b"<!doctype", b"<html", b"<script", b"<?php", b"<svg", b"#!"))
+    ):
+        raise ValueError("Güvenlik engeli: Zararlı veya çalıştırılabilir dosya imzası tespit edildi")
+
     # 1) DICOM Part 10 kontrolü (128-byte preamble + 'DICM' magic header veya .dcm uzantısı)
-    is_dcm = (len(data) >= 132 and data[128:132] == b"DICM") or fn_low.endswith(".dcm") or "dicom" in mime_low
+    is_dcm = (len(data) >= 132 and data[128:132] == b"DICM") or fn_low.endswith((".dcm", ".dicom")) or "dicom" in mime_low
     if is_dcm:
         if len(data) < 132 or data[128:132] != b"DICM":
             raise ValueError("Bozuk veya geçersiz DICOM (.dcm) dosya başlığı (DICM imzası bulunamadı)")
@@ -127,6 +152,9 @@ def assess_media_file(data: bytes, filename: str = "", mime: str = "") -> dict:
     if data[:5] == b"%PDF-" or fn_low.endswith(".pdf") or mime_low == "application/pdf":
         if data[:5] != b"%PDF-":
             raise ValueError("Bozuk veya geçersiz PDF dosya başlığı")
+        pdf_scan = data[:65536].lower()
+        if any(tok in pdf_scan for tok in (b"/javascript", b"/js ", b"/js(", b"/launch", b"<script")):
+            raise ValueError("Güvenlik engeli: PDF içinde gömülü betik (/JavaScript) tespit edildi")
         return {
             "verdict": "document_ok",
             "w": 0,
@@ -141,9 +169,15 @@ def assess_media_file(data: bytes, filename: str = "", mime: str = "") -> dict:
             "disclaimer": QC_DISCLAIMER_TR,
         }
 
-    # 3) Standart görsel (JPEG/PNG/WebP) kalite kontrolü
+    # 3) Standart görsel (JPEG/PNG/WebP/PGM) magic-byte ve kalite kontrolü
+    is_jpeg = data[:3] == b"\xff\xd8\xff"
+    is_png = data[:8] == b"\x89PNG\r\n\x1a\n"
+    is_webp = len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    is_pnm = len(data) >= 10 and data[:2] in (b"P5", b"P6") and data[2:3] in (b"\n", b" ", b"\r", b"\t")
+    if not (is_jpeg or is_png or is_webp or is_pnm):
+        raise ValueError("Geçersiz görsel dosya başlığı (yalnız gerçek JPEG, PNG, WebP, PGM, PDF ve DICOM kabul edilir)")
     res = assess_image(data)
-    det_mime = "image/jpeg" if data[:3] == b"\xff\xd8\xff" else ("image/png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "image/webp")
+    det_mime = "image/jpeg" if is_jpeg else ("image/png" if is_png else ("image/x-portable-graymap" if is_pnm else "image/webp"))
     res["mime_type"] = det_mime
     return res
 

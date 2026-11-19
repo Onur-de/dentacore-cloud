@@ -261,6 +261,8 @@ ALTER TABLE appointments ADD COLUMN IF NOT EXISTS cancel_reason          TEXT NO
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS satisfaction_sent_at   TIMESTAMPTZ;
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS satisfaction_reply     TEXT;
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS satisfaction_replied_at TIMESTAMPTZ;
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS satisfaction_status    TEXT NOT NULL DEFAULT '';
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS google_link_sent_at    TIMESTAMPTZ;
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS series_id              TEXT;
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS sequence               INT NOT NULL DEFAULT 0;
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS updated_at             TIMESTAMPTZ;

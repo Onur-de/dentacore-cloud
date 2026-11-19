@@ -2078,3 +2078,85 @@ async def lead(b: LeadIn, request: Request):
     )
     await add_alert(None, "web_talep", f"Web sitesinden demo talebi: {b.clinic} ({b.city or '-'}, {b.chairs or '?'} koltuk)")
     return {"ok": True}
+
+
+@router.get("/app/api/leads")
+async def list_leads_pg(u: dict = Depends(HQ_OWNER)):
+    rows = await q("SELECT id, clinic, contact_enc, city, chairs, created_at FROM leads ORDER BY id DESC LIMIT 200")
+    for r in rows:
+        try:
+            r["contact"] = dec(r.pop("contact_enc"))
+        except Exception:
+            r["contact"] = "***"
+    return rows
+
+
+@router.get("/app/api/patients/check-duplicate")
+async def check_duplicate_patient_pg(phone: str = "", name: str = "", u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    matches = []
+    if phone.strip():
+        ph = phone_hmac(norm_phone(phone))
+        p_row = await q1("SELECT id, display_name, first_source FROM patients WHERE clinic_id=%s AND phone_hmac=%s", cid, ph)
+        if p_row:
+            matches.append({"id": p_row["id"], "display_name": p_row["display_name"], "match_type": "exact_phone", "first_source": p_row.get("first_source")})
+    if name.strip() and len(name.strip()) >= 3:
+        n_rows = await q("SELECT id, display_name, first_source FROM patients WHERE clinic_id=%s AND lower(display_name)=lower(%s) LIMIT 5", cid, name.strip())
+        for nr in n_rows:
+            if not any(m["id"] == nr["id"] for m in matches):
+                matches.append({"id": nr["id"], "display_name": nr["display_name"], "match_type": "similar_name", "first_source": nr.get("first_source")})
+    return {"duplicate": len(matches) > 0, "matches": matches}
+
+
+@router.post("/app/api/patients/{pid}/media")
+async def upload_patient_media_pg(pid: int, request: Request, u: dict = Depends(ANY)):
+    cid = u["clinic_id"]
+    p_row = await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
+    if not p_row:
+        raise HTTPException(404, "hasta yok")
+    data = await request.body()
+    qp = request.query_params
+    filename = Path(str(qp.get("filename") or "upload.jpg").replace("\\", "/")).name
+    try:
+        qc = media.assess_media_file(data, filename=filename)
+    except ValueError as ve:
+        raise HTTPException(400, str(ve))
+    enc_path = media.store_encrypted(pid, data, str(qc.get("mime_type") or "image/jpeg"))
+    await log(u, "patient.media_upload", f"patient:{pid}", {"verdict": qc["verdict"]})
+    return {**qc, "patient_id": pid, "filename": filename, "encrypted_file": Path(enc_path).name}
+
+
+class PostopSchedPgIn(BaseModel):
+    patient_id: int
+    procedure: str = Field(min_length=2, max_length=120)
+
+
+@router.post("/app/api/postop/schedule")
+async def schedule_postop_pg(b: PostopSchedPgIn, u: dict = Depends(ANY)):
+    if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", b.patient_id, u["clinic_id"]):
+        raise HTTPException(404, "hasta yok")
+    await modules.schedule_postop(b.patient_id, b.procedure, datetime.now(timezone.utc))
+    return {"ok": True, "stages": ["2s", "24s", "72s"]}
+
+
+class PostopReplyPgIn(BaseModel):
+    patient_id: int
+    stage: Literal["2s", "24s", "72s"] = "2s"
+    pain_score: int = Field(ge=1, le=10)
+    emergency: bool = False
+
+
+@router.post("/app/api/postop/reply")
+async def reply_postop_pg(b: PostopReplyPgIn, u: dict = Depends(ANY)):
+    if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", b.patient_id, u["clinic_id"]):
+        raise HTTPException(404, "hasta yok")
+    alarm = bool(b.emergency or b.pain_score >= 8)
+    await q("UPDATE postop_checks SET pain_score=%s, answered_at=now(), alarm=%s WHERE patient_id=%s AND stage=%s",
+            b.pain_score, alarm, b.patient_id, b.stage)
+    return {"ok": True, "alarm": alarm, "pain_score": b.pain_score}
+
+
+@router.post("/app/api/appointments/{aid}/done")
+async def appt_done_alias_pg(aid: int, u: dict = Depends(ANY)):
+    return await appt_status(aid, StatusIn(status="done"), u)
+

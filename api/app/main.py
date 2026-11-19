@@ -150,6 +150,7 @@ async def robots(request: Request):
 
 # ======================= WhatsApp webhook =======================
 @app.get("/webhook/whatsapp")
+@app.get("/webhooks/whatsapp")
 async def wa_verify(request: Request):
     p = request.query_params
     if p.get("hub.mode") == "subscribe" and hmac.compare_digest(p.get("hub.verify_token", ""), env("WA_VERIFY_TOKEN")):
@@ -182,6 +183,7 @@ async def _resolve_webhook_clinic(channel: str, channel_id: str) -> int | None:
 
 
 @app.post("/webhook/whatsapp")
+@app.post("/webhooks/whatsapp")
 async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
     raw = await request.body()
     if not wa.verify_signature(raw, x_hub_signature_256):
@@ -215,6 +217,7 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
 
 # ======================= Instagram DM webhook =======================
 @app.get("/webhook/instagram")
+@app.get("/webhooks/instagram")
 async def ig_verify(request: Request):
     p = request.query_params
     if p.get("hub.mode") == "subscribe" and hmac.compare_digest(p.get("hub.verify_token", ""), env("IG_VERIFY_TOKEN") or env("WA_VERIFY_TOKEN")):
@@ -223,6 +226,7 @@ async def ig_verify(request: Request):
 
 
 @app.post("/webhook/instagram")
+@app.post("/webhooks/instagram")
 async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(default=None)):
     raw = await request.body()
     if not ig.verify_signature(raw, x_hub_signature_256):
@@ -622,3 +626,8 @@ async def admin_route_test(request: Request, x_admin_token: str | None = Header(
     b = await request.json()
     res = await state["router"].route(b.get("text", ""), b.get("lang"))
     return JSONResponse(res.__dict__)
+
+
+from . import enterprise_ext as _ent_pg  # noqa: E402
+_ent_pg.register_enterprise_routes_for_pg(app)
+
