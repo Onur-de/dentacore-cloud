@@ -1,6 +1,8 @@
 FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=Europe/Istanbul
+# Fail-closed: DC_ENV verilmezse run_local 'local' moda düşer (HTTP çerez, geçici anahtar, demo veri).
+ENV DC_ENV="production"
 RUN useradd -m -u 10001 app && mkdir -p /data/patient_media /data/images /data/voice && chown -R app:app /data /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

@@ -400,6 +400,16 @@ def test_dockerignore_keeps_secrets_and_live_db_out_of_image():
         assert must in rules, f".dockerignore '{must}' içermeli"
 
 
+@pytest.mark.parametrize("rel", ["Dockerfile", "api/Dockerfile"])
+def test_dockerfiles_default_to_production_mode(rel):
+    """DC_ENV verilmezse run_local 'local' moda düşer (HTTP çerez, otomatik üretilen anahtar, demo veri): fail-open (CWE-1188)."""
+    text = (_DC_ROOT / rel).read_text(encoding="utf-8")
+    env_lines = [ln for ln in text.splitlines() if ln.strip().upper().startswith("ENV ")]
+    assert any(re.search(r'\bDC_ENV\s*=\s*"?production"?', ln) for ln in env_lines), \
+        f"{rel}: ENV DC_ENV=production yok; imaj varsayılan olarak yerel/demo modda açılır"
+    assert not any("DC_ALLOW_HTTP_LOCAL" in ln for ln in env_lines), f"{rel}: imajda DC_ALLOW_HTTP_LOCAL set edilmemeli"
+
+
 # ---------------------------------------------------------------------------
 # 10) RATE LIMIT TESTLERİ (EN SONDA)
 # ---------------------------------------------------------------------------
