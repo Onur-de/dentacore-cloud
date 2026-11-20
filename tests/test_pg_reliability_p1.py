@@ -15,8 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
+import hmac
+import json
 import os
 import pathlib
+import time
 import urllib.parse
 from collections import Counter
 from datetime import timedelta
@@ -25,6 +29,8 @@ import pytest
 
 DSN = os.environ.get("DC_PG_TEST_DSN", "postgresql://dentacore:dctest_pw_local_only@127.0.0.1:55432/dentacore_test")
 os.environ["DATABASE_URL"] = DSN
+os.environ["WA_APP_SECRET"] = "wa-secret-test"
+os.environ.setdefault("ADMIN_TOKEN", "p1-test-admin-token-0123456789abcdef")
 os.environ.setdefault("PHONE_HMAC_KEY", "p1-test-phone-hmac-key-0123456789abcdef")
 if not os.environ.get("DATA_ENCRYPTION_KEY"):
     from cryptography.fernet import Fernet
@@ -68,11 +74,11 @@ async def _fresh_db(apply_migrations: bool = True) -> None:
 def pg_test(fn=None, *, migrations: bool = True):
     def deco(f):
         @functools.wraps(f)
-        def wrapper():
+        def wrapper(**fixtures):  # pytest imzayı f'den okur; fixture'lar (monkeypatch) f'ye iletilir
             async def main():
                 await _fresh_db(migrations)
                 try:
-                    await asyncio.wait_for(f(), 120)
+                    await asyncio.wait_for(f(**fixtures), 120)
                 finally:
                     await core.db_close()
             asyncio.run(main())
@@ -394,3 +400,113 @@ async def test_heartbeat_ok_and_error_recorded():
     row = await core.q1("SELECT last_ok_at, last_error, last_error_at FROM system_heartbeat WHERE name='scheduler'")
     assert row["last_ok_at"] is not None and row["last_error_at"] is not None
     assert "RuntimeError" in row["last_error"] and "905551112233" not in row["last_error"]
+
+
+# ---------------------------------------------------------------- 6) HTTP uçtan uca: webhook -> kalıcı inbox -> işleme, /ready, admin
+def _sign(raw: bytes) -> dict:
+    return {"x-hub-signature-256": "sha256=" + hmac.new(b"wa-secret-test", raw, hashlib.sha256).hexdigest(),
+            "content-type": "application/json"}
+
+
+def _wa_body(msg_id: str, phone_id: str = "PID-P1") -> bytes:
+    body = {"object": "whatsapp_business_account", "entry": [{"changes": [{"value": {
+        "metadata": {"phone_number_id": phone_id},
+        "contacts": [{"wa_id": "905551234567", "profile": {"name": "Ali"}}],
+        "messages": [{"id": msg_id, "from": "905551234567", "type": "text", "text": {"body": "merhaba"}}]}}]}]}
+    return json.dumps(body).encode()
+
+
+def test_http_webhook_is_persisted_deduped_ready_and_503_on_persist_failure(monkeypatch):
+    if not _pg_reachable():
+        pytest.skip("Test PostgreSQL erişilemiyor (docker `dentacore-pg-test`).")
+    if not DB_NAME.endswith("_test"):
+        pytest.fail("Güvenlik: test DB adı '_test' ile bitmeli")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    from api.app import main, panel
+
+    async def reset():
+        await core.db_open()
+        try:
+            await _exec("DROP SCHEMA public CASCADE")
+            await _exec("CREATE SCHEMA public")
+        finally:
+            await core.db_close()
+
+    asyncio.run(reset())
+
+    handled: list[str] = []
+
+    async def fake_handle(m, profile_name, channel="wa", clinic_id=1):
+        handled.append(m["id"])
+
+    async def noop():
+        return None
+
+    monkeypatch.setattr(main, "handle_message", fake_handle)
+    monkeypatch.setattr(modules, "morning_brief", noop)
+    monkeypatch.setattr(modules, "mine_sleeping_plans", noop)
+    main.app.dependency_overrides[panel.HQ_OWNER] = lambda: {"id": 1, "role": "owner", "clinic_id": 1}
+    try:
+        with TestClient(main.app) as c:
+            with psycopg.connect(DSN, autocommit=True) as conn:  # lifespan migrations'ı uyguladı
+                conn.execute("INSERT INTO clinics (id, name, slug) VALUES (1,'T','t') ON CONFLICT DO NOTHING")
+                conn.execute("UPDATE clinics SET wa_phone_id='PID-P1', active=true WHERE id=1")
+
+            assert c.get("/health").json() == {"ok": True, "db_ok": True}
+            # /ready: zamanlayıcı + inbox işleyici heartbeat'leri gelene dek 503, sonra 200
+            r = None
+            for _ in range(100):
+                r = c.get("/ready")
+                if r.status_code == 200:
+                    break
+                time.sleep(0.1)
+            assert r is not None and r.status_code == 200, r.text
+            ready = r.json()
+            assert ready["ready"] and ready["scheduler_ok"] and ready["inbox_workers_alive"] >= 1
+            assert ready["redis"] == "not_configured" and ready["db_latency_ms"] >= 0
+
+            # imzasız istek reddedilir
+            assert c.post("/webhook/whatsapp", content=_wa_body("wamid.h0")).status_code == 401
+
+            raw = _wa_body("wamid.h1")
+            r1 = c.post("/webhook/whatsapp?sync=1", content=raw, headers=_sign(raw))
+            assert r1.status_code == 200 and r1.json()["persisted"] == 1 and r1.json()["processed"] == 1
+            r2 = c.post("/webhook/whatsapp?sync=1", content=raw, headers=_sign(raw))  # Meta yeniden denemesi
+            assert r2.status_code == 200 and r2.json()["dedup"] == 1 and r2.json()["persisted"] == 0
+            assert handled == ["wamid.h1"]
+
+            # asenkron mod: kalıcı yazılır, 200 döner, arka plan işleyici işler
+            raw3 = _wa_body("wamid.h3")
+            r3 = c.post("/webhook/whatsapp?async=1", content=raw3, headers=_sign(raw3))
+            assert r3.status_code == 200 and r3.json()["queued"] == 1
+            for _ in range(100):
+                if "wamid.h3" in handled:
+                    break
+                time.sleep(0.1)
+            assert handled.count("wamid.h3") == 1
+
+            # PG yazımı başarısızsa 200 DEĞİL 503 (Meta yeniden dener; mesaj kaybolmaz)
+            async def broken(*a, **k):
+                raise ConnectionError("pg yazılamadı")
+
+            raw4 = _wa_body("wamid.h4")
+            with monkeypatch.context() as mp:
+                mp.setattr(main.inbox, "persist", broken)
+                assert c.post("/webhook/whatsapp?sync=1", content=raw4, headers=_sign(raw4)).status_code == 503
+            assert "wamid.h4" not in handled
+
+            # admin: sağlık + DLQ uçları
+            ah = c.get("/app/api/admin/health").json()
+            assert ah["ok"] and ah["redis"] == "not_configured" and ah["inbox"]["dead"] == 0
+            assert c.get("/app/api/admin/inbox/dead").json()["items"] == []
+            assert c.post("/app/api/admin/inbox/999999/requeue").status_code == 404
+            drain = c.post("/app/api/admin/webhook-queue/drain").json()
+            assert drain["ok"] and drain["queue_depth"] == 0
+
+            with psycopg.connect(DSN) as conn:
+                n = conn.execute("SELECT count(*) FROM webhook_inbox WHERE external_id='wamid.h1'").fetchone()[0]
+                assert n == 1
+    finally:
+        main.app.dependency_overrides.pop(panel.HQ_OWNER, None)
