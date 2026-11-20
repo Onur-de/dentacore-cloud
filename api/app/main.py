@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from pydantic import BaseModel, Field
 
 from . import ig, inbox, media, modules, panel, staff_bot, wa
-from .core import (S, add_alert, db_close, db_open, env, has_consent, log_msg, mask_phone, patient, phone_hmac, q, q1, run_migrations,
+from .core import (S, add_alert, db_close, db_open, env, has_consent, instance_id, log_msg, mask_phone, patient, phone_hmac, q, q1, run_migrations,
                    tx, upsert_identity, upsert_patient, verify_sig)
 from .router import TokenRouter, normalize
 from .security import SecurityHeadersMiddleware, WebhookDedupCache, audit as sec_audit
@@ -28,7 +28,6 @@ state: dict = {}
 _MEM_WEBHOOK_DEDUP = WebhookDedupCache(max_size=10_000, ttl_seconds=86_400)
 _WEBHOOK_SEM = asyncio.Semaphore(16)
 _SENDER_LOCKS: dict[str, asyncio.Lock] = {}
-_WEBHOOK_QUEUE: asyncio.Queue | None = None
 _WEBHOOK_WORKERS: list[asyncio.Task] = []
 _WEBHOOK_PROCESSED_TOTAL = 0
 HERE = Path(__file__).parent
@@ -356,12 +355,12 @@ async def _finish_inbound(new_ids: list[int], async_mode: bool) -> int:
     if async_mode:
         _WEBHOOK_WAKE.set()
         return 0
-    return await inbox.drain_ids(new_ids, _run_webhook_job, inbox.instance_id())
+    return await inbox.drain_ids(new_ids, _run_webhook_job, instance_id())
 
 
 @app.post("/app/api/admin/webhook-queue/drain")
 async def drain_webhook_queue_ep(u: dict = Depends(panel.HQ_OWNER)):
-    done = await inbox.drain_all(_run_webhook_job, inbox.instance_id(), budget_s=15.0)
+    done = await inbox.drain_all(_run_webhook_job, instance_id(), budget_s=15.0)
     st = await inbox.stats()
     return {
         "ok": True,
