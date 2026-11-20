@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import ig, media, modules, panel, staff_bot, wa
+from . import ig, inbox, media, modules, panel, staff_bot, wa
 from .core import (S, add_alert, db_close, db_open, env, has_consent, log_msg, mask_phone, patient, phone_hmac, q, q1, run_migrations,
                    tx, upsert_identity, upsert_patient, verify_sig)
 from .router import TokenRouter, normalize
@@ -32,7 +33,7 @@ _WEBHOOK_WORKERS: list[asyncio.Task] = []
 _WEBHOOK_PROCESSED_TOTAL = 0
 HERE = Path(__file__).parent
 WEB = HERE / "web"
-MIGRATION = Path(env("MIGRATION_FILE", str(HERE / "migrations" / "002_platform.sql")))
+MIGRATION = Path(env("MIGRATION_FILE", str(HERE / "migrations")))  # klasör: 001/002/003... sıralı, idempotent
 
 
 def _get_sender_lock(key: str) -> asyncio.Lock:
@@ -49,7 +50,13 @@ def _get_sender_lock(key: str) -> asyncio.Lock:
     return lk
 
 
+_WEBHOOK_WAKE = asyncio.Event()
+INBOX_WORKERS = int(env("DC_INBOX_WORKERS", "8"))
+_BG_TASKS: list[asyncio.Task] = []
+
+
 async def _run_webhook_job(m: dict, profile_name: str | None, channel: str, clinic_id: int) -> None:
+    """Gelen kutusu işleyicisi: süreç içi eşzamanlılık sınırı + gönderen başına sıralama; hatada istisna fırlatır (inbox yeniden dener)."""
     global _WEBHOOK_PROCESSED_TOTAL
     sender = str(m.get("from") or "")
     async with _WEBHOOK_SEM:
@@ -58,28 +65,9 @@ async def _run_webhook_job(m: dict, profile_name: str | None, channel: str, clin
             _WEBHOOK_PROCESSED_TOTAL += 1
 
 
-async def _webhook_worker_loop(q_obj: asyncio.Queue) -> None:
-    while True:
-        item = await q_obj.get()
-        try:
-            if item is None:
-                return
-            m, profile_name, channel, clinic_id, fut = item
-            try:
-                await _run_webhook_job(m, profile_name, channel, clinic_id)
-                if fut is not None and not fut.done():
-                    fut.set_result(True)
-            except Exception as exc:
-                log.exception("webhook worker hatası")
-                if fut is not None and not fut.done():
-                    fut.set_exception(exc)
-        finally:
-            q_obj.task_done()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _WEBHOOK_QUEUE, _WEBHOOK_WORKERS
+    global _WEBHOOK_WORKERS
     from .core import assert_no_compromised_secrets
     for k in ("DATA_ENCRYPTION_KEY", "PHONE_HMAC_KEY", "ADMIN_TOKEN", "DATABASE_URL"):
         if not env(k):
@@ -95,13 +83,16 @@ async def lifespan(app: FastAPI):
     state["redis"] = redis
     panel.limiter.redis = redis
     state["router"] = TokenRouter(redis=redis)
-    _WEBHOOK_QUEUE = asyncio.Queue(maxsize=2000)
-    _WEBHOOK_WORKERS = [asyncio.create_task(_webhook_worker_loop(_WEBHOOK_QUEUE)) for _ in range(8)]
-    task = asyncio.create_task(modules.scheduler_loop(redis))
+    _WEBHOOK_WAKE.clear()
+    _WEBHOOK_WORKERS = [asyncio.create_task(inbox.worker_loop(_run_webhook_job, _WEBHOOK_WAKE, i)) for i in range(INBOX_WORKERS)]
+    _BG_TASKS[:] = [asyncio.create_task(inbox.heartbeat_loop()), asyncio.create_task(modules.scheduler_loop(redis))]
     yield
-    task.cancel()
+    for t in _BG_TASKS:
+        t.cancel()
     for w in _WEBHOOK_WORKERS:
         w.cancel()
+    await asyncio.gather(*_BG_TASKS, *_WEBHOOK_WORKERS, return_exceptions=True)
+    _BG_TASKS.clear()
     _WEBHOOK_WORKERS.clear()
     await wa.close_client()
     await ig.close_client()
@@ -136,24 +127,91 @@ async def health():
     return {"ok": True, "db_ok": True}
 
 
+SCHEDULER_STALE_S = int(env("DC_SCHEDULER_STALE_S", "180"))
+INBOX_HB_STALE_S = int(env("DC_INBOX_HB_STALE_S", "60"))
+
+
+async def _redis_status() -> str:
+    """Kullanılmayan servisi başarılı gösterme: yapılandırılmadıysa 'not_configured'."""
+    r = state.get("redis")
+    if r is None:
+        return "not_configured"
+    try:
+        await r.ping()
+        return "ok"
+    except Exception:
+        return "down"
+
+
+async def _readiness() -> dict:
+    t0 = time.perf_counter()
+    db_ok = True
+    try:
+        await q1("SELECT 1")
+    except Exception:
+        db_ok = False
+    db_ms = round((time.perf_counter() - t0) * 1000, 1)
+    sched_age = inbox_workers = None
+    if db_ok:
+        try:
+            hb = await q1("SELECT extract(epoch FROM now() - last_ok_at)::int AS age FROM system_heartbeat WHERE name='scheduler'")
+            sched_age = int(hb["age"]) if hb and hb["age"] is not None else None
+            w = await q1("SELECT count(*) AS n FROM system_heartbeat WHERE name LIKE 'inbox:%%' "
+                         "AND last_ok_at > now() - make_interval(secs => %s)", INBOX_HB_STALE_S)
+            inbox_workers = int(w["n"]) if w else 0
+        except Exception:
+            log.exception("heartbeat okunamadı")
+    sched_ok = sched_age is not None and sched_age <= SCHEDULER_STALE_S
+    workers_ok = bool(inbox_workers)
+    return {
+        "ready": db_ok and sched_ok and workers_ok,
+        "db_ok": db_ok,
+        "db_latency_ms": db_ms,
+        "scheduler_ok": sched_ok,
+        "scheduler_age_s": sched_age,
+        "inbox_workers_alive": inbox_workers or 0,
+        "redis": await _redis_status(),
+    }
+
+
+@app.get("/ready")
+async def ready():
+    """Readiness: DB + zamanlayıcı heartbeat + inbox işleyici heartbeat. Hazır değilse 503 (yük dengeleyici trafiği keser)."""
+    r = await _readiness()
+    return JSONResponse(status_code=200 if r["ready"] else 503, content=r)
+
+
 @app.get("/app/api/admin/health")
 async def admin_health(u: dict = Depends(panel.HQ_OWNER)):
-    await q1("SELECT 1")
-    redis_ok = True
-    if state.get("redis") is not None:
-        try:
-            await state["redis"].ping()
-        except Exception:
-            redis_ok = False
+    r = await _readiness()
+    try:
+        qs = await inbox.stats()
+    except Exception:
+        log.exception("inbox istatistiği okunamadı")
+        qs = {}
     return {
-        "ok": True,
+        "ok": r["ready"],
         "mode": "cloud-postgres",
-        "db_ok": True,
-        "redis_ok": redis_ok,
-        "webhook_queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
+        **r,
+        "inbox": qs,
+        "webhook_queue_depth": qs.get("pending", 0) + qs.get("processing", 0),
         "webhook_processed_total": _WEBHOOK_PROCESSED_TOTAL,
-        "workers_ready": len(_WEBHOOK_WORKERS),
+        "workers_ready": len([w for w in _WEBHOOK_WORKERS if not w.done()]),
     }
+
+
+@app.get("/app/api/admin/inbox/dead")
+async def admin_inbox_dead(u: dict = Depends(panel.HQ_OWNER)):
+    """DLQ: kalıcı işlenemeyen webhook mesajları (yük/PHI döndürülmez)."""
+    return {"ok": True, "items": await inbox.list_dead(100)}
+
+
+@app.post("/app/api/admin/inbox/{rid}/requeue")
+async def admin_inbox_requeue(rid: int, u: dict = Depends(panel.HQ_OWNER)):
+    if not await inbox.requeue(rid):
+        raise HTTPException(404, "Kayıt DLQ'da değil ya da yükü silinmiş")
+    _WEBHOOK_WAKE.set()
+    return {"ok": True, "id": rid}
 
 
 # ======================= Web sitesi ve panel (statik, dış kaynak yok) =======================
@@ -283,26 +341,33 @@ def _is_async_webhook(request: Request) -> bool:
     return os.environ.get("DC_WEBHOOK_ASYNC") == "1"
 
 
-async def _dispatch_webhook_job(m: dict, profile_name: str | None, channel: str, clinic_id: int, async_mode: bool) -> None:
-    if _WEBHOOK_QUEUE is not None and _WEBHOOK_WORKERS:
-        if async_mode:
-            _WEBHOOK_QUEUE.put_nowait((m, profile_name, channel, clinic_id, None))
-            return
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        await _WEBHOOK_QUEUE.put((m, profile_name, channel, clinic_id, fut))
-        await fut
-    else:
-        await _run_webhook_job(m, profile_name, channel, clinic_id)
+async def _persist_inbound(channel: str, external_id: str, clinic_id: int, m: dict, profile_name: str | None) -> int | None:
+    """Mesajı kalıcı gelen kutusuna yazar. Yeni satır id'si; mükerrerse None.
+    PG yazımı başarısız olursa istisna YUTULMAZ -> çağıran 503 döner, Meta yeniden dener (mesaj kaybolmaz)."""
+    ext = external_id or inbox.synthetic_external_id(channel, m)
+    rid, _new = await inbox.persist(channel, ext, clinic_id, str(m.get("from") or ""), m, profile_name)
+    return rid
+
+
+async def _finish_inbound(new_ids: list[int], async_mode: bool) -> int:
+    """Asenkron: işçileri uyandır. Senkron: yeni satırları satır içi işle (başarıyla biten sayısı)."""
+    if not new_ids:
+        return 0
+    if async_mode:
+        _WEBHOOK_WAKE.set()
+        return 0
+    return await inbox.drain_ids(new_ids, _run_webhook_job, inbox.instance_id())
 
 
 @app.post("/app/api/admin/webhook-queue/drain")
 async def drain_webhook_queue_ep(u: dict = Depends(panel.HQ_OWNER)):
-    if _WEBHOOK_QUEUE is not None:
-        await asyncio.wait_for(_WEBHOOK_QUEUE.join(), timeout=15.0)
+    done = await inbox.drain_all(_run_webhook_job, inbox.instance_id(), budget_s=15.0)
+    st = await inbox.stats()
     return {
         "ok": True,
-        "queue_depth": _WEBHOOK_QUEUE.qsize() if _WEBHOOK_QUEUE is not None else 0,
+        "drained": done,
+        "queue_depth": st.get("pending", 0) + st.get("processing", 0),
+        "dead": st.get("dead", 0),
         "processed_total": _WEBHOOK_PROCESSED_TOTAL,
     }
 
@@ -341,7 +406,8 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
     except json.JSONDecodeError:
         raise HTTPException(400, "Geçersiz JSON gövdesi") from None
     async_mode = _is_async_webhook(request)
-    processed, queued, dedup, unmapped = 0, 0, 0, 0
+    new_ids: list[int] = []
+    dedup, unmapped = 0, 0
     for entry in body.get("entry", []):
         for ch in entry.get("changes", []):
             v = ch.get("value", {})
@@ -352,20 +418,19 @@ async def wa_inbound(request: Request, x_hub_signature_256: str | None = Header(
                 continue
             names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in v.get("contacts", [])}
             for m in v.get("messages", []):
-                if async_mode and _WEBHOOK_QUEUE is not None and _WEBHOOK_QUEUE.full():
-                    raise HTTPException(503, "Webhook kuyruğu dolu, lütfen tekrar deneyin")
-                # Meta webhook'u yeniden deneyebilir: aynı mesajı iki kez işleme
-                if await _is_dup_webhook_msg(str(m.get("id") or "")):
-                    dedup += 1
-                    continue
+                # Önce kalıcı yaz, sonra 200 dön. Yazım başarısızsa 503: Meta yeniden dener, mesaj kaybolmaz.
                 try:
-                    await _dispatch_webhook_job(m, names.get(m.get("from")), "wa", clinic_id, async_mode)
-                    processed += 1
-                    if async_mode:
-                        queued += 1
+                    rid = await _persist_inbound("wa", str(m.get("id") or ""), clinic_id, m, names.get(m.get("from")))
                 except Exception:
-                    log.exception("mesaj işlenemedi")
-    return {"ok": True, "processed": processed, "queued": queued, "dedup": dedup, "unmapped": unmapped}
+                    log.exception("webhook gelen kutusuna yazılamadı")
+                    raise HTTPException(503, "Gelen kutusu yazılamadı, lütfen tekrar deneyin") from None
+                if rid is None:
+                    dedup += 1  # mükerrer teslimat: yan etki yok
+                else:
+                    new_ids.append(rid)
+    processed = await _finish_inbound(new_ids, async_mode)
+    queued = len(new_ids) if async_mode else 0
+    return {"ok": True, "processed": processed, "queued": queued, "persisted": len(new_ids), "dedup": dedup, "unmapped": unmapped}
 
 
 # ======================= Instagram DM webhook =======================
@@ -394,7 +459,8 @@ async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(
     except json.JSONDecodeError:
         raise HTTPException(400, "Geçersiz JSON gövdesi") from None
     async_mode = _is_async_webhook(request)
-    processed, queued, dedup, unmapped = 0, 0, 0, 0
+    new_ids: list[int] = []
+    dedup, unmapped = 0, 0
     for entry in body.get("entry", []):
         entry_id = str(entry.get("id") or "").strip()
         for ev in entry.get("messaging", []):
@@ -406,20 +472,19 @@ async def ig_inbound(request: Request, x_hub_signature_256: str | None = Header(
             if not clinic_id:
                 unmapped += 1
                 continue
-            if async_mode and _WEBHOOK_QUEUE is not None and _WEBHOOK_QUEUE.full():
-                raise HTTPException(503, "Webhook kuyruğu dolu, lütfen tekrar deneyin")
-            if await _is_dup_webhook_msg(str(msg.get("mid") or "")):
-                dedup += 1
-                continue
+            m_obj = {"from": ev["sender"]["id"], "type": "text", "text": {"body": msg["text"]}}
             try:
-                m_obj = {"from": ev["sender"]["id"], "type": "text", "text": {"body": msg["text"]}}
-                await _dispatch_webhook_job(m_obj, None, "ig", clinic_id, async_mode)
-                processed += 1
-                if async_mode:
-                    queued += 1
+                rid = await _persist_inbound("ig", str(msg.get("mid") or ""), clinic_id, m_obj, None)
             except Exception:
-                log.exception("IG mesajı işlenemedi")
-    return {"ok": True, "processed": processed, "queued": queued, "dedup": dedup, "unmapped": unmapped}
+                log.exception("IG webhook gelen kutusuna yazılamadı")
+                raise HTTPException(503, "Gelen kutusu yazılamadı, lütfen tekrar deneyin") from None
+            if rid is None:
+                dedup += 1
+            else:
+                new_ids.append(rid)
+    processed = await _finish_inbound(new_ids, async_mode)
+    queued = len(new_ids) if async_mode else 0
+    return {"ok": True, "processed": processed, "queued": queued, "persisted": len(new_ids), "dedup": dedup, "unmapped": unmapped}
 
 
 async def handle_message(m: dict, profile_name: str | None, channel: str = "wa", clinic_id: int = 1):

@@ -381,22 +381,55 @@ async def schedule_postop(pid: int, procedure: str, done_at: datetime):
         await q("INSERT INTO postop_checks (patient_id, procedure, due_at, stage) VALUES (%s,%s,%s,%s)", pid, procedure, done_at + delta, stage)
 
 
-async def send_postop_checks(clinic_id: int | None = None) -> int:
-    sql = """SELECT pc.*, p.clinic_id FROM postop_checks pc
-             JOIN patients p ON p.id=pc.patient_id
-             WHERE pc.sent_at IS NULL AND pc.due_at <= now() AND pc.due_at > now() - interval '6 hours'"""
-    args: list = []
+_POSTOP_CLAIM_SQL = """
+WITH due AS (
+  SELECT pc.id FROM postop_checks pc
+  JOIN patients p ON p.id = pc.patient_id
+  WHERE pc.sent_at IS NULL AND pc.due_at <= now() AND pc.due_at > now() - interval '6 hours'
+    AND (pc.claimed_at IS NULL OR pc.claimed_at < now() - make_interval(mins => %s))
+    AND pc.id <> ALL(%s::bigint[])
+    {clinic_filter}
+  ORDER BY pc.due_at
+  FOR UPDATE OF pc SKIP LOCKED
+  LIMIT %s)
+UPDATE postop_checks pc SET claimed_at=now(), claimed_by=%s
+FROM due
+WHERE pc.id = due.id
+RETURNING pc.id, pc.patient_id, pc.procedure
+"""
+
+
+async def _claim_postop(clinic_id: int | None, wid: str, exclude: list[int]) -> list[dict]:
+    args: list = [CLAIM_LEASE_MIN, exclude]
+    clinic_filter = ""
     if clinic_id is not None:
-        sql += " AND p.clinic_id=%s"
+        clinic_filter = "AND p.clinic_id=%s"
         args.append(clinic_id)
-    rows = await q(sql, *args)
+    args += [CLAIM_BATCH, wid]
+    return await q(_POSTOP_CLAIM_SQL.format(clinic_filter=clinic_filter), *args)  # nosec B608  # noqa: S608
+
+
+async def send_postop_checks(clinic_id: int | None = None) -> int:
+    """Post-op kontrol mesajı. Önce sahiplen (claimed_at/by, FOR UPDATE SKIP LOCKED), sonra gönder; başarısızsa lease dolunca yeniden denenir."""
+    wid = instance_id()
     sent_cnt = 0
-    for r in rows:
-        p = await patient(r["patient_id"])
-        res = await wa.send_template(p["phone"], TPL["postop"], [r["procedure"]])
-        if not (isinstance(res, dict) and res.get("error")):
-            await q("UPDATE postop_checks SET sent_at=now() WHERE id=%s", r["id"])
-            sent_cnt += 1
+    skip: list[int] = []
+    while True:
+        rows = await _claim_postop(clinic_id, wid, skip)
+        if not rows:
+            break
+        for r in rows:
+            skip.append(int(r["id"]))
+            ok = False
+            try:
+                p = await patient(r["patient_id"])
+                res = await wa.send_template(p["phone"], TPL["postop"], [r["procedure"]])
+                ok = not (isinstance(res, dict) and res.get("error"))
+            except Exception:
+                log.exception("post-op gönderilemedi id=%s", r["id"])
+            if ok:
+                await q("UPDATE postop_checks SET sent_at=now(), claimed_at=NULL, claimed_by=NULL WHERE id=%s AND sent_at IS NULL", r["id"])
+                sent_cnt += 1
     return sent_cnt
 
 
@@ -596,23 +629,56 @@ async def run_scheduler_tick(clinic_id: int | None = None, now_dt: datetime | No
         }
 
 
-async def scheduler_loop(redis):
-    last_daily: dict[str, str] = {}
+async def claim_daily(job: str, run_key: str) -> bool:
+    """Günlük tekil görevi küme genelinde tam 1 kez sahiplenir (scheduler_runs PK = (job, run_key))."""
+    row = await q1(
+        "INSERT INTO scheduler_runs (job, run_key, claimed_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING RETURNING job",
+        job, run_key, instance_id())
+    return bool(row)
+
+
+async def release_daily(job: str, run_key: str) -> None:
+    """Görev hata verirse sahiplenmeyi geri bırakır; bir sonraki turda yeniden denenir."""
+    await q("DELETE FROM scheduler_runs WHERE job=%s AND run_key=%s", job, run_key)
+
+
+async def _run_daily(job: str, run_key: str, fn) -> None:
+    if not await claim_daily(job, run_key):
+        return
+    try:
+        await fn()
+    except Exception:
+        await release_daily(job, run_key)
+        raise
+
+
+async def scheduler_tick_once() -> bool:
+    """Tek zamanlayıcı turu. Redis gerekmez: PG advisory kilidi + scheduler_runs. Kilidi başka worker tutuyorsa False döner."""
+    async with try_lock("dentacore:scheduler_tick") as lk:
+        if not lk.acquired:
+            return False
+        await run_scheduler_tick(respect_hours=True)
+        local = datetime.now(TZ)
+        today = local.strftime("%Y%m%d")
+        if local.strftime("%H:%M") >= "08:30":
+            await _run_daily("morning_brief", today, morning_brief)
+        if local.hour >= 11:
+            await _run_daily("mine_sleeping_plans", today, mine_sleeping_plans)
+        if local.hour >= 3:
+            await _run_daily("inbox_purge_done", today, inbox.purge_done)
+    return True
+
+
+async def scheduler_loop(redis=None):
+    """`redis` parametresi geriye dönük uyumluluk için durur; kullanılmaz."""
     while True:
         try:
-            got = await redis.set("dc:sched:lock", "1", nx=True, ex=55) if redis else True
-            if got:
-                await run_scheduler_tick(respect_hours=True)
-                local = datetime.now(TZ)
-                today = local.strftime("%Y%m%d")
-                if local.strftime("%H:%M") >= "08:30" and last_daily.get("brief") != today:
-                    if not redis or await redis.set(f"dc:brief:{today}", "1", nx=True, ex=86400):
-                        await morning_brief()
-                    last_daily["brief"] = today
-                if local.hour == 11 and last_daily.get("sleep") != today:
-                    if not redis or await redis.set(f"dc:sleep:{today}", "1", nx=True, ex=86400):
-                        await mine_sleeping_plans()
-                    last_daily["sleep"] = today
+            await scheduler_tick_once()
+            await heartbeat_ok("scheduler")
         except Exception as e:
             log.exception("zamanlayıcı hatası: %s", e)
+            try:
+                await heartbeat_error("scheduler", e)
+            except Exception:
+                log.exception("heartbeat_error yazılamadı")
         await asyncio.sleep(60)
