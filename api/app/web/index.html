@@ -91,7 +91,7 @@
           "name": "Yapay zeka hastaya teşhis koyar veya fiyat verir mi?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Koymaz ve vermez. Sistem tıbbi teşhis, ilaç önerisi ve hekim onaysız fiyat cümlelerini çıkış filtresiyle engeller; soruyu muayene randevusuna veya ekibe yönlendirir."
+            "text": "Koymaz ve vermez. Teşhis, ilaç önerisi ve hekim onaysız fiyat cümleleri çıkış filtresinde engellenir; hasta muayene randevusuna yönlendirilir."
           }
         },
         {
@@ -99,7 +99,7 @@
           "name": "Hasta verileri nerede saklanır ve kimler görebilir?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "DentaCore kendi sunucunuzda veya Türkiye lokasyonlu size özel sunucuda çalışır. Telefon numaraları ve anamnez yanıtları uygulama katmanında şifreli tutulur; her görüntüleme hash zincirli denetim kaydına işlenir."
+            "text": "Kendi sunucunuzda veya Türkiye lokasyonlu özel sunucuda çalışır. Telefon ve anamnez yanıtları şifreli tutulur; her görüntüleme hash zincirli denetim kaydına yazılır."
           }
         },
         {
@@ -107,7 +107,7 @@
           "name": "iPhone ve Android telefon takvimleriyle nasıl eşitlenir?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Her şubeye özel imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olduğunda yeni randevular ve 60 ile 15 dakikalık uyarılar telefona otomatik düşer."
+            "text": "Her şube için imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olunca yeni randevular ve 60 ile 15 dakikalık uyarılar telefona düşer."
           }
         },
         {
@@ -115,7 +115,7 @@
           "name": "Birden fazla şubesi olan zincir klinikler tek yerden yönetilir mi?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Evet. Her şubenin hasta, kasa, envanter ve randevu verisi clinic_id ile ayrılır. Merkez yönetici tek tıkla şubeler arasında geçiş yapar; yeni şube açıldığında giriş ve takvim teslim kartı hazır oluşur."
+            "text": "Evet. Hasta, kasa, envanter ve randevu verisi clinic_id ile şubeye göre ayrılır. Merkez yönetici tek tıkla şube değiştirir; yeni şubede giriş ve takvim teslim kartı hazır gelir."
           }
         },
         {
@@ -123,7 +123,7 @@
           "name": "Kurulum ne kadar sürer ve eğitim gerekir mi?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar alındıktan sonra aynı hafta içinde devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsizdir."
+            "text": "Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar gelince aynı hafta devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsiz."
           }
         }
       ]
@@ -303,21 +303,21 @@
             <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <h3>7/24 Çok Dilli Karşılama</h3>
           </div>
-          <p>WhatsApp ve Instagram mesajlarını 16 dilde karşılar. Konum, otopark, saat ve teyit sorularını ek yapay zekâ maliyeti olmadan yanıtlar; tıbbi teşhis ve ilaç önerisini çıkış filtresiyle keser.</p>
+          <p>WhatsApp ve Instagram mesajlarını 16 dilde karşılar. Konum, otopark, saat ve teyit sorularını ek yapay zekâ maliyeti olmadan yanıtlar; teşhis ve ilaç önerisini filtreler.</p>
         </article>
         <article class="pillar-card">
           <div class="mod-head">
             <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg>
             <h3>Boş Koltuk Doldurucu</h3>
           </div>
-          <p>İptal geldiği anda bekleme listesindeki uygun hastalara sırayla teklif mesajı çıkar. İlk onay veren hastaya randevu yazılır; çift rezervasyon veritabanı kilidiyle engellenir.</p>
+          <p>İptal gelince bekleme listesindeki uygun hastalara sırayla teklif gider. İlk onaylayana randevu yazılır; çift rezervasyonu veritabanı kilidi engeller.</p>
         </article>
         <article class="pillar-card">
           <div class="mod-head">
             <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"/></svg>
             <h3>Kırmızı Bayraklı Anamnez</h3>
           </div>
-          <p>İşlemden önce hastaya 11 soruluk form gider: kan sulandırıcı, penisilin alerjisi, bifosfonat, diyabet, kalp, hamilelik. Riskli yanıt hekime anında uyarı düşer, KVKK onamı sürümle saklanır.</p>
+          <p>İşlemden önce hastaya 11 soruluk form gider: kan sulandırıcı, penisilin alerjisi, bifosfonat, diyabet, kalp, hamilelik. Riskli yanıt hekime anında düşer; KVKK onamı sürümle saklanır.</p>
         </article>
       </div>
 
@@ -333,7 +333,7 @@
           <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0"/></svg>
           <div>
             <h3>İşlem Sonrası 2-24-72 Saat Takibi</h3>
-            <p>Cerrahi çekim veya implant sonrası 2, 24 ve 72. saatte ağrı skoru sorulur. 8 ve üzeri ağrı ya da durmayan kanamada nöbetçi hekime alarm gönderilir.</p>
+            <p>Cerrahi çekim veya implant sonrası 2, 24 ve 72. saatte ağrı skoru sorulur. 8 ve üzeri ağrı ya da durmayan kanama nöbetçi hekime alarm olur.</p>
           </div>
         </article>
         <article class="mod-item">
@@ -371,12 +371,12 @@
   <section class="sec surface-alt" id="takvim">
     <div class="wrap">
       <h2>iPhone, Android ve Google Takvim ile RFC 5545 güvenli senkronizasyon</h2>
-      <p class="sec-sub">Koltuk ve hekim çakışması veritabanı kilidiyle sunucuda engellenir. Her şubenin imzalı <code>webcal://</code> takvim akışı hekimin telefonuna tek yönlü (salt-okunur) ve KVKK maskeli olarak bağlanır.</p>
+      <p class="sec-sub">Koltuk ve hekim çakışmasını veritabanı kilidi engeller. Her şubenin imzalı <code>webcal://</code> akışı hekimin telefonuna salt-okunur ve KVKK maskeli bağlanır.</p>
 
       <div class="cal-grid">
         <article class="cal-card">
           <h3>iPhone (Apple Takvim · Tek Yönlü ICS)</h3>
-          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. KVKK gereği dış takvim beslemesinde tıbbi işlem adı veya anamnez detayı paylaşılmaz; yalnızca maskeli hasta baş harfleri ve koltuk numarası görünür.</p>
+          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. Dış takvimde işlem adı veya anamnez görünmez; yalnızca maskeli baş harfler ve koltuk numarası yer alır.</p>
           <ul>
             <li>60 dk ve 15 dk öncesinde çift <code>VALARM</code> bildirimi</li>
             <li>RFC 5545 <code>SEQUENCE</code> ve sabit <code>UID</code> ile iptal/saat güncellemesi (yenileme sıklığı iOS ayarlarına bağlıdır)</li>
@@ -384,7 +384,7 @@
         </article>
         <article class="cal-card">
           <h3>Android (Google Takvim)</h3>
-          <p>Hem tüm klinik takvimine <code>google_subscribe_url</code> ile abone olunabilir hem de paneldeki her randevu satırından tek tıkla Google Takvim etkinliği açılabilir.</p>
+          <p>Tüm klinik takvimine <code>google_subscribe_url</code> ile abone olunur; her randevu satırından tek tıkla Google Takvim etkinliği açılır.</p>
           <ul>
             <li>90 gün süreli HMAC imzalı URL, tek tıkla iptal/yenileme (rotasyon)</li>
             <li>Klinik adresi etkinlik konumuna otomatik işlenir</li>
@@ -392,7 +392,7 @@
         </article>
         <article class="cal-card">
           <h3>Toplu ve Tekil <code>.ics</code> İndirme</h3>
-          <p>Outlook, macOS Takvim veya arşiv için tek randevuyu ya da tüm şube programını (<code>all.ics</code>) standart RFC 5545 biçiminde dışa aktarabilirsiniz.</p>
+          <p>Outlook, macOS Takvim veya arşiv için tek randevu ya da tüm şube programı (<code>all.ics</code>) RFC 5545 biçiminde dışa aktarılır.</p>
           <ul>
             <li>Aylık, haftalık ve günlük görünüm arasında anlık geçiş</li>
             <li>Yeni klinik açılışında teslim kartıyla hazır link</li>
@@ -414,7 +414,7 @@
         </article>
         <article class="sec-card">
           <h3>SHA-256 Değiştirilemez Denetim Zinciri</h3>
-          <p>Kim, hangi hastanın telefonunu veya kaydını ne zaman açtı? Her satır bir önceki satırın SHA-256 özetini taşır; tek kayıt değişirse zincir kırılır.</p>
+          <p>Kim, hangi kaydı ne zaman açtı? Her satır öncekinin SHA-256 özetini taşır; tek kayıt değişirse zincir kırılır.</p>
         </article>
         <article class="sec-card">
           <h3>RFC 6238 TOTP 2FA + 10 Deneme Kilidi</h3>
@@ -426,11 +426,11 @@
         </article>
         <article class="sec-card">
           <h3>Kendi Sunucunuzda Tam Veri Egemenliği</h3>
-          <p>Docker Compose ile kliniğin kendi sunucusuna veya Türkiye lokasyonlu özel sunucuya kurulur. Dış CDN veya üçüncü parti font betiği yüklenmez.</p>
+          <p>Docker Compose ile kendi sunucunuza veya Türkiye lokasyonlu özel sunucuya kurulur. Dış CDN ve üçüncü parti font betiği yüklenmez.</p>
         </article>
         <article class="sec-card">
           <h3>12/12 HTTP Güvenlik Başlığı + Gece Yedeği</h3>
-          <p>Sunucunun verdiği her yanıtta 12 güvenlik başlığı zorunlu tutulur (BT ekibiniz için ayrıntı aşağıda). Veritabanı yedeği her gece açık anahtarla şifrelenir; çözme anahtarı sunucuda tutulmaz.</p>
+          <p>Her yanıtta 12 güvenlik başlığı zorunludur (ayrıntı aşağıda). Yedek her gece açık anahtarla şifrelenir; çözme anahtarı sunucuda durmaz.</p>
         </article>
       </div>
 
@@ -469,7 +469,7 @@
     <div class="wrap chain-grid">
       <div class="chain-block">
         <h2>Çok şubeli zincir klinikler, tam veri izolasyonuyla</h2>
-        <p>Her şubenin hasta kartları, randevu koltukları, kasa hareketleri ve envanteri veritabanı düzeyinde <code>clinic_id</code> ile ayrılır. Bursa şubesi İstanbul veya Ankara şubesinin tek kaydını göremez.</p>
+        <p>Hasta kartı, koltuk, kasa ve envanter veritabanı düzeyinde <code>clinic_id</code> ile ayrılır. Bursa şubesi İstanbul veya Ankara şubesinin tek kaydını göremez.</p>
         <ul class="check-list">
           <li>Merkez (HQ) yöneticisi tek tıkla herhangi bir şubeye geçip yönetebilir ve merkeze dönebilir.</li>
           <li>Yeni şube açıldığında giriş e-postası, iPhone <code>webcal://</code> linki ve Google Takvim linki tek WhatsApp teslim kartında hazırlanır.</li>
@@ -479,7 +479,7 @@
 
       <div class="lang-block" id="diller">
         <h2>16 dilde anında algılama ve RTL desteği</h2>
-        <p>Hasta hangi dilde yazarsa ilk mesajdan itibaren o dilde karşılanır. Arapça, Farsça ve İbranice sağdan sola (RTL) yazım yönüyle doğal görünür.</p>
+        <p>Hasta hangi dilde yazarsa ilk mesajdan o dilde karşılanır. Arapça, Farsça ve İbranice sağdan sola (RTL) görünür.</p>
         <div class="lang-chips" id="lang-chips" role="group" aria-label="16 desteklenen dil örneği">
           <button type="button" class="lang-chip active" data-lang="tr">Türkçe (tr)</button>
           <button type="button" class="lang-chip" data-lang="en">English (en)</button>
@@ -623,23 +623,23 @@
         </details>
         <details>
           <summary>Yapay zeka hastaya teşhis koyar veya fiyat verir mi?</summary>
-          <p>Koymaz ve vermez. Sistem tıbbi teşhis, ilaç önerisi ve hekim onaysız fiyat cümlelerini çıkış filtresiyle engeller; soruyu muayene randevusuna veya ekibe yönlendirir.</p>
+          <p>Koymaz ve vermez. Teşhis, ilaç önerisi ve hekim onaysız fiyat cümleleri çıkış filtresinde engellenir; hasta muayene randevusuna yönlendirilir.</p>
         </details>
         <details>
           <summary>Hasta verileri nerede saklanır ve kimler görebilir?</summary>
-          <p>DentaCore kendi sunucunuzda veya Türkiye lokasyonlu size özel sunucuda çalışır. Telefon numaraları ve anamnez yanıtları uygulama katmanında şifreli tutulur; her görüntüleme hash zincirli denetim kaydına işlenir.</p>
+          <p>Kendi sunucunuzda veya Türkiye lokasyonlu özel sunucuda çalışır. Telefon ve anamnez yanıtları şifreli tutulur; her görüntüleme hash zincirli denetim kaydına yazılır.</p>
         </details>
         <details>
           <summary>iPhone ve Android telefon takvimleriyle nasıl eşitlenir?</summary>
-          <p>Her şubeye özel imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olduğunda yeni randevular ve 60 ile 15 dakikalık uyarılar telefona otomatik düşer.</p>
+          <p>Her şube için imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olunca yeni randevular ve 60 ile 15 dakikalık uyarılar telefona düşer.</p>
         </details>
         <details>
           <summary>Birden fazla şubesi olan zincir klinikler tek yerden yönetilir mi?</summary>
-          <p>Evet. Her şubenin hasta, kasa, envanter ve randevu verisi clinic_id ile ayrılır. Merkez yönetici tek tıkla şubeler arasında geçiş yapar; yeni şube açıldığında giriş ve takvim teslim kartı hazır oluşur.</p>
+          <p>Evet. Hasta, kasa, envanter ve randevu verisi clinic_id ile şubeye göre ayrılır. Merkez yönetici tek tıkla şube değiştirir; yeni şubede giriş ve takvim teslim kartı hazır gelir.</p>
         </details>
         <details>
           <summary>Kurulum ne kadar sürer ve eğitim gerekir mi?</summary>
-          <p>Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar alındıktan sonra aynı hafta içinde devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsizdir.</p>
+          <p>Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar gelince aynı hafta devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsiz.</p>
         </details>
       </div>
     </div>

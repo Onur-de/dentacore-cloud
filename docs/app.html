@@ -31,14 +31,14 @@
   --amber-soft: #FFF7ED;
   --amber-border: #FDBA74;
   --bg-canvas: #F5F9FA;
-  --bg-surface: #FFFFFF;
+  --bg-surface: #FCFEFD;
   --bg-subtle: #EDF4F5;
   --ink: #0E1B2E;
   --ink-2: #2D3E52;
   --muted: #46576B;
   --on-dark: #F5F8FC;
   --on-dark-muted: #CBD5E1;
-  --on-cta: #FFFFFF;
+  --on-cta: #F8FCFB;
   --border: #E2E8F0;
   --border-field: #5C6D82;
   --red: #B91C1C;
@@ -595,7 +595,7 @@ textarea.input { min-height: 84px; }
 .mcell {
   min-height: 76px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   padding: var(--space-1);
   background: var(--bg-canvas);
   text-align: left;
@@ -696,7 +696,7 @@ textarea.input { min-height: 84px; }
   margin-bottom: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-canvas);
+  background: var(--bg-subtle);
 }
 .conv-msg {
   max-width: 86%;
@@ -938,7 +938,7 @@ textarea.input { min-height: 84px; }
 .asst-ans {
   background: var(--bg-canvas);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: 12px;
   white-space: pre-wrap;
   margin-top: 12px;
@@ -1139,7 +1139,7 @@ textarea.input { min-height: 84px; }
   gap: var(--space-1) 12px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-canvas);
 }
 .sec-desk-meta {
@@ -1172,7 +1172,7 @@ textarea.input { min-height: 84px; }
   background: var(--bg-canvas);
   color: var(--ink-2);
   padding: var(--space-1) 12px;
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
@@ -3011,7 +3011,9 @@ textarea.input { min-height: 84px; }
     }
     return h("div", { class: "field" }, h("label", fid ? { for: fid, text: label } : { text: label }), input);
   };
-  const inp = (name, attrs = {}) => h("input", { class: "input", name, ...attrs });
+  const INP_AUTOCOMPLETE = { email: "email", phone: "tel", tel: "tel", name: "name", display_name: "name", password: "current-password" };
+  const inpAc = (n) => (Object.prototype.hasOwnProperty.call(INP_AUTOCOMPLETE, n) ? INP_AUTOCOMPLETE[n] : "off");
+  const inp = (name, attrs = {}) => h("input", { class: "input", name, autocomplete: inpAc(name), ...attrs });
   const sel = (name, options, value) => h("select", { class: "input", name }, options.map(([v, t]) => h("option", { value: v, selected: v === value }, t)));
 
   // ------------------------------------------------------------------ hareketsizlik zaman aşımı

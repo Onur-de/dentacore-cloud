@@ -3815,7 +3815,7 @@ _SHIELD = ('<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="
 def _patient_page(title: str, clinic: str, inner: str, status: int = 200, with_validate: bool = False) -> HTMLResponse:
     js_tag = '<script src="/form/validate.js" defer></script>' if with_validate else ""
     page = (f"<!doctype html><html lang=tr><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<meta name=robots content='noindex,nofollow'><title>{html_lib.escape(title)}</title><style>{_PATIENT_CSS}</style></head><body><main>"
+            f"<meta name=robots content='noindex,nofollow'><title>{html_lib.escape(title)}</title><link rel='icon' href='/static/favicon.svg' type='image/svg+xml'><style>{_PATIENT_CSS}</style></head><body><main>"
             f"<div class=head>{_SHIELD}<div><b>{html_lib.escape(clinic)}</b><small>Güvenli hasta formu</small></div></div>"
             f"<div class=card>{inner}</div><p class=foot>Bilgileriniz şifrelenerek yalnızca hekiminizle paylaşılır.</p>{js_tag}</main></body></html>")
     return HTMLResponse(page, status_code=status)

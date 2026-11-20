@@ -370,7 +370,9 @@
     }
     return h("div", { class: "field" }, h("label", fid ? { for: fid, text: label } : { text: label }), input);
   };
-  const inp = (name, attrs = {}) => h("input", { class: "input", name, ...attrs });
+  const INP_AUTOCOMPLETE = { email: "email", phone: "tel", tel: "tel", name: "name", display_name: "name", password: "current-password" };
+  const inpAc = (n) => (Object.prototype.hasOwnProperty.call(INP_AUTOCOMPLETE, n) ? INP_AUTOCOMPLETE[n] : "off");
+  const inp = (name, attrs = {}) => h("input", { class: "input", name, autocomplete: inpAc(name), ...attrs });
   const sel = (name, options, value) => h("select", { class: "input", name }, options.map(([v, t]) => h("option", { value: v, selected: v === value }, t)));
 
   // ------------------------------------------------------------------ hareketsizlik zaman aşımı

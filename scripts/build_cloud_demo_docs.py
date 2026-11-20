@@ -1440,7 +1440,8 @@ def build_all() -> None:
     (docs_dir / "app" / "manifest.webmanifest").write_text(static_manifest, encoding="utf-8")
     wa_dir = REPO_ROOT / "WhatsApp_Gonderim"
     if wa_dir.exists():
-        (wa_dir / "1_Birebir_Tanitim_Sitesi.html").write_text(pure_landing, encoding="utf-8")
+        wa_landing = pure_landing.replace('href="panel.html"', 'href="2_Birebir_Yonetim_Paneli.html"')
+        (wa_dir / "1_Birebir_Tanitim_Sitesi.html").write_text(wa_landing, encoding="utf-8")
         (wa_dir / "2_Birebir_Yonetim_Paneli.html").write_text(pure_panel, encoding="utf-8")
     print("Built standalone cloud demo docs:", docs_dir)
 
