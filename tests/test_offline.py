@@ -18,8 +18,15 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 from PIL import Image, ImageDraw, ImageFilter
 
-# Host ortamında psycopg kurulu değilse bellekte stubla (veritabanı gerektirmeyen testler için)
-if "psycopg" not in sys.modules:
+# Gerçek psycopg varsa onu kullan (aynı oturumdaki PG testleri bozulmasın); yüklenemiyorsa (kurulu değil / Windows
+# Uygulama Denetimi DLL'i engelliyor) veritabanı gerektirmeyen testler için bellekte stubla.
+try:
+    import psycopg  # noqa: F401
+    import psycopg.rows  # noqa: F401
+    import psycopg_pool  # noqa: F401
+except ImportError:
+    for _m in ("psycopg", "psycopg.rows", "psycopg_pool"):
+        sys.modules.pop(_m, None)
     sys.modules["psycopg"] = types.ModuleType("psycopg")
     sys.modules["psycopg.rows"] = types.SimpleNamespace(dict_row=None)
     sys.modules["psycopg_pool"] = types.SimpleNamespace(AsyncConnectionPool=object)
