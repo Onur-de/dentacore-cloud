@@ -4,7 +4,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import pathlib
 import re
+import socket
+import sys
 import time
 
 from cryptography.fernet import Fernet
@@ -118,7 +121,16 @@ pool: AsyncConnectionPool | None = None
 
 async def db_open():
     global pool
-    pool = AsyncConnectionPool(S.database_url, min_size=1, max_size=10, open=False, kwargs={"row_factory": dict_row})
+    # check: kopan/öldürülen bağlantılar (PG yeniden başlaması, ağ kesintisi) havuzdan verilmeden önce yenilenir.
+    pool = AsyncConnectionPool(
+        S.database_url,
+        min_size=1,
+        max_size=int(env("DC_DB_POOL_MAX", "10")),
+        timeout=float(env("DC_DB_POOL_TIMEOUT", "30")),
+        open=False,
+        check=AsyncConnectionPool.check_connection,
+        kwargs={"row_factory": dict_row},
+    )
     await pool.open()
 
 
@@ -211,10 +223,35 @@ class tx:
 
 
 async def run_migrations(path: str):
-    with open(path, encoding="utf-8") as f:
-        sql = f.read()
+    """Tek dosya VEYA dizin (adına göre sıralı *.sql) uygular.
+
+    - Tüm işlem tek transaction'da ve `pg_advisory_xact_lock` altında yürür: aynı anda açılan iki worker
+      migration'ı yarıştırmaz (CREATE TABLE IF NOT EXISTS yarışı), biri bekler.
+    - `schema_migrations` her dosyanın checksum'ını tutar; değişmeyen dosya atlanır, değişen dosya yeniden uygulanır
+      (migration dosyaları idempotent yazılmıştır: IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
+    - Hata olursa tüm işlem geri alınır.
+    """
+    p = pathlib.Path(path)
+    files = sorted(p.glob("*.sql")) if p.is_dir() else [p]
     async with pool.connection() as c:
-        await c.execute(sql)
+        await c.execute("SELECT pg_advisory_xact_lock(hashtextextended('dentacore:migrate', 0))")
+        await c.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                 version    TEXT PRIMARY KEY,
+                 checksum   TEXT NOT NULL,
+                 applied_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
+        for f in files:
+            sql = f.read_text(encoding="utf-8")
+            digest = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+            cur = await c.execute("SELECT checksum FROM schema_migrations WHERE version=%s", (f.name,))
+            row = await cur.fetchone()
+            if row and row["checksum"] == digest:
+                continue
+            await c.execute(sql)
+            await c.execute(
+                """INSERT INTO schema_migrations (version, checksum) VALUES (%s, %s)
+                   ON CONFLICT (version) DO UPDATE SET checksum=EXCLUDED.checksum, applied_at=now()""",
+                (f.name, digest))
 
 
 async def patient(pid: int) -> dict:
@@ -279,3 +316,54 @@ async def add_alert(pid: int | None, kind: str, detail: str, clinic_id: int | No
             clinic_id = 1
     r = await q1("INSERT INTO alerts (clinic_id, patient_id, kind, detail) VALUES (%s,%s,%s,%s) RETURNING id", clinic_id, pid, kind, detail)
     return r["id"]
+
+
+# ---------------- küme genelinde koordinasyon (Redis'e bağımlı değil) ----------------
+def instance_id() -> str:
+    """Bu süreci günlüklerde / kilit sahibi olarak ayırt eder (host:pid)."""
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+class try_lock:
+    """PostgreSQL `pg_try_advisory_xact_lock` ile küme genelinde karşılıklı dışlama.
+
+    `async with try_lock("anahtar") as lk:` -> `lk.acquired` False ise başka bir worker kilidi tutuyordur; iş atlanır.
+    Kilit transaction ömrüne bağlıdır: blok biterken ya da süreç/bağlantı ölürse PostgreSQL otomatik serbest bırakır
+    (takılı kalan kilit oluşmaz). Blok boyunca havuzdan bir bağlantı tutulur.
+    """
+
+    def __init__(self, key: str):
+        self.key = key
+        self.acquired = False
+        self._cm = None
+
+    async def __aenter__(self):
+        self._cm = pool.connection()
+        conn = await self._cm.__aenter__()
+        try:
+            cur = await conn.execute("SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0)) AS ok", (self.key,))
+            self.acquired = bool((await cur.fetchone())["ok"])
+        except BaseException:
+            await self._cm.__aexit__(*sys.exc_info())
+            raise
+        return self
+
+    async def __aexit__(self, et, ev, tb):
+        return await self._cm.__aexit__(et, ev, tb)
+
+
+async def heartbeat_ok(name: str) -> None:
+    """Sağlık uçlarının okuduğu "son başarılı çalışma" kaydı (küme genelinde, tüm worker'lar için görünür)."""
+    await q(
+        """INSERT INTO system_heartbeat (name, instance, last_ok_at) VALUES (%s, %s, now())
+           ON CONFLICT (name) DO UPDATE SET instance=EXCLUDED.instance, last_ok_at=now()""",
+        name, instance_id())
+
+
+async def heartbeat_error(name: str, err: BaseException) -> None:
+    """Hata kaydı: yalnızca hata sınıfı ve rakamları maskelenmiş kısa ileti tutulur (sağlık verisi sızmaz)."""
+    msg = f"{type(err).__name__}: {re.sub(r'[0-9]{6,}', '***', str(err))[:160]}"
+    await q(
+        """INSERT INTO system_heartbeat (name, instance, last_error, last_error_at) VALUES (%s, %s, %s, now())
+           ON CONFLICT (name) DO UPDATE SET instance=EXCLUDED.instance, last_error=EXCLUDED.last_error, last_error_at=now()""",
+        name, instance_id(), msg)

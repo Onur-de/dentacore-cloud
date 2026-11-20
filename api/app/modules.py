@@ -10,8 +10,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import wa
-from .core import S, add_alert, add_consent, enc, env, mask_phone, patient, q, q1, sign
+from . import inbox, wa
+from .core import S, add_alert, add_consent, enc, env, heartbeat_error, heartbeat_ok, instance_id, mask_phone, patient, q, q1, sign, try_lock
 from .router import normalize
 
 log = logging.getLogger("modules")
@@ -71,28 +71,72 @@ async def alert_doctor(phone: str, text: str, pid: int | None, kind: str, clinic
 
 
 # ================= 1) Randevu hatırlatma (no-show önleme) =================
-async def send_reminders(clinic_id: int | None = None, now_dt: datetime | None = None, respect_hours: bool = True) -> int:
-    ref_now = (now_dt if now_dt.tzinfo else now_dt.replace(tzinfo=TZ)) if now_dt else now()
-    sql = """SELECT a.id, a.clinic_id, a.starts_at, a.patient_id, c.working_hours_json
-             FROM appointments a
-             JOIN clinics c ON c.id = a.clinic_id
-             WHERE a.status='booked' AND a.reminder_sent_at IS NULL AND a.patient_id IS NOT NULL
-               AND a.starts_at BETWEEN %s + interval '20 hours' AND %s + interval '28 hours'"""
-    args: list = [ref_now, ref_now]
+CLAIM_LEASE_MIN = int(env("DC_CLAIM_LEASE_MINUTES", "10"))  # gönderim sahiplenme süresi = başarısız gönderimde yeniden deneme bekleme süresi
+CLAIM_BATCH = int(env("DC_CLAIM_BATCH", "20"))              # tek seferde sahiplenilen satır (lease'in batch sürerken dolmaması için küçük)
+
+_REMINDER_CLAIM_SQL = """
+WITH due AS (
+  SELECT a.id FROM appointments a
+  WHERE a.status='booked' AND a.reminder_sent_at IS NULL AND a.patient_id IS NOT NULL
+    AND a.starts_at BETWEEN %s + interval '20 hours' AND %s + interval '28 hours'
+    AND (a.reminder_claimed_at IS NULL OR a.reminder_claimed_at < now() - make_interval(mins => %s))
+    AND a.id <> ALL(%s::bigint[])
+    {clinic_filter}
+  ORDER BY a.starts_at
+  FOR UPDATE OF a SKIP LOCKED
+  LIMIT %s)
+UPDATE appointments a SET reminder_claimed_at=now(), reminder_claimed_by=%s
+FROM due, clinics c
+WHERE a.id = due.id AND c.id = a.clinic_id
+RETURNING a.id, a.clinic_id, a.starts_at, a.patient_id, c.working_hours_json
+"""
+
+
+async def _claim_reminders(ref_now: datetime, clinic_id: int | None, wid: str, exclude: list[int]) -> list[dict]:
+    args: list = [ref_now, ref_now, CLAIM_LEASE_MIN, exclude]
+    clinic_filter = ""
     if clinic_id is not None:
-        sql += " AND a.clinic_id=%s"
+        clinic_filter = "AND a.clinic_id=%s"
         args.append(clinic_id)
-    rows = await q(sql, *args)
+    args += [CLAIM_BATCH, wid]
+    return await q(_REMINDER_CLAIM_SQL.format(clinic_filter=clinic_filter), *args)  # nosec B608  # noqa: S608
+
+
+async def send_reminders(clinic_id: int | None = None, now_dt: datetime | None = None, respect_hours: bool = True) -> int:
+    """Randevu hatırlatması. "Önce sahiplen, sonra gönder": iki worker aynı randevuya aynı anda gönderemez.
+
+    - Sahiplenme (reminder_claimed_*) tek SQL'de, FOR UPDATE SKIP LOCKED ile yapılır; Redis gerekmez.
+    - Gönderim başarılıysa reminder_sent_at yazılır. Başarısızsa sahiplenme KALIR: lease (CLAIM_LEASE_MIN dk) dolunca
+      yeniden denenir (Meta 429/5xx'e karşı doğal geri çekilme). Çalışma saati dışındakiler hemen serbest bırakılır.
+    - Çöken worker: lease dolunca başka worker devralır. Gönderimden sonra, işaretlemeden önce çökerse dar bir pencerede
+      mükerrer gönderim mümkündür (at-least-once; Meta gönderim idempotency anahtarı sunmaz).
+    """
+    ref_now = (now_dt if now_dt.tzinfo else now_dt.replace(tzinfo=TZ)) if now_dt else now()
+    wid = instance_id()
     sent_cnt = 0
-    for r in rows:
-        if respect_hours and not is_within_work_hours(ref_now, r.get("working_hours_json")):
-            continue
-        p = await patient(r["patient_id"])
-        d, t = fmt_dt(r["starts_at"])
-        res = await wa.send_template(p["phone"], TPL["reminder"], [d, t], quick_reply_payloads=[f"RMD_OK_{r['id']}", f"RMD_CHG_{r['id']}"])
-        if not (isinstance(res, dict) and res.get("error")):
-            await q("UPDATE appointments SET reminder_sent_at=%s WHERE id=%s AND reminder_sent_at IS NULL", ref_now, r["id"])
-            sent_cnt += 1
+    skip: list[int] = []
+    while True:
+        rows = await _claim_reminders(ref_now, clinic_id, wid, skip)
+        if not rows:
+            break
+        for r in rows:
+            skip.append(int(r["id"]))
+            if respect_hours and not is_within_work_hours(ref_now, r.get("working_hours_json")):
+                await q("UPDATE appointments SET reminder_claimed_at=NULL, reminder_claimed_by=NULL WHERE id=%s AND reminder_claimed_by=%s",
+                        r["id"], wid)
+                continue
+            ok = False
+            try:
+                p = await patient(r["patient_id"])
+                d, t = fmt_dt(r["starts_at"])
+                res = await wa.send_template(p["phone"], TPL["reminder"], [d, t], quick_reply_payloads=[f"RMD_OK_{r['id']}", f"RMD_CHG_{r['id']}"])
+                ok = not (isinstance(res, dict) and res.get("error"))
+            except Exception:
+                log.exception("hatırlatma gönderilemedi appt=%s", r["id"])
+            if ok:
+                await q("""UPDATE appointments SET reminder_sent_at=%s, reminder_claimed_at=NULL, reminder_claimed_by=NULL
+                           WHERE id=%s AND reminder_sent_at IS NULL""", ref_now, r["id"])
+                sent_cnt += 1
     return sent_cnt
 
 
