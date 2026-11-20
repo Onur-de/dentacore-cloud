@@ -36,11 +36,29 @@ if not os.environ.get("DATA_ENCRYPTION_KEY"):
     from cryptography.fernet import Fernet
     os.environ["DATA_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 
-psycopg = pytest.importorskip("psycopg")
-pytest.importorskip("psycopg_pool")
+REQUIRE_PG = os.environ.get("DC_REQUIRE_PG") == "1"  # =1: PG yoksa/atlanacaksa test ATLANMAZ, BAŞARISIZ olur (CI'da sessiz atlamayı önler)
+
+
+def _unavailable(reason: str, *, module_level: bool = False):
+    if REQUIRE_PG:
+        pytest.fail(f"DC_REQUIRE_PG=1 ama PG testleri çalıştırılamıyor: {reason}", pytrace=False)
+    pytest.skip(reason, allow_module_level=module_level)
+
+
+# Gerçek psycopg gerekir. tests/test_offline.py psycopg'yi yüklenemediğinde (ör. Windows Uygulama Denetimi DLL'i engelliyor)
+# boş taslakla değiştirir; bu durumda `connect` yoktur ve testler net bir sebeple atlanır.
+try:
+    import psycopg
+    import psycopg_pool  # noqa: F401
+except ImportError as _e:
+    psycopg = None
+    _unavailable(f"psycopg yüklenemedi: {_e}", module_level=True)
+if not hasattr(psycopg, "connect"):
+    _unavailable("psycopg gerçek değil (test_offline taslağı ya da yüklenemedi)", module_level=True)
 
 from api.app import core, inbox, modules  # noqa: E402
 
+core.S.database_url = DSN  # başka bir test modülü core'u daha önce içe aktarmış olabilir; DSN'i açıkça ayarla
 MIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "api" / "app" / "migrations"
 DB_NAME = urllib.parse.urlparse(DSN).path.lstrip("/")
 
@@ -62,7 +80,7 @@ async def _fresh_db(apply_migrations: bool = True) -> None:
     if not DB_NAME.endswith("_test"):
         pytest.fail(f"Güvenlik: test DB adı '_test' ile bitmeli, gelen: {DB_NAME}")
     if not _pg_reachable():
-        pytest.skip("Test PostgreSQL erişilemiyor (docker `dentacore-pg-test`).")
+        _unavailable("Test PostgreSQL erişilemiyor (docker `dentacore-pg-test`).")
     await core.db_open()
     await _exec("DROP SCHEMA public CASCADE")
     await _exec("CREATE SCHEMA public")
@@ -418,7 +436,7 @@ def _wa_body(msg_id: str, phone_id: str = "PID-P1") -> bytes:
 
 def test_http_webhook_is_persisted_deduped_ready_and_503_on_persist_failure(monkeypatch):
     if not _pg_reachable():
-        pytest.skip("Test PostgreSQL erişilemiyor (docker `dentacore-pg-test`).")
+        _unavailable("Test PostgreSQL erişilemiyor (docker `dentacore-pg-test`).")
     if not DB_NAME.endswith("_test"):
         pytest.fail("Güvenlik: test DB adı '_test' ile bitmeli")
     pytest.importorskip("httpx")
