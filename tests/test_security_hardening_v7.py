@@ -410,6 +410,41 @@ def test_dockerfiles_default_to_production_mode(rel):
     assert not any("DC_ALLOW_HTTP_LOCAL" in ln for ln in env_lines), f"{rel}: imajda DC_ALLOW_HTTP_LOCAL set edilmemeli"
 
 
+def test_int64_overflow_path_id_returns_422_not_500(env):
+    """Schemathesis 64-bit üstü path ID (2^63) SQLite OverflowError ile 500 değil 422 dönmeli."""
+    hq, hdr = _login(*HQ_CREDS)
+    big = 9223372036854775808
+    for path in (f"/app/api/alerts/{big}/ack", f"/app/api/patients/{big}/archive"):
+        r = hq.post(path, headers=hdr)
+        assert r.status_code == 422, f"{path}: beklenen 422, gelen {r.status_code} ({r.text})"
+
+
+def test_campaign_track_empty_idempotency_and_surrogate_no_500(env):
+    """Boş idempotency_key='' tekrarlı çağrısı ve surrogate Unicode asla HTTP 500 vermemeli."""
+    _fresh_limiter()
+    c = _client()
+    body = {"campaign_id": None, "campaign_code": None, "event_type": "click", "idempotency_key": ""}
+    r1 = c.post("/api/campaigns/track", json=body)
+    r2 = c.post("/api/campaigns/track", json=body)
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+    r_sur = c.post(
+        "/api/campaigns/track",
+        content=b'{"event_type":"click","utm_source":"\\ud800"}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert r_sur.status_code == 422, r_sur.text
+
+
+def test_settings_bounds_and_empty_name_no_500(env):
+    """POST /app/api/settings sınır dışı slot_step_min veya boş klinik adında 500 değil 422 dönmeli."""
+    hq, hdr = _login(*HQ_CREDS)
+    r_big = hq.post("/app/api/settings", json={"name": "Merkez", "slot_step_min": 9223372036854775808}, headers=hdr)
+    assert r_big.status_code == 422, r_big.text
+    r_empty = hq.post("/app/api/settings", json={"name": ""}, headers=hdr)
+    assert r_empty.status_code == 422, r_empty.text
+
+
 # ---------------------------------------------------------------------------
 # 10) RATE LIMIT TESTLERİ (EN SONDA)
 # ---------------------------------------------------------------------------

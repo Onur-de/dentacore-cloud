@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.repository == 'Onur-de/dentacore-cloud'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
