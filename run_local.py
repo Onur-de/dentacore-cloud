@@ -1080,6 +1080,16 @@ app = FastAPI(title="DentaCore Local v5.0", docs_url=None, redoc_url=None,
 app.add_middleware(sec.SecurityHeadersMiddleware)
 
 
+@app.exception_handler(OverflowError)
+async def _handle_int64_overflow(request: Request, exc: OverflowError):
+    return JSONResponse(status_code=422, content={"detail": "Sayısal değer geçerli 64-bit tam sayı sınırlarının dışında"})
+
+
+@app.exception_handler(UnicodeEncodeError)
+async def _handle_unicode_encode_error(request: Request, exc: UnicodeEncodeError):
+    return JSONResponse(status_code=422, content={"detail": "Geçersiz karakter kodlaması (UTF-8 dışı karakter)"})
+
+
 def _get_sender_lock(key: str) -> asyncio.Lock:
     lk = _SENDER_LOCKS.get(key)
     if lk is None:
@@ -5662,14 +5672,14 @@ def get_settings(u: dict = Depends(ANY)):
 
 
 class SettingsIn(BaseModel):
-    name: str
-    city: str = "İstanbul"
-    address: str = ""
-    phone: str = ""
-    autopilot_name: str = "DentaCore Asistan"
-    default_lang: str = "tr"
-    slot_step_min: int = 15
-    google_review_url: str = ""
+    name: str = Field(..., min_length=1, max_length=120)
+    city: str = Field("İstanbul", max_length=80)
+    address: str = Field("", max_length=300)
+    phone: str = Field("", max_length=40)
+    autopilot_name: str = Field("DentaCore Asistan", max_length=80)
+    default_lang: str = Field("tr", max_length=12)
+    slot_step_min: int = Field(15, ge=5, le=120)
+    google_review_url: str = Field("", max_length=400)
     working_hours_json: str | None = None
     buffer_min: int = Field(0, ge=0, le=120)
     ai_custom_rules_json: str | None = None
@@ -5680,6 +5690,8 @@ class SettingsIn(BaseModel):
 @app.post("/app/api/settings")
 def save_settings(b: SettingsIn, u: dict = Depends(OWNER)):
     cid = u["clinic_id"]
+    if not b.name.strip():
+        raise HTTPException(422, "Klinik adı boş olamaz")
     rev_url = (b.google_review_url or "").strip()
     if rev_url and not re.match(r"^https?://", rev_url, re.IGNORECASE):
         raise HTTPException(400, "Google değerlendirme bağlantısı http:// veya https:// ile başlamalıdır")

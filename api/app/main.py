@@ -114,6 +114,16 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(panel.router)
 
 
+@app.exception_handler(OverflowError)
+async def _handle_int64_overflow(request: Request, exc: OverflowError):
+    return JSONResponse(status_code=422, content={"detail": "Sayısal değer geçerli 64-bit tam sayı sınırlarının dışında"})
+
+
+@app.exception_handler(UnicodeEncodeError)
+async def _handle_unicode_encode_error(request: Request, exc: UnicodeEncodeError):
+    return JSONResponse(status_code=422, content={"detail": "Geçersiz karakter kodlaması (UTF-8 dışı karakter)"})
+
+
 def require_admin(token: str | None):
     if not token or not hmac.compare_digest(token, S.admin_token):
         raise HTTPException(401, "yetkisiz")

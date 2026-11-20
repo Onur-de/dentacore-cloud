@@ -660,8 +660,8 @@ class AssignGroupIn(BaseModel):
 
 
 class CampaignTrackIn(BaseModel):
-    campaign_id: int | None = None
-    campaign_code: str | None = None
+    campaign_id: int | None = Field(default=None, ge=1, le=9_223_372_036_854_775_807)
+    campaign_code: str | None = Field(default=None, max_length=80)
     event_type: Literal["click", "form_start", "form_submit"] = "click"
     source: str | None = None
     utm_source: str = ""
@@ -1177,11 +1177,12 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
         v_hash = _visitor_hash(request, campaign_id)
         t_now = iso_now()
 
+        idem = (idempotency_key or "").strip() or None
         with db_lock, db() as c:
-            if idempotency_key:
+            if idem:
                 dup = c.execute(
                     "SELECT id FROM campaign_events WHERE clinic_id=? AND idempotency_key=?",
-                    (clinic_id, idempotency_key),
+                    (clinic_id, idem),
                 ).fetchone()
                 if dup:
                     return {"ok": True, "dedup": True, "is_bot": bool(bot), "is_unique": False, "event_id": dup["id"]}
@@ -1192,16 +1193,26 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
             ).fetchone()
             is_uniq = 1 if (not bot and not prev_unique) else 0
 
-            cur = c.execute(
-                """INSERT INTO campaign_events
-                   (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,click_id,
-                    visitor_hash,is_bot,is_unique,patient_id,appointment_id,idempotency_key,user_agent_summary,created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    clinic_id, campaign_id, event_type, source, utm_source[:80], utm_medium[:80], utm_campaign[:120],
-                    click_id[:120], v_hash, bot, is_uniq, patient_id, appointment_id, idempotency_key, ua[:120], t_now,
-                ),
-            )
+            try:
+                cur = c.execute(
+                    """INSERT INTO campaign_events
+                       (clinic_id,campaign_id,event_type,source,utm_source,utm_medium,utm_campaign,click_id,
+                        visitor_hash,is_bot,is_unique,patient_id,appointment_id,idempotency_key,user_agent_summary,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        clinic_id, campaign_id, event_type, source or "website", (utm_source or "")[:80], (utm_medium or "")[:80], (utm_campaign or "")[:120],
+                        (click_id or "")[:120], v_hash, bot, is_uniq, patient_id, appointment_id, idem, ua[:120], t_now,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                if idem:
+                    dup2 = c.execute(
+                        "SELECT id FROM campaign_events WHERE clinic_id=? AND idempotency_key=?",
+                        (clinic_id, idem),
+                    ).fetchone()
+                    if dup2:
+                        return {"ok": True, "dedup": True, "is_bot": bool(bot), "is_unique": False, "event_id": dup2["id"]}
+                raise HTTPException(409, "Kampanya olayı kaydedilemedi (mükerrer/geçersiz kayıt)") from None
             ev_id = cur.lastrowid
             if campaign_id and event_type == "click" and not bot:
                 c.execute("UPDATE campaigns SET clicks = clicks + 1 WHERE id=? AND clinic_id=?", (campaign_id, clinic_id))
