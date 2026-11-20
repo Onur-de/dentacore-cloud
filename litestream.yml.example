@@ -1,0 +1,75 @@
+# DentaCore — Litestream v0.5.x sürekli SQLite yedekleme şablonu (benbjohnson/litestream, Apache-2.0)
+#
+# Bu dosya bir ŞABLONDUR. Gerçek anahtarları BU DOSYAYA YAZMAYIN; ortam değişkeniyle verin.
+# Litestream yapılandırmadaki ${DEGISKEN} ifadelerini ortamdan genişletir.
+# Şema, litestream/litestream:0.5.18 imajında `litestream databases -config` ile doğrulanmıştır.
+#
+# ---------------------------------------------------------------------------
+# KISA KURULUM (Türkçe)
+# ---------------------------------------------------------------------------
+# 1) Litestream'i sunucuya kurun (https://litestream.io/install/).
+# 2) Cloudflare R2 (veya AWS S3) üzerinde ÖZEL (public olmayan) bir kova açın ve yalnızca o kovaya
+#    yazma/okuma yetkili bir API anahtarı üretin. Kovada sürümleme ve yaşam döngüsü kuralı açın.
+# 3) Bu dosyayı `litestream.yml` olarak kopyalayın ve aşağıdaki ortam değişkenlerini tanımlayın:
+#      DC_DB_PATH                    -> uygulamanın SQLite dosya yolu (örn. /data/dentacore_local.db)
+#      LITESTREAM_BUCKET             -> kova adı
+#      R2_ACCOUNT_ID                 -> Cloudflare hesap kimliği (yalnız R2 için)
+#      LITESTREAM_ACCESS_KEY_ID      -> kova erişim anahtarı   (Litestream bu adı KENDİSİ okur)
+#      LITESTREAM_SECRET_ACCESS_KEY  -> kova gizli anahtarı    (Litestream bu adı KENDİSİ okur)
+#    Anahtarlar bilinçli olarak yapılandırma dosyasında YOKTUR: tanımsız bir ${DEGISKEN} boş metne
+#    genişleyip ortamdaki gerçek anahtarı ezebilirdi. Bu değerleri `.env` veya sunucu gizli
+#    yöneticisinde tutun; git'e ASLA eklemeyin.
+# 4) Uygulamayı Litestream altında çalıştırın (süreç yönetimi ve temiz kapanış için):
+#      litestream replicate -config litestream.yml -exec "python run_local.py"
+# 5) Geri yükleme (felaket anında). Canlı dosyanın ÜSTÜNE yazmayın; önce yeni dosyaya geri yükleyin,
+#    bütünlüğünü doğrulayın, sonra uygulama kapalıyken yerine koyun:
+#      litestream restore -config litestream.yml -o /data/dentacore_restored.db /data/dentacore_local.db
+#    Belirli bir ana dönmek için: ... -timestamp 2026-01-31T09:30:00Z   (veya -txid <TXID>)
+#    Önizleme için: litestream restore -dry-run ...
+# 6) Düzenli olarak geri yükleme tatbikatı yapın; test edilmemiş yedek, yedek sayılmaz.
+#
+# v0.5.x NOTLARI (v0.3.x şablonundan farklar)
+# - Her veritabanı TEK bir hedefe (`replica:`) yedeklenir; `replicas:` listesi ve çift replikasyon kullanılmaz.
+# - `retention` ve `snapshot-interval` kopya içinde DEĞİL, aşağıdaki kök `snapshot:` bloğundadır.
+#   Eski şablondaki kopya içi `retention: 72h` v0.5.x'te uygulanmaz (varsayılan 24h geçerli kalırdı).
+# - Süre değerleri s / m / h ile yazılır (gün, hafta, yıl yoktur): 72h gibi.
+#
+# ŞİFRELEME NOTU
+# - Aktarım TLS ile yapılır. Kova içinde bekleyen veri R2/S3 tarafında sunucu taraflı şifrelenir
+#   (R2 varsayılan olarak şifreler; S3'te SSE-S3 veya SSE-KMS'yi kovada açın).
+# - Litestream v0.5.x kendi istemci taraflı (age) şifrelemesini sunmaz; bu şablonda bu yüzden yoktur.
+# - Hasta telefonu ve anamnez alanları uygulama katmanında zaten Fernet ile şifreli saklanır.
+# - Replika, veritabanının ham SQLite sayfalarını taşır; kova erişimini en az yetkiyle sınırlayın.
+# - `.local_secrets.json` / DATA_ENCRYPTION_KEY yedeği AYRI ve güvenli bir yerde tutulmalıdır;
+#   anahtar kaybolursa geri yüklenen şifreli alanlar açılamaz.
+#
+# SQLite WAL kipi gereklidir (DentaCore zaten WAL kullanır: dentacore_local.db-wal / -shm).
+
+# Replikasyon izleme için isteğe bağlı yerel metrik uç noktası (yalnız 127.0.0.1'e açın)
+addr: "127.0.0.1:9090"
+
+# Anlık görüntü sıklığı ve saklama süresi (tüm veritabanları için geçerli, v0.5.x kök blok)
+snapshot:
+  interval: 6h       # düzenli tam anlık görüntü (geri yükleme süresini kısaltır)
+  retention: 72h     # eski anlık görüntü ve LTX dosyalarını 72 saat sonra temizle
+
+dbs:
+  - path: ${DC_DB_PATH}
+
+    # --- Seçenek A: Cloudflare R2 (S3 uyumlu) ---
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: dentacore/dentacore_local.db
+      endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+      region: auto
+      force-path-style: true
+      sync-interval: 1s        # değişiklikler yaklaşık saniyede bir gönderilir
+
+    # --- Seçenek B: AWS S3 (A bloğunun YERİNE kullanın; bir veritabanı tek `replica:` alır) ---
+    # replica:
+    #   type: s3
+    #   bucket: ${LITESTREAM_BUCKET}
+    #   path: dentacore/dentacore_local.db
+    #   region: eu-central-1
+    #   sync-interval: 1s

@@ -26,7 +26,7 @@
   --amber-soft: #FFF7ED;
   --amber-border: #FDBA74;
   --bg-canvas: #FAFDFC;
-  --bg-surface: #FFFFFF;
+  --bg-surface: #FCFEFD;
   --bg-subtle: #F1F6F6;
   --bg-code: #0D2D4D;
   --ink: #0E1B2E;
@@ -34,9 +34,9 @@
   --muted: #46576B;
   --on-dark: #F5F8FC;
   --on-dark-muted: #CBD5E1;
-  --on-cta: #FFFFFF;
+  --on-cta: #F8FCFB;
   --border: #E2E8F0;
-  --border-field: #64748B;
+  --border-field: #4F686C;
   --border-dark: #1E4468;
   --danger: #B91C1C;
   --danger-bg: #FEE2E2;
@@ -210,7 +210,7 @@ code {
   display: inline-flex;
   align-items: center;
   min-height: 36px;
-  padding: var(--space-1) 6px;
+  padding: var(--space-1);
   white-space: nowrap;
   transition: color 0.15s ease;
 }
@@ -280,7 +280,7 @@ code {
 .btn-lg { min-height: 48px; padding: 12px var(--space-3); font-size: 15.5px; }
 .btn-cta { background: var(--cta); color: var(--on-cta); box-shadow: var(--shadow-btn); }
 .btn-cta:hover { background: var(--cta-hover); box-shadow: var(--shadow-btn-cta); }
-.btn-ghost { background: var(--bg-surface); border-color: var(--border-field); color: var(--navy); }
+.btn-ghost { background: transparent; border-color: var(--border-field); color: var(--navy); }
 .btn-ghost:hover { background: var(--teal-mint); border-color: var(--teal); color: var(--teal-ink); }
 .btn:disabled { opacity: 0.58; cursor: not-allowed; box-shadow: none; transform: none; }
 
@@ -970,7 +970,7 @@ code {
   background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 12px;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--ink-2);
@@ -1022,7 +1022,7 @@ code {
 .foot-brand { display: flex; flex-direction: column; gap: 4px; }
 .foot-brand strong { color: var(--on-dark); font-size: 16px; }
 .foot-links { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.foot-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 6px; color: var(--teal-bright); font-weight: 600; }
+.foot-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px var(--space-1); color: var(--teal-bright); font-weight: 600; }
 
 @media (max-width: 960px) {
   .nav-links { display: none; }

@@ -1379,6 +1379,7 @@ def build_all() -> None:
     pure_landing = pure_landing.replace('<link rel="stylesheet" href="/static/site.css">', f"{font_link}\n<style>{site_css}</style>")
     pure_landing = pure_landing.replace('src="/static/favicon.svg"', f'src="{FAVICON_DATA_URI}"')
     pure_landing = pure_landing.replace('href="/app"', 'href="panel.html"')
+    pure_landing = pure_landing.replace('<a class="brand" href="/">', '<a class="brand" href="./">')
     pure_landing = pure_landing.replace('<script src="/static/landing.js" defer></script>', f"<script>{engine_js}</script>\n<script>{site_js}</script>")
     pure_landing = pure_landing.replace('<script src="/static/landing.js"></script>', f"<script>{engine_js}</script>\n<script>{site_js}</script>")
     pure_landing = pure_landing.replace('<script src="/static/site.js" defer></script>', f"<script>{engine_js}</script>\n<script>{site_js}</script>")
@@ -1440,7 +1441,7 @@ def build_all() -> None:
     (docs_dir / "app" / "manifest.webmanifest").write_text(static_manifest, encoding="utf-8")
     wa_dir = REPO_ROOT / "WhatsApp_Gonderim"
     if wa_dir.exists():
-        wa_landing = pure_landing.replace('href="panel.html"', 'href="2_Birebir_Yonetim_Paneli.html"')
+        wa_landing = pure_landing.replace('href="panel.html"', 'href="2_Birebir_Yonetim_Paneli.html"').replace('<a class="brand" href="./">', '<a class="brand" href="1_Birebir_Tanitim_Sitesi.html">')
         (wa_dir / "1_Birebir_Tanitim_Sitesi.html").write_text(wa_landing, encoding="utf-8")
         (wa_dir / "2_Birebir_Yonetim_Paneli.html").write_text(pure_panel, encoding="utf-8")
     print("Built standalone cloud demo docs:", docs_dir)

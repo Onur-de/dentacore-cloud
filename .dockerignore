@@ -1,0 +1,24 @@
+# Canlı veri ve sırlar imaja asla girmez (CWE-538). Kök Dockerfile `COPY . .` yapar,
+# bu dosya olmadan .local_secrets.json ve dentacore_local.db imaj katmanına kopyalanırdı.
+.env
+.env.*
+!.env.example
+.local_secrets.json
+dentacore_local.db
+dentacore_local.db-*
+*.db
+*.db-*
+*.pem
+*.key
+
+# Çalışma zamanında gerekmeyen geliştirme çıktıları
+.git
+.github
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+tests
+backups
+backup
+node_modules

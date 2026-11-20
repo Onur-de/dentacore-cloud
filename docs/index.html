@@ -58,7 +58,7 @@
   --amber-soft: #FFF7ED;
   --amber-border: #FDBA74;
   --bg-canvas: #FAFDFC;
-  --bg-surface: #FFFFFF;
+  --bg-surface: #FCFEFD;
   --bg-subtle: #F1F6F6;
   --bg-code: #0D2D4D;
   --ink: #0E1B2E;
@@ -66,9 +66,9 @@
   --muted: #46576B;
   --on-dark: #F5F8FC;
   --on-dark-muted: #CBD5E1;
-  --on-cta: #FFFFFF;
+  --on-cta: #F8FCFB;
   --border: #E2E8F0;
-  --border-field: #64748B;
+  --border-field: #4F686C;
   --border-dark: #1E4468;
   --danger: #B91C1C;
   --danger-bg: #FEE2E2;
@@ -242,7 +242,7 @@ code {
   display: inline-flex;
   align-items: center;
   min-height: 36px;
-  padding: var(--space-1) 6px;
+  padding: var(--space-1);
   white-space: nowrap;
   transition: color 0.15s ease;
 }
@@ -312,7 +312,7 @@ code {
 .btn-lg { min-height: 48px; padding: 12px var(--space-3); font-size: 15.5px; }
 .btn-cta { background: var(--cta); color: var(--on-cta); box-shadow: var(--shadow-btn); }
 .btn-cta:hover { background: var(--cta-hover); box-shadow: var(--shadow-btn-cta); }
-.btn-ghost { background: var(--bg-surface); border-color: var(--border-field); color: var(--navy); }
+.btn-ghost { background: transparent; border-color: var(--border-field); color: var(--navy); }
 .btn-ghost:hover { background: var(--teal-mint); border-color: var(--teal); color: var(--teal-ink); }
 .btn:disabled { opacity: 0.58; cursor: not-allowed; box-shadow: none; transform: none; }
 
@@ -1002,7 +1002,7 @@ code {
   background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 12px;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--ink-2);
@@ -1054,7 +1054,7 @@ code {
 .foot-brand { display: flex; flex-direction: column; gap: 4px; }
 .foot-brand strong { color: var(--on-dark); font-size: 16px; }
 .foot-links { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.foot-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 6px; color: var(--teal-bright); font-weight: 600; }
+.foot-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px var(--space-1); color: var(--teal-bright); font-weight: 600; }
 
 @media (max-width: 960px) {
   .nav-links { display: none; }
@@ -1139,7 +1139,7 @@ code {
           "name": "Mevcut WhatsApp klinik numaramız değişir mi?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Hayır. Mevcut klinik hattınız resmi Meta WhatsApp Cloud API üzerinden bağlanır; hastalar aynı numaraya yazmaya devam eder."
+            "text": "Hayır. Mevcut hattınız resmi Meta WhatsApp Cloud API ile bağlanır; hastalar aynı numaraya yazar."
           }
         },
         {
@@ -1147,7 +1147,7 @@ code {
           "name": "Yapay zeka hastaya teşhis koyar veya fiyat verir mi?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Koymaz ve vermez. Teşhis, ilaç önerisi ve hekim onaysız fiyat cümleleri çıkış filtresinde engellenir; hasta muayene randevusuna yönlendirilir."
+            "text": "Koymaz ve vermez. Teşhis, ilaç önerisi ve hekim onaysız fiyat cümleleri çıkış filtresinde engellenir."
           }
         },
         {
@@ -1155,7 +1155,7 @@ code {
           "name": "Hasta verileri nerede saklanır ve kimler görebilir?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Kendi sunucunuzda veya Türkiye lokasyonlu özel sunucuda çalışır. Telefon ve anamnez yanıtları şifreli tutulur; her görüntüleme hash zincirli denetim kaydına yazılır."
+            "text": "Kendi veya Türkiye lokasyonlu özel sunucunuzda çalışır. Telefon ve anamnez şifreli tutulur; her görüntüleme denetim zincirine yazılır."
           }
         },
         {
@@ -1163,7 +1163,7 @@ code {
           "name": "iPhone ve Android telefon takvimleriyle nasıl eşitlenir?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Her şube için imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olunca yeni randevular ve 60 ile 15 dakikalık uyarılar telefona düşer."
+            "text": "Her şube için imzalı webcal ve Google Takvim bağlantısı üretilir. Abone olunca randevular ve uyarılar telefona düşer."
           }
         },
         {
@@ -1171,7 +1171,7 @@ code {
           "name": "Birden fazla şubesi olan zincir klinikler tek yerden yönetilir mi?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Evet. Hasta, kasa, envanter ve randevu verisi clinic_id ile şubeye göre ayrılır. Merkez yönetici tek tıkla şube değiştirir; yeni şubede giriş ve takvim teslim kartı hazır gelir."
+            "text": "Evet. Veri clinic_id ile şubeye göre ayrılır; merkez yönetici tek tıkla şube değiştirir."
           }
         },
         {
@@ -1179,7 +1179,7 @@ code {
           "name": "Kurulum ne kadar sürer ve eğitim gerekir mi?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar gelince aynı hafta devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsiz."
+            "text": "Klinik bilgileri geldikten sonra aynı hafta devreye alınır. Kurulum ve eğitim ilk ay ücretsiz."
           }
         }
       ]
@@ -1193,7 +1193,7 @@ code {
 
 <header class="site-nav">
   <div class="wrap nav-in">
-    <a class="brand" href="/">
+    <a class="brand" href="./">
       <img src="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%230A2540%22/%3E%3Cpath%20d%3D%22M20%2018c-5%200-8%204-8%2010%200%209%204%2020%208%2020%203%200%203-8%206-12%201-1%202-2%206-2s5%201%206%202c3%204%203%2012%206%2012%204%200%208-11%208-20%200-6-3-10-8-10-4%200-7%202-12%202s-8-2-12-2z%22%20fill%3D%22%230D9488%22/%3E%3Ccircle%20cx%3D%2246%22%20cy%3D%2218%22%20r%3D%225%22%20fill%3D%22%23EA580C%22/%3E%3C/svg%3E" alt="" width="32" height="32">
       <span>DentaCore</span>
     </a>
@@ -1359,21 +1359,21 @@ code {
             <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <h3>7/24 Çok Dilli Karşılama</h3>
           </div>
-          <p>WhatsApp ve Instagram mesajlarını 16 dilde karşılar. Konum, otopark, saat ve teyit sorularını ek yapay zekâ maliyeti olmadan yanıtlar; teşhis ve ilaç önerisini filtreler.</p>
+          <p>WhatsApp ve Instagram mesajlarını 16 dilde, ek yapay zekâ maliyeti olmadan karşılar. Konum, saat ve teyit sorularını yanıtlar; teşhis ve ilaç önerisini filtreler.</p>
         </article>
         <article class="pillar-card">
           <div class="mod-head">
             <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg>
             <h3>Boş Koltuk Doldurucu</h3>
           </div>
-          <p>İptal gelince bekleme listesindeki uygun hastalara sırayla teklif gider. İlk onaylayana randevu yazılır; çift rezervasyonu veritabanı kilidi engeller.</p>
+          <p>İptal gelince bekleme listesine teklif gider. İlk onaylayana randevu yazılır; çift rezervasyonu veritabanı kilidi engeller.</p>
         </article>
         <article class="pillar-card">
           <div class="mod-head">
             <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"/></svg>
             <h3>Kırmızı Bayraklı Anamnez</h3>
           </div>
-          <p>İşlemden önce hastaya 11 soruluk form gider: kan sulandırıcı, penisilin alerjisi, bifosfonat, diyabet, kalp, hamilelik. Riskli yanıt hekime anında düşer; KVKK onamı sürümle saklanır.</p>
+          <p>İşlemden önce 11 soruluk form gider: kan sulandırıcı, penisilin alerjisi, bifosfonat, diyabet, kalp, hamilelik. Riskli yanıt hekime anında düşer.</p>
         </article>
       </div>
 
@@ -1382,35 +1382,35 @@ code {
           <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 14l3-3 3 3 2-2 4 4"/></svg>
           <div>
             <h3>Röntgen ve Fotoğraf Kalite Denetimi</h3>
-            <p>Bulanık, karanlık veya düşük çözünürlüklü görseli tespit edip hastadan yenisini ister. Teşhis koymaz; hekimin ekranına yalnız net kare gelir.</p>
+            <p>Bulanık veya karanlık görseli tespit edip hastadan yenisini ister. Teşhis koymaz; hekime yalnız net kare gelir.</p>
           </div>
         </article>
         <article class="mod-item">
           <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0"/></svg>
           <div>
             <h3>İşlem Sonrası 2-24-72 Saat Takibi</h3>
-            <p>Cerrahi çekim veya implant sonrası 2, 24 ve 72. saatte ağrı skoru sorulur. 8 ve üzeri ağrı ya da durmayan kanama nöbetçi hekime alarm olur.</p>
+            <p>Çekim veya implant sonrası 2, 24 ve 72. saatte ağrı skoru sorulur. 8 ve üzeri ağrı ya da durmayan kanama nöbetçi hekime alarm olur.</p>
           </div>
         </article>
         <article class="mod-item">
           <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M22 19v-1a4 4 0 0 0-3-3.9"/></svg>
           <div>
             <h3>Uyuyan Hasta Geri Kazanımı</h3>
-            <p>Tedavi planı alıp 3 ila 6 aydır dönmeyen hastaya iletişim izni varsa nazik bir hatırlatma gider. Bekleyen planlı ciro görünür olur.</p>
+            <p>Planı alıp 3 ila 6 aydır dönmeyen hastaya, izni varsa, hatırlatma gider. Bekleyen planlı ciro görünür olur.</p>
           </div>
         </article>
         <article class="mod-item">
           <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6"/></svg>
           <div>
             <h3>Kasa ve Hekim Hak Edişi</h3>
-            <p>Hizmet, tahsilat, kalan alacak ve hekim payı kuruş hassasiyetinde hesaplanır. Finansal kayıt silinmez; yalnız gerekçeli iptal edilir.</p>
+            <p>Hizmet, tahsilat, alacak ve hekim payı kuruş hassasiyetinde hesaplanır. Kayıt silinmez, yalnız gerekçeli iptal edilir.</p>
           </div>
         </article>
         <article class="mod-item">
           <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/></svg>
           <div>
             <h3>Envanter ve Kritik Stok</h3>
-            <p>İmplant, kompozit ve anestezik stokları alt sınıra düştüğünde uyarı oluşur; her giriş çıkış personel imzasıyla kaydedilir.</p>
+            <p>Stok alt sınıra düşünce uyarı oluşur; her giriş çıkış personel imzasıyla kaydedilir.</p>
           </div>
         </article>
         <article class="mod-item">
@@ -1427,12 +1427,12 @@ code {
   <section class="sec surface-alt" id="takvim">
     <div class="wrap">
       <h2>iPhone, Android ve Google Takvim ile RFC 5545 güvenli senkronizasyon</h2>
-      <p class="sec-sub">Koltuk ve hekim çakışmasını veritabanı kilidi engeller. Her şubenin imzalı <code>webcal://</code> akışı hekimin telefonuna salt-okunur ve KVKK maskeli bağlanır.</p>
+      <p class="sec-sub">Koltuk çakışmasını veritabanı kilidi engeller. Şubenin imzalı <code>webcal://</code> akışı hekimin telefonuna salt-okunur ve KVKK maskeli bağlanır.</p>
 
       <div class="cal-grid">
         <article class="cal-card">
           <h3>iPhone (Apple Takvim · Tek Yönlü ICS)</h3>
-          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. Dış takvimde işlem adı veya anamnez görünmez; yalnızca maskeli baş harfler ve koltuk numarası yer alır.</p>
+          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. Dış takvimde yalnız maskeli baş harfler ve koltuk numarası görünür.</p>
           <ul>
             <li>60 dk ve 15 dk öncesinde çift <code>VALARM</code> bildirimi</li>
             <li>RFC 5545 <code>SEQUENCE</code> ve sabit <code>UID</code> ile iptal/saat güncellemesi (yenileme sıklığı iOS ayarlarına bağlıdır)</li>
@@ -1440,7 +1440,7 @@ code {
         </article>
         <article class="cal-card">
           <h3>Android (Google Takvim)</h3>
-          <p>Tüm klinik takvimine <code>google_subscribe_url</code> ile abone olunur; her randevu satırından tek tıkla Google Takvim etkinliği açılır.</p>
+          <p>Tüm takvime <code>google_subscribe_url</code> ile abone olunur; her randevu satırından Google Takvim etkinliği açılır.</p>
           <ul>
             <li>90 gün süreli HMAC imzalı URL, tek tıkla iptal/yenileme (rotasyon)</li>
             <li>Klinik adresi etkinlik konumuna otomatik işlenir</li>
@@ -1448,7 +1448,7 @@ code {
         </article>
         <article class="cal-card">
           <h3>Toplu ve Tekil <code>.ics</code> İndirme</h3>
-          <p>Outlook, macOS Takvim veya arşiv için tek randevu ya da tüm şube programı (<code>all.ics</code>) RFC 5545 biçiminde dışa aktarılır.</p>
+          <p>Tek randevu ya da tüm şube programı (<code>all.ics</code>) RFC 5545 biçiminde dışa aktarılır.</p>
           <ul>
             <li>Aylık, haftalık ve günlük görünüm arasında anlık geçiş</li>
             <li>Yeni klinik açılışında teslim kartıyla hazır link</li>
@@ -1461,12 +1461,12 @@ code {
   <section class="sec dark-band" id="guvenlik">
     <div class="wrap">
       <h2>Hasta verisi kendi sunucunuzda. Şifreli ve denetlenebilir.</h2>
-      <p class="sec-sub">Sağlık verisi 6698 sayılı KVKK’ya göre özel nitelikli kişisel veridir. Güvenliği soyut vaatlerle değil, test edilen teknik kontrollerle kurduk.</p>
+      <p class="sec-sub">Sağlık verisi 6698 sayılı KVKK’ya göre özel nitelikli kişisel veridir. Güvenlik, test edilen teknik kontrollerle kurulur.</p>
 
       <div class="sec-cards">
         <article class="sec-card">
           <h3>Fernet AES-128 Şifreli Hasta Verisi</h3>
-          <p>Hasta telefonu, anamnez yanıtları, görseller ve TOTP anahtarları veritabanına şifreli yazılır; arama için ayrı HMAC özetleri tutulur.</p>
+          <p>Telefon, anamnez, görseller ve TOTP anahtarları şifreli yazılır; arama için ayrı HMAC özetleri tutulur.</p>
         </article>
         <article class="sec-card">
           <h3>SHA-256 Değiştirilemez Denetim Zinciri</h3>
@@ -1474,11 +1474,11 @@ code {
         </article>
         <article class="sec-card">
           <h3>RFC 6238 TOTP 2FA + 10 Deneme Kilidi</h3>
-          <p>Parolalar bellek-yoğun scrypt ile özetlenir. TOTP tekrar oynatma korumalıdır; 10 hatalı girişte hesap 15 dakika kilitlenir, 15 dakika hareketsizlikte oturum düşer.</p>
+          <p>Parolalar scrypt ile özetlenir. TOTP tekrar oynatmaya karşı korunur; 10 hatalı girişte hesap 15 dakika kilitlenir, 15 dakika hareketsizlikte oturum düşer.</p>
         </article>
         <article class="sec-card">
           <h3>6698 Sayılı KVKK Açık Rıza Sürümleme</h3>
-          <p>Aydınlatma, sağlık verisi açık rıza, iletişim izni ve yurt dışı aktarım onayları metin özeti ve sürüm numarasıyla ayrı saklanır.</p>
+          <p>Aydınlatma, açık rıza, iletişim izni ve yurt dışı aktarım onayları sürüm numarasıyla ayrı saklanır.</p>
         </article>
         <article class="sec-card">
           <h3>Kendi Sunucunuzda Tam Veri Egemenliği</h3>
@@ -1502,18 +1502,18 @@ code {
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>Strict-Transport-Security</code></td><td><code>max-age=63072000; includeSubDomains; preload</code></td><td>HTTPS zorunlu tutar, downgrade saldırısını kapatır</td></tr>
-            <tr><td><code>Content-Security-Policy</code></td><td><code>default-src 'self'; script-src 'self'; frame-ancestors 'none'</code></td><td>Satır içi ve dış kaynaklı XSS betiklerini durdurur</td></tr>
-            <tr><td><code>X-Content-Type-Options</code></td><td><code>nosniff</code></td><td>Tarayıcının dosya türünü tahmin edip çalıştırmasını önler</td></tr>
-            <tr><td><code>X-Frame-Options</code></td><td><code>DENY</code></td><td>Panelin başka sitede iframe içine alınmasını (clickjacking) engeller</td></tr>
-            <tr><td><code>X-XSS-Protection</code></td><td><code>0</code></td><td>OWASP önerisine uygun, hatalı eski XSS filtresini kapatır</td></tr>
+            <tr><td><code>Strict-Transport-Security</code></td><td><code>max-age=63072000; includeSubDomains; preload</code></td><td>HTTPS zorunlu, downgrade kapalı</td></tr>
+            <tr><td><code>Content-Security-Policy</code></td><td><code>default-src 'self'; script-src 'self'; frame-ancestors 'none'</code></td><td>Satır içi ve dış XSS betiklerini durdurur</td></tr>
+            <tr><td><code>X-Content-Type-Options</code></td><td><code>nosniff</code></td><td>Dosya türü tahminini önler</td></tr>
+            <tr><td><code>X-Frame-Options</code></td><td><code>DENY</code></td><td>Clickjacking ve iframe gömmeyi engeller</td></tr>
+            <tr><td><code>X-XSS-Protection</code></td><td><code>0</code></td><td>Hatalı eski XSS filtresini kapatır</td></tr>
             <tr><td><code>Referrer-Policy</code></td><td><code>no-referrer</code></td><td>Hasta bağlantı ve token bilgisinin dış URL’ye sızmasını önler</td></tr>
-            <tr><td><code>Permissions-Policy</code></td><td><code>camera=(), microphone=(), geolocation=(), payment=()</code></td><td>Kamera, mikrofon ve konum donanım izinlerini kilitler</td></tr>
+            <tr><td><code>Permissions-Policy</code></td><td><code>camera=(), microphone=(), geolocation=(), payment=()</code></td><td>Kamera, mikrofon ve konumu kilitler</td></tr>
             <tr><td><code>Cross-Origin-Opener-Policy</code></td><td><code>same-origin</code></td><td>Açılan sekmelerle bellek/pencere paylaşımını keser</td></tr>
             <tr><td><code>Cross-Origin-Resource-Policy</code></td><td><code>same-origin</code></td><td>Panel kaynaklarının başka kökenlerden yüklenmesini engeller</td></tr>
-            <tr><td><code>Cross-Origin-Embedder-Policy</code></td><td><code>require-corp</code></td><td>Yan kanal (Spectre) bellek sızıntısı riskini azaltır</td></tr>
+            <tr><td><code>Cross-Origin-Embedder-Policy</code></td><td><code>require-corp</code></td><td>Spectre yan kanal riskini azaltır</td></tr>
             <tr><td><code>X-Permitted-Cross-Domain-Policies</code></td><td><code>none</code></td><td>Harici Flash/PDF çapraz alan politikalarını yasaklar</td></tr>
-            <tr><td><code>Cache-Control</code> + Kimlik Gizleme</td><td><code>no-store</code> (/app/api, /auth), Server gizli</td><td>Hasta verisinin önbellekte kalmasını ve sunucu sürüm ifşasını önler</td></tr>
+            <tr><td><code>Cache-Control</code> + Kimlik Gizleme</td><td><code>no-store</code> (/app/api, /auth), Server gizli</td><td>Önbellek ve sürüm ifşasını önler</td></tr>
           </tbody>
         </table>
       </div>
@@ -1527,8 +1527,8 @@ code {
         <h2>Çok şubeli zincir klinikler, tam veri izolasyonuyla</h2>
         <p>Hasta kartı, koltuk, kasa ve envanter veritabanı düzeyinde <code>clinic_id</code> ile ayrılır. Bursa şubesi İstanbul veya Ankara şubesinin tek kaydını göremez.</p>
         <ul class="check-list">
-          <li>Merkez (HQ) yöneticisi tek tıkla herhangi bir şubeye geçip yönetebilir ve merkeze dönebilir.</li>
-          <li>Yeni şube açıldığında giriş e-postası, iPhone <code>webcal://</code> linki ve Google Takvim linki tek WhatsApp teslim kartında hazırlanır.</li>
+          <li>Merkez yöneticisi tek tıkla şubeye geçer ve merkeze döner.</li>
+          <li>Yeni şubede giriş e-postası, <code>webcal://</code> ve Google Takvim linki tek teslim kartında hazırlanır.</li>
           <li>Şube bazlı aktif randevu, hasta sayısı ve tahsilat cirosu merkez tabloda karşılaştırılır.</li>
         </ul>
       </div>
@@ -1565,7 +1565,7 @@ code {
   <section class="sec surface-alt" id="karsilastirma">
     <div class="wrap">
       <h2>Tipik mesaj botu ile DentaCore arasındaki fark</h2>
-      <p class="sec-sub">Piyasadaki sıradan SaaS mesaj botlarının bıraktığı güvenlik, klinik takip ve maliyet açıklarını tek mimaride kapatır.</p>
+      <p class="sec-sub">Sıradan SaaS mesaj botlarının güvenlik, takip ve maliyet açıklarını tek mimaride kapatır.</p>
       <div class="table-wrap" tabindex="0" role="region" aria-label="Tipik mesaj botu ile DentaCore karşılaştırma tablosu">
         <table class="cmp">
           <thead>
@@ -1638,7 +1638,7 @@ code {
               <li>Mesai dışı cevapsız mesajlardan: <strong id="r-off">-</strong></li>
               <li>Gelmeyen hastalardan: <strong id="r-ns">-</strong></li>
             </ul>
-            <p>Bu hesaplama kliniğinizdeki kaybı görünür kılar. İlk ayın sonunda gerçek kaybı panelin ana ekranında kendi randevularınızla izlersiniz.</p>
+            <p>Hesaplama kaybı görünür kılar. İlk ay sonunda gerçek kaybı panelin ana ekranında izlersiniz.</p>
           </div>
           <a class="btn btn-cta btn-lg" href="#demo">Demo talep et</a>
         </div>
@@ -1649,7 +1649,7 @@ code {
   <section class="sec surface-alt" id="fiyat">
     <div class="wrap">
       <h2>Tek paket, şeffaf fiyat, tüm modüller dahil</h2>
-      <p class="sec-sub">Modül başına ek ücret, hekim başı lisans farkı veya gizli kurulum bedeli yok. İlk ay ve kurulum ücretsiz, istediğiniz an iptal.</p>
+      <p class="sec-sub">Modül başı ek ücret, hekim başı lisans farkı ve gizli kurulum bedeli yok. İlk ay ücretsiz, istediğiniz an iptal.</p>
       <div class="prices">
         <article class="price best">
           <h3>DentaCore Kurumsal Tek Paket</h3>
@@ -1675,27 +1675,27 @@ code {
       <div class="faq-list">
         <details open>
           <summary>Mevcut WhatsApp klinik numaramız değişir mi?</summary>
-          <p>Hayır. Mevcut klinik hattınız resmi Meta WhatsApp Cloud API üzerinden bağlanır; hastalar aynı numaraya yazmaya devam eder.</p>
+          <p>Hayır. Mevcut hattınız resmi Meta WhatsApp Cloud API ile bağlanır; hastalar aynı numaraya yazar.</p>
         </details>
         <details>
           <summary>Yapay zeka hastaya teşhis koyar veya fiyat verir mi?</summary>
-          <p>Koymaz ve vermez. Teşhis, ilaç önerisi ve hekim onaysız fiyat cümleleri çıkış filtresinde engellenir; hasta muayene randevusuna yönlendirilir.</p>
+          <p>Koymaz ve vermez. Teşhis, ilaç önerisi ve hekim onaysız fiyat cümleleri çıkış filtresinde engellenir.</p>
         </details>
         <details>
           <summary>Hasta verileri nerede saklanır ve kimler görebilir?</summary>
-          <p>Kendi sunucunuzda veya Türkiye lokasyonlu özel sunucuda çalışır. Telefon ve anamnez yanıtları şifreli tutulur; her görüntüleme hash zincirli denetim kaydına yazılır.</p>
+          <p>Kendi veya Türkiye lokasyonlu özel sunucunuzda çalışır. Telefon ve anamnez şifreli tutulur; her görüntüleme denetim zincirine yazılır.</p>
         </details>
         <details>
           <summary>iPhone ve Android telefon takvimleriyle nasıl eşitlenir?</summary>
-          <p>Her şube için imzalı webcal ve Google Takvim bağlantısı üretilir. Hekim bir kez abone olunca yeni randevular ve 60 ile 15 dakikalık uyarılar telefona düşer.</p>
+          <p>Her şube için imzalı webcal ve Google Takvim bağlantısı üretilir. Abone olunca randevular ve uyarılar telefona düşer.</p>
         </details>
         <details>
           <summary>Birden fazla şubesi olan zincir klinikler tek yerden yönetilir mi?</summary>
-          <p>Evet. Hasta, kasa, envanter ve randevu verisi clinic_id ile şubeye göre ayrılır. Merkez yönetici tek tıkla şube değiştirir; yeni şubede giriş ve takvim teslim kartı hazır gelir.</p>
+          <p>Evet. Veri clinic_id ile şubeye göre ayrılır; merkez yönetici tek tıkla şube değiştirir.</p>
         </details>
         <details>
           <summary>Kurulum ne kadar sürer ve eğitim gerekir mi?</summary>
-          <p>Klinik bilgileri, koltuk saatleri ve sık sorulan yanıtlar gelince aynı hafta devreye alınır. Kurulum ve ekip eğitimi ilk ay ücretsiz.</p>
+          <p>Klinik bilgileri geldikten sonra aynı hafta devreye alınır. Kurulum ve eğitim ilk ay ücretsiz.</p>
         </details>
       </div>
     </div>
@@ -1706,7 +1706,7 @@ code {
       <div class="demo-box">
         <div>
           <h2>15 dakikada kliniğinize nasıl uyacağını görün</h2>
-          <p class="demo-copy">Kliniğinizin tedavilerini, çalışma saatlerini ve sık gelen soruları dinliyoruz; sistemi mevcut numaranızın üzerine bir hafta içinde kuruyoruz.</p>
+          <p class="demo-copy">Tedavilerinizi, saatlerinizi ve sık gelen soruları dinliyor, sistemi mevcut numaranıza bir hafta içinde kuruyoruz.</p>
           <ul class="check-list">
             <li>Bağlayıcı sözleşme yok, ilk ay ve kurulum ücretsiz</li>
             <li>Teknik kurulum ve numara bağlantısı ekibimizden</li>
