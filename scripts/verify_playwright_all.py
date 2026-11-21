@@ -132,7 +132,7 @@ def _verify_surface(page, base_url: str, panel_path: str, is_static: bool) -> di
             open_btn.click()
             page.wait_for_timeout(450)
             assert page.locator(".drawer").count() > 0, "Patient drawer did not open"
-            for d_tk in ("summary", "odo", "finance", "clinical", "all"):
+            for d_tk in ("summary", "messages", "odontogram", "appointments", "finance"):
                 tab_btn = page.locator(f".drawer-tab[data-tk='{d_tk}']")
                 assert tab_btn.count() > 0, f"Missing drawer tab {d_tk}"
                 tab_btn.click()
