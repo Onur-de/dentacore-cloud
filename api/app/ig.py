@@ -7,10 +7,13 @@ import logging
 
 import httpx
 
+from . import meta_graph
 from .core import env
 
 log = logging.getLogger("ig")
-VER = env("IG_GRAPH_VERSION", "v21.0")
+# Sürüm merkezîdir: IG_GRAPH_VERSION (özel) > META_GRAPH_VERSION (paylaşılan) > meta_graph.DEFAULT_VERSION. Biçim bozuksa varsayılan.
+VER = meta_graph.resolve_version(env("IG_GRAPH_VERSION"), env("META_GRAPH_VERSION"), label="ig")
+meta_graph.check_version(VER, "ig")
 TOKEN = env("IG_ACCESS_TOKEN")
 APP_SECRET = env("IG_APP_SECRET") or env("WA_APP_SECRET")
 GRAPH = f"https://graph.instagram.com/{VER}"
@@ -49,11 +52,6 @@ async def send_text(igsid: str, body: str) -> dict:
     if not ready():
         log.info("[ig kuru] metin")
         return {"dry_run": True}
-    c = get_client()
-    r = await c.post(f"{GRAPH}/me/messages", headers={"Authorization": f"Bearer {TOKEN}"},
-                     json={"recipient": {"id": igsid}, "message": {"text": body[:1000]}})
-    j = r.json()
-    if r.status_code >= 400:
-        log.warning("IG hata %s: %s", r.status_code, j)
-        return {"error": j.get("error", {})}
-    return j
+    return await meta_graph.call(get_client(), "POST", f"{GRAPH}/me/messages", channel="ig",
+                                 headers={"Authorization": f"Bearer {TOKEN}"},
+                                 json={"recipient": {"id": igsid}, "message": {"text": body[:1000]}})

@@ -38,6 +38,9 @@ services:
         value: "127.0.0.1"
       - key: WEB_CONCURRENCY
         value: "2"
+      # Meta Graph API sürümü (WhatsApp + Instagram). Kanala özel WA_GRAPH_VERSION / IG_GRAPH_VERSION isteğe bağlıdır.
+      - key: META_GRAPH_VERSION
+        value: v25.0
       # Hasta görselleri: /data diski (yukarıdaki disk) kalıcıdır, bu yüzden DC_MEDIA_PERSISTENT=1 doğrudur.
       - key: MEDIA_BACKEND
         value: local
