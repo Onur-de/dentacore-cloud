@@ -177,11 +177,13 @@ ANALYZE;
         path.write_text(out, encoding="ascii")
         return pub, path
 
-    def backup(self, recipient: str, host: str, *, env: dict[str, str] | None = None, backups_dir: Path | None = None) -> R:
+    def backup(self, recipient: str, host: str, *, env: dict[str, str] | None = None, backups_dir: Path | None = None,
+               extra: list[str] | None = None) -> R:
+        """Tek seferlik yedek (BACKUP_ONCE=1). `extra`: docker run'a eklenecek bağımsız değişkenler (ör. ["-v", "a:/offhost"])."""
         b = backups_dir or (self.tmp / "backups")
         cmd = ["docker", "run", "--rm", "--network", self.net, "-v", f"{b}:/backups",
                "-e", f"PGHOST={host}", "-e", f"PGUSER={PG_USER}", "-e", f"PGPASSWORD={PG_PASS}",
-               "-e", f"AGE_RECIPIENT={recipient}", "-e", "BACKUP_ONCE=1"]
+               "-e", f"AGE_RECIPIENT={recipient}", "-e", "BACKUP_ONCE=1", *(extra or [])]
         for k, v in (env or {}).items():
             cmd += ["-e", f"{k}={v}"]
         return run([*cmd, IMAGE], check=False)
