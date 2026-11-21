@@ -1404,10 +1404,12 @@ def build_all() -> None:
     pure_landing = pure_landing.replace('<link rel="manifest" href="/manifest.webmanifest">', '<link rel="manifest" href="manifest.webmanifest">')
     pure_landing = pure_landing.replace('<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">', f'<link rel="apple-touch-icon" href="{FAVICON_DATA_URI}">')
     pure_landing = pure_landing.replace('navigator.serviceWorker.register("/sw.js"', 'navigator.serviceWorker.register("sw.js"')
+    pure_landing = pure_landing.replace('{ scope: "/" }', '{ scope: "./" }')
 
     pure_panel = pure_panel.replace('<link rel="manifest" href="/manifest.webmanifest">', '<link rel="manifest" href="manifest.webmanifest">')
     pure_panel = pure_panel.replace('<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">', f'<link rel="apple-touch-icon" href="{FAVICON_DATA_URI}">')
     pure_panel = pure_panel.replace('navigator.serviceWorker.register("/sw.js"', 'navigator.serviceWorker.register("sw.js"')
+    pure_panel = pure_panel.replace('{ scope: "/" }', '{ scope: "./" }')
 
     docs_dir = CLOUD_DIR / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)

@@ -2568,7 +2568,7 @@ code {
 
   // Service worker kaydı (yalnız statik varlıklar önbelleğe alınır)
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js", { scope: "/" }).catch(() => {});
+    navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(() => {});
   }
 
   // Mobil menü aç/kapa

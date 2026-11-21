@@ -2777,7 +2777,7 @@ a.kpi-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; 
 
   // Service worker kaydı (yalnız statik dosyalar)
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js", { scope: "/" }).catch(() => {});
+    navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(() => {});
   }
 
   // ------------------------------------------------------------------ güvenli localStorage & pano
@@ -4767,110 +4767,6 @@ a.kpi-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; 
     grpSel.addEventListener("change", doSearch);
     srcSel.addEventListener("change", doSearch);
 
-    function openFastCreatePatientModal() {
-      const nameIn = inp("name", { required: true, minLength: 2, placeholder: "Hasta adını giriniz", value: "", autocomplete: "off" });
-      const phoneIn = inp("phone", { required: true, placeholder: "Telefon numarası giriniz (05xx xxx xx xx)", value: "", autocomplete: "off" });
-      const dupBanner = h("div", { class: "cal-box hidden", role: "status", style: "border-color:var(--amber);background:#FFFBEB" });
-      let dupTimer = null;
-      phoneIn.addEventListener("input", () => {
-        clearTimeout(dupTimer);
-        const raw = phoneIn.value.trim();
-        if (raw.replace(/\D/g, "").length < 10) {
-          dupBanner.classList.add("hidden");
-          dupBanner.replaceChildren();
-          return;
-        }
-        dupTimer = setTimeout(async () => {
-          try {
-            const res = await api(`/app/api/patients/check-duplicate?phone=${encodeURIComponent(raw)}`);
-            if (res && res.duplicate && res.patient) {
-              dupBanner.classList.remove("hidden");
-              dupBanner.replaceChildren(
-                h("strong", { text: `Mükerrer Kayıt Uyarısı: Bu numara ${res.patient.display_name} (#${res.patient.id}) adına kayıtlı.` }),
-                h("div", { class: "actions", style: "margin-top:6px" },
-                  h("button", {
-                    type: "button",
-                    class: "btn btn-sm btn-primary",
-                    on: {
-                      click: () => {
-                        document.querySelectorAll(".overlay .modal").forEach((m) => m.closest(".overlay")?.remove());
-                        openPatient(res.patient.id);
-                      },
-                    },
-                  }, "Mevcut Hasta Kartını Aç")
-                )
-              );
-            } else {
-              dupBanner.classList.add("hidden");
-              dupBanner.replaceChildren();
-            }
-          } catch (_) { /* sessiz */ }
-        }, 250);
-      });
-
-      let openApptAfterSave = false;
-      const ov = modal("Hızlı Hasta Kaydı (Sekreter & Klinik Akışı)", [
-        h("p", { style: "margin:0 0 8px;font-size:13px;color:var(--muted)", text: "Zorunlu alanlar: Ad Soyad, Telefon ve Geliş Kaynağı. Diğer detayları şimdi veya daha sonra hasta kartından ekleyebilirsiniz." }),
-        h("div", { class: "row" },
-          fld("Ad Soyad *", nameIn),
-          fld("Telefon *", phoneIn)
-        ),
-        dupBanner,
-        h("div", { class: "row" },
-          fld("İlk Geliş Kaynağı *", sel("first_source", PATIENT_SOURCES, "phone")),
-          fld("Sorumlu Doktor (Opsiyonel)", sel("primary_doctor_id", [["", "Seçilmedi"], ...doctors.map((d) => [String(d.id), d.full_name])], ""))
-        ),
-        h("div", { class: "row" },
-          fld("Banka / Kurum Anlaşması (Opsiyonel)", sel("bank_agreement_id", [["", "Yok"], ...banks.filter((b) => b.active).map((b) => [String(b.id), `${b.bank_name} (%${b.discount_pct})`])], "")),
-          fld("İletişim Dili (16 Dil)", sel("lang", LANG_OPTIONS, "tr"))
-        ),
-        h("div", { class: "row" },
-          fld("Hasta Grubu / Etiket (Opsiyonel)", sel("group_id", [["", "Seçilmedi"], ...groups.map((g) => [String(g.id), `${g.name}${g.is_restricted ? " (Gerekçe zorunlu)" : ""}`])], "")),
-          fld("Grup Gerekçesi / Kısa Not", inp("group_reason", { placeholder: "Özel takip veya etiket nedeni giriniz", value: "", autocomplete: "off" }))
-        ),
-        fld("Klinik Notu (Opsiyonel)", inp("notes", { placeholder: "Ek hasta bilgisi giriniz", value: "", autocomplete: "off" })),
-      ], async (f) => {
-        const body = {
-          name: f.get("name"),
-          phone: f.get("phone"),
-          first_source: f.get("first_source") || "phone",
-          lang: f.get("lang") || "tr",
-          primary_doctor_id: f.get("primary_doctor_id") ? Number(f.get("primary_doctor_id")) : null,
-          bank_agreement_id: f.get("bank_agreement_id") ? Number(f.get("bank_agreement_id")) : null,
-          group_id: f.get("group_id") ? Number(f.get("group_id")) : null,
-          group_reason: f.get("group_reason") || "",
-          notes: f.get("notes") || "",
-        };
-        const r = await api("/app/api/patients", { method: "POST", body });
-        if (r.duplicate) {
-          toast(`Telefon numarası zaten kayıtlı (${r.existing_name || "#" + r.id}); mevcut hasta kartı açılıyor.`);
-        } else {
-          toast("Hasta kaydedildi");
-        }
-        await route();
-        if (openApptAfterSave) {
-          newAppt(r.id);
-        } else {
-          openPatient(r.id);
-        }
-      }, "Kaydet");
-
-      const foot = ov.querySelector(".foot");
-      if (foot) {
-        const saveAndBookBtn = h("button", {
-          type: "button",
-          class: "btn btn-teal",
-          on: {
-            click: () => {
-              openApptAfterSave = true;
-              ov.querySelector("form")?.requestSubmit();
-            },
-          },
-        }, "Kaydet ve Randevu Oluştur");
-        foot.insertBefore(saveAndBookBtn, foot.lastElementChild);
-      }
-    }
-
     function openCsvImportModal() {
       const csvArea = h("textarea", {
         class: "input",
@@ -4987,6 +4883,116 @@ a.kpi-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; 
   // Hasta 360 çekmecesi: 5 sekme (özet, WhatsApp, odontogram, randevu, kasa). Eski sekme adları yeni adlara eşlenir.
   const DRAWER_TAB_ALIAS = { all: "summary", odo: "odontogram", clinical: "finance" };
   const DRAWER_TABS = ["summary", "messages", "odontogram", "appointments", "finance"];
+  async function openFastCreatePatientModal() {
+    const [staff, banks, groups] = await Promise.all([
+      api("/app/api/staff").catch(() => []),
+      api("/app/api/bank-agreements").catch(() => []),
+      api("/app/api/patient-groups").catch(() => []),
+    ]);
+    const doctors = (staff || []).filter((s) => s.active && (s.role === "doctor" || s.role === "owner"));
+    const nameIn = inp("name", { required: true, minLength: 2, placeholder: "Hasta adını giriniz", value: "", autocomplete: "off" });
+    const phoneIn = inp("phone", { required: true, placeholder: "Telefon numarası giriniz (05xx xxx xx xx)", value: "", autocomplete: "off" });
+    const dupBanner = h("div", { class: "cal-box hidden", role: "status", style: "border-color:var(--amber);background:#FFFBEB" });
+    let dupTimer = null;
+    phoneIn.addEventListener("input", () => {
+      clearTimeout(dupTimer);
+      const raw = phoneIn.value.trim();
+      if (raw.replace(/\D/g, "").length < 10) {
+        dupBanner.classList.add("hidden");
+        dupBanner.replaceChildren();
+        return;
+      }
+      dupTimer = setTimeout(async () => {
+        try {
+          const res = await api(`/app/api/patients/check-duplicate?phone=${encodeURIComponent(raw)}`);
+          if (res && res.duplicate && res.patient) {
+            dupBanner.classList.remove("hidden");
+            dupBanner.replaceChildren(
+              h("strong", { text: `Mükerrer Kayıt Uyarısı: Bu numara ${res.patient.display_name} (#${res.patient.id}) adına kayıtlı.` }),
+              h("div", { class: "actions", style: "margin-top:6px" },
+                h("button", {
+                  type: "button",
+                  class: "btn btn-sm btn-primary",
+                  on: {
+                    click: () => {
+                      document.querySelectorAll(".overlay .modal").forEach((m) => m.closest(".overlay")?.remove());
+                      openPatient(res.patient.id);
+                    },
+                  },
+                }, "Mevcut Hasta Kartını Aç")
+              )
+            );
+          } else {
+            dupBanner.classList.add("hidden");
+            dupBanner.replaceChildren();
+          }
+        } catch (_) { /* sessiz */ }
+      }, 250);
+    });
+
+    let openApptAfterSave = false;
+    const ov = modal("Hızlı Hasta Kaydı (Sekreter & Klinik Akışı)", [
+      h("p", { style: "margin:0 0 8px;font-size:13px;color:var(--muted)", text: "Zorunlu alanlar: Ad Soyad, Telefon ve Geliş Kaynağı. Diğer detayları şimdi veya daha sonra hasta kartından ekleyebilirsiniz." }),
+      h("div", { class: "row" },
+        fld("Ad Soyad *", nameIn),
+        fld("Telefon *", phoneIn)
+      ),
+      dupBanner,
+      h("div", { class: "row" },
+        fld("İlk Geliş Kaynağı *", sel("first_source", PATIENT_SOURCES, "phone")),
+        fld("Sorumlu Doktor (Opsiyonel)", sel("primary_doctor_id", [["", "Seçilmedi"], ...doctors.map((d) => [String(d.id), d.full_name])], ""))
+      ),
+      h("div", { class: "row" },
+        fld("Banka / Kurum Anlaşması (Opsiyonel)", sel("bank_agreement_id", [["", "Yok"], ...banks.filter((b) => b.active).map((b) => [String(b.id), `${b.bank_name} (%${b.discount_pct})`])], "")),
+        fld("İletişim Dili (16 Dil)", sel("lang", LANG_OPTIONS, "tr"))
+      ),
+      h("div", { class: "row" },
+        fld("Hasta Grubu / Etiket (Opsiyonel)", sel("group_id", [["", "Seçilmedi"], ...groups.map((g) => [String(g.id), `${g.name}${g.is_restricted ? " (Gerekçe zorunlu)" : ""}`])], "")),
+        fld("Grup Gerekçesi / Kısa Not", inp("group_reason", { placeholder: "Özel takip veya etiket nedeni giriniz", value: "", autocomplete: "off" }))
+      ),
+      fld("Klinik Notu (Opsiyonel)", inp("notes", { placeholder: "Ek hasta bilgisi giriniz", value: "", autocomplete: "off" })),
+    ], async (f) => {
+      const body = {
+        name: f.get("name"),
+        phone: f.get("phone"),
+        first_source: f.get("first_source") || "phone",
+        lang: f.get("lang") || "tr",
+        primary_doctor_id: f.get("primary_doctor_id") ? Number(f.get("primary_doctor_id")) : null,
+        bank_agreement_id: f.get("bank_agreement_id") ? Number(f.get("bank_agreement_id")) : null,
+        group_id: f.get("group_id") ? Number(f.get("group_id")) : null,
+        group_reason: f.get("group_reason") || "",
+        notes: f.get("notes") || "",
+      };
+      const r = await api("/app/api/patients", { method: "POST", body });
+      if (r.duplicate) {
+        toast(`Telefon numarası zaten kayıtlı (${r.existing_name || "#" + r.id}); mevcut hasta kartı açılıyor.`);
+      } else {
+        toast("Hasta kaydedildi");
+      }
+      await route();
+      if (openApptAfterSave) {
+        newAppt(r.id);
+      } else {
+        openPatient(r.id);
+      }
+    }, "Kaydet");
+
+    const foot = ov.querySelector(".foot");
+    if (foot) {
+      const saveAndBookBtn = h("button", {
+        type: "button",
+        class: "btn btn-teal",
+        on: {
+          click: () => {
+            openApptAfterSave = true;
+            ov.querySelector("form")?.requestSubmit();
+          },
+        },
+      }, "Kaydet ve Randevu Oluştur");
+      foot.insertBefore(saveAndBookBtn, foot.lastElementChild);
+    }
+  }
+
   async function openPatient(pid, reveal, initialTab) {
     // Aynı hastanın çekmecesi yeniden açılıyorsa (kayıt sonrası tazeleme) kullanıcının bulunduğu sekme korunur.
     const prevTab = S.drawer && Number(S.drawer.pid) === Number(pid) ? S.drawer.tab : "";
