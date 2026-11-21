@@ -1183,34 +1183,220 @@
   // ------------------------------------------------------------------ görünümler
   const VIEWS = {};
 
+  // ------------------------------------------------------------------ Sabah 09:00 eylem kokpiti
+  // Boş veya iptal olmuş koltuk saatini bekleme listesindeki uygun hastalarla tek tıkla doldurur.
+  // Yalnızca mevcut uçları kullanır (bekleme listesi, randevu, konuşma gönderimi); hem yerel motorda hem statik demoda çalışır.
+  async function openWaitlistFillModal(slot) {
+    const rows = await run(() => api("/app/api/waitlist"));
+    if (!rows) return;
+    const when = new Date(slot.starts_at);
+    const whenTxt = `${fmtD(when)} ${fmtT(when)}`;
+    const wantTr = trNorm(slot.treatment || "");
+    const fits = (w) => {
+      const t = trNorm(w.treatment || "");
+      return !t || t === "herhangi" || !wantTr || t.includes(wantTr) || wantTr.includes(t);
+    };
+    const ordered = [...rows].sort((a, b) => Number(fits(b)) - Number(fits(a)) || new Date(a.created_at) - new Date(b.created_at));
+    let ov = null;
+    const closeAll = () => {
+      const b = ov && ov.querySelector(".foot .btn-ghost");
+      if (b) b.click();
+    };
+    const rowFor = (w, i) => {
+      const name = w.patient || `Hasta #${w.patient_id}`;
+      const isAny = !w.treatment || trNorm(w.treatment) === "herhangi";
+      const treat = isAny ? (slot.treatment || "Muayene") : w.treatment;
+      const first = String(name).split(/\s+/)[0];
+      const okFit = fits(w);
+      return h("div", { class: "ck-row" },
+        h("div", { class: "ck-meta" },
+          tag(`${i + 1}. sıra`, ""),
+          h("strong", { class: "ck-title", text: name }),
+          tag(okFit ? "Uygun" : "Farklı işlem", okFit ? "green" : "yellow"),
+          h("span", { class: "ck-sub", text: `${w.treatment || "herhangi"} · ${fmtD(w.created_at)} tarihinde eklendi` })
+        ),
+        h("div", { class: "ck-actions" },
+          h("button", {
+            class: "btn btn-sm btn-primary",
+            type: "button",
+            on: {
+              click: async (ev) => {
+                const btn = ev.currentTarget;
+                btn.disabled = true;
+                const r = await run(() => api("/app/api/appointments", {
+                  method: "POST",
+                  body: { patient_id: Number(w.patient_id), starts_at: when.toISOString(), duration_min: Number(slot.duration_min || 30), treatment: treat, chair: String(slot.chair || "1"), doctor_id: null },
+                }));
+                if (!r) { btn.disabled = false; return; }
+                await api(`/app/api/waitlist/${w.id}/remove`, { method: "POST" }).catch(() => null);
+                toast(`${name} için ${whenTxt} randevusu oluşturuldu`);
+                closeAll();
+                afterChange(w.patient_id);
+              },
+            },
+          }, "Randevuyu Ver"),
+          h("button", {
+            class: "btn btn-sm btn-teal",
+            type: "button",
+            on: {
+              click: async (ev) => {
+                const btn = ev.currentTarget;
+                btn.disabled = true;
+                try {
+                  await sendConv(w.patient_id, `Merhaba ${first}, ${whenTxt} saatinde klinikte boş bir koltuk açıldı (${treat}). Bu saati almak ister misiniz? Yanıtladığınız anda randevunuzu oluşturalım.`);
+                  btn.textContent = "Teklif gönderildi";
+                  refreshNavBadges();
+                } catch (x) {
+                  if (x.message !== "oturum") toast(x.message || "Teklif gönderilemedi", true);
+                  btn.disabled = false;
+                }
+              },
+            },
+          }, "Teklif Gönder")
+        )
+      );
+    };
+    ov = modal("Bekleme listesinden doldur", [
+      h("p", { style: "margin:0;color:var(--ink-2);font-size:13.5px", text: `Boş saat: ${whenTxt} · Koltuk ${slot.chair || "1"} · ${slot.duration_min || 30} dk. İşleme uygun hastalar üstte, eklenme sırasına göre listelenir.` }),
+      ordered.length
+        ? h("div", { class: "ck-list" }, ordered.slice(0, 12).map(rowFor))
+        : h("div", { class: "empty", text: "Bekleme listesi boş. Hasta kartından veya Bekleme Listesi sayfasından hasta ekleyebilirsiniz." }),
+    ], async () => true, "Kapat");
+    const submitBtn = ov.querySelector(".foot .btn-cta");
+    if (submitBtn) submitBtn.remove();
+    const closeBtn = ov.querySelector(".foot .btn-ghost");
+    if (closeBtn) closeBtn.textContent = "Kapat";
+  }
+
+  function addToOrderList(r) {
+    const list = getOrders();
+    if (list.some((o) => o.id === r.id)) { toast(`${r.name} zaten sipariş listesinde`); return false; }
+    list.push({ id: r.id, name: r.name, unit: r.unit || "", qty: suggestQty(r), supplier: r.supplier || "", added_at: new Date().toISOString() });
+    setOrders(list);
+    toast(`${r.name} sipariş listesine eklendi`);
+    return true;
+  }
+
   VIEWS.overview = async () => {
+    const enc = encodeURIComponent;
     const todayStart = sod(new Date());
-    const todayEnd = addDays(todayStart, 2);
-    const [o, todayAppts] = await Promise.all([
+    const todayEnd = addDays(todayStart, 1);
+    const perms = S.user.permissions || null;
+    const can = (k, fb) => (perms ? Boolean(perms[k]) : fb);
+    const isSec = S.user.role === "secretary";
+    const canFinance = can("finance_view", !isSec);
+    const canStock = can("inventory_manage", !isSec);
+    const canPay = can("finance_edit", true);
+    const navKeys = new Set(visibleNavItems().map((n) => n[0]));
+    const [o, todayAppts, alerts, convs, freeRes, inv, kasa] = await Promise.all([
       api("/app/api/overview"),
-      api(`/app/api/appointments?start=${encodeURIComponent(todayStart.toISOString())}&end=${encodeURIComponent(todayEnd.toISOString())}`).catch(() => []),
+      api(`/app/api/appointments?start=${enc(todayStart.toISOString())}&end=${enc(todayEnd.toISOString())}`).catch(() => []),
+      api("/app/api/alerts").catch(() => []),
+      api("/app/api/conversations").catch(() => []),
+      api(`/app/api/appointments/available?date=${ymd(todayStart)}&duration=30`).catch(() => null),
+      api("/app/api/inventory").catch(() => []),
+      canFinance ? api(`/app/api/kasa?start=${enc(todayStart.toISOString())}&end=${enc(todayEnd.toISOString())}`).catch(() => null) : Promise.resolve(null),
     ]);
     S.counts = o.counts || {};
+    if (Array.isArray(convs)) S.convs = convs;
     const c = S.counts;
-    const kpi = (label, value, hint, cls) => h("div", { class: `card kpi ${cls || ""}` },
-      h("div", { class: "label", text: label }),
-      h("div", { class: "value", text: value }),
-      hint ? h("div", { class: "hint", text: hint }) : null
-    );
-    const occ = h("div", { class: "card kpi" },
-      h("div", { class: "label", text: "Bugünkü koltuk doluluğu" }),
-      h("div", { class: "value", text: `%${o.today.occupancy}` }),
-      h("div", { class: "hint", text: `${o.today.appointments} randevu, ${o.today.confirmed} teyitli` }),
-      h("div", { class: "bar" }, h("i", { style: `width:${Math.min(100, o.today.occupancy)}%` }))
-    );
+    const unanswered = (convs || []).filter(isUnanswered);
+
+    // --- tıklanabilir özet kartları
+    const kpi = ({ label, value, hint, cls, href, bar }) => {
+      const kids = [
+        h("div", { class: "label", text: label }),
+        h("div", { class: "value", text: value }),
+        hint ? h("div", { class: "hint", text: hint }) : null,
+        bar !== undefined ? h("div", { class: "bar" }, h("i", { style: `width:${Math.min(100, bar)}%` })) : null,
+      ];
+      const target = href ? href.replace(/^#\//, "").split("?")[0] : "";
+      if (target && navKeys.has(target)) {
+        return h("a", { class: `card kpi kpi-link ${cls || ""}`, href, "aria-label": `${label}: ${value}. Ayrıntıyı aç` }, kids);
+      }
+      return h("div", { class: `card kpi ${cls || ""}` }, kids);
+    };
     const nameParts = (S.user.full_name || "").trim().split(/\s+/);
     const greetName = nameParts[0] && nameParts[0].endsWith(".") && nameParts[1] ? `${nameParts[0]} ${nameParts[1]}` : (nameParts[0] || "Ekip");
 
+    // --- a) Acil müdahale ve cevapsız mesajlar (triyaj kuyruğu)
+    const urgentKinds = new Set(["acil", "postop_alarm", "anamnez_kirmizi", "sikayet"]);
+    const convById = new Map((convs || []).map((r) => [Number(r.id), r]));
+    const nameOf = (pid) => {
+      const r = convById.get(Number(pid));
+      return (r && r.display_name) || `Hasta #${pid}`;
+    };
+    const triage = [
+      ...(alerts || []).filter((a) => urgentKinds.has(a.kind)).map((a) => ({ kind: "alert", id: a.id, pid: a.patient_id, at: a.created_at, a })),
+      ...unanswered.map((r) => ({ kind: "msg", id: r.id, pid: r.id, at: r.last_at, r })),
+    ].sort((x, y) => (x.kind === y.kind ? 0 : x.kind === "alert" ? -1 : 1) || new Date(y.at || 0) - new Date(x.at || 0));
+
+    const resolveItem = async (it) => {
+      if (it.kind === "alert") {
+        await run(() => api(`/app/api/alerts/${it.id}/ack`, { method: "POST" }), "Uyarı çözüldü olarak işaretlendi");
+      } else {
+        markResolved(it.pid, it.r.last_at || "1");
+        toast("Konuşma çözüldü olarak işaretlendi");
+      }
+      await afterChange();
+    };
+    const triageRow = (it) => {
+      const isAlert = it.kind === "alert";
+      const [lbl, cls] = isAlert ? (ALERT[it.a.kind] || [it.a.kind, "red"]) : ["Yanıt bekliyor", "yellow"];
+      const name = it.pid ? nameOf(it.pid) : "Genel uyarı";
+      const detail = String(isAlert ? (it.a.detail || "") : (it.r.last_body || "")).trim();
+      const short = detail.length > 90 ? `${detail.slice(0, 90)}…` : detail;
+      return h("div", { class: "ck-row" },
+        h("div", { class: "ck-meta" },
+          tag(lbl, cls),
+          h("strong", { class: "ck-title", text: name }),
+          it.at ? h("span", { class: "ck-sub", text: fmtDT(it.at) }) : null
+        ),
+        short ? h("div", { class: "ck-sub", dir: "auto", text: short }) : null,
+        h("div", { class: "ck-actions" },
+          it.pid ? h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: () => openConversationModal(it.pid, name) } }, "Hızlı Yanıtla") : null,
+          it.pid ? h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: () => newAppt(it.pid) } }, "Randevu Ver") : null,
+          it.pid ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient360(it.pid, "messages") } }, "Hasta 360") : null,
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => resolveItem(it) } }, "Çözüldü İşaretle")
+        )
+      );
+    };
+    const triageBlock = h("section", { class: "card ck-block", "aria-label": "Acil müdahale ve cevapsız mesajlar" },
+      h("div", { class: "ck-head" },
+        h("h3", { text: `Acil Müdahale & Cevapsız Mesajlar (${triage.length})` }),
+        h("div", { class: "ck-actions" },
+          h("a", { class: "btn btn-sm btn-ghost", href: "#/alerts" }, "Uyarılar"),
+          h("a", { class: "btn btn-sm btn-ghost", href: "#/messages" }, "Mesajlar")
+        )
+      ),
+      triage.length
+        ? h("div", { class: "ck-list" }, triage.slice(0, 8).map(triageRow))
+        : h("div", { class: "empty", text: "Acil uyarı veya yanıt bekleyen mesaj yok." }),
+      triage.length > 8 ? h("p", { class: "muted-s", text: `${triage.length - 8} kayıt daha var; tamamı Uyarılar ve Mesajlar sayfalarında.` }) : null
+    );
+
+    // --- b) Bugünün koltuk akışı ve boşluk doldurucu
+    const nowMs = Date.now();
+    const todays = (todayAppts || []).filter((a) => sod(new Date(a.starts_at)).getTime() === todayStart.getTime());
+    const freeSlots = [];
+    if (freeRes && !freeRes.closed) {
+      let lastEnd = 0;
+      (freeRes.slots || []).forEach((sl) => {
+        const st = new Date(`${ymd(todayStart)}T${sl.time}`);
+        if (Number.isNaN(st.getTime()) || st.getTime() <= nowMs || st.getTime() < lastEnd) return;
+        lastEnd = st.getTime() + 30 * 60000;
+        freeSlots.push({ at: st, slot: sl });
+      });
+    }
+    const seatItems = [
+      ...todays.map((a) => ({ at: new Date(a.starts_at), a })),
+      ...freeSlots.slice(0, 6).map((f) => ({ at: f.at, free: f.slot })),
+    ].sort((x, y) => x.at - y.at);
+
     const setDeskStatus = async (aid, st) => {
       const r = await run(() => api(`/app/api/appointments/${aid}/status`, { method: "POST", body: { status: st } }), "Randevu durumu güncellendi");
-      if (r) route();
+      if (r) await afterChange();
     };
-
     const runDemoFlow = async () => {
       const r = await run(() => api("/app/api/demo/simulate-flow", { method: "POST", body: {} }), "Canlı demo akışı tamamlandı");
       if (r && r.steps) {
@@ -1223,35 +1409,101 @@
         }, "Tamam");
       }
     };
-
-    const deskCard = h("div", { class: "card", style: "margin-top:14px" },
-      h("div", { style: "display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px" },
-        h("h3", { style: "margin:0", text: `Sekreter Masası · Bugün ve Yakın Randevu Akışı (${todayAppts.length})` }),
-        h("div", { class: "actions" },
+    const seatRow = (it) => {
+      if (it.free) {
+        const sl = it.free;
+        const chairs = (sl.available_chairs || []);
+        return h("div", { class: "ck-row" },
+          h("div", { class: "ck-meta" },
+            h("span", { class: "ck-time", text: `${sl.time}–${sl.end_time || ""}` }),
+            tag("Boş saat", "teal"),
+            h("span", { class: "ck-sub", text: chairs.length ? `Boş koltuk: ${chairs.join(", ")}` : "Koltuk müsait" })
+          ),
+          h("div", { class: "ck-actions" },
+            h("button", {
+              class: "btn btn-sm btn-cta",
+              type: "button",
+              on: { click: () => openWaitlistFillModal({ starts_at: it.at.toISOString(), duration_min: 30, chair: chairs[0] || "1", treatment: "" }) },
+            }, "Bekleme Listesinden Doldur (1 Tık)")
+          )
+        );
+      }
+      const a = it.a;
+      const [stLbl, stCls] = STATUS[a.status] || [a.status, ""];
+      const live = a.status === "booked" || a.status === "confirmed";
+      const cancelledFuture = a.status === "cancelled" && new Date(a.starts_at).getTime() > nowMs;
+      return h("div", { class: "ck-row" + (a.status === "cancelled" ? " is-off" : "") },
+        h("div", { class: "ck-meta" },
+          h("span", { class: "ck-time", text: `${fmtT(a.starts_at)} · K${a.chair}` }),
+          h("strong", { class: "ck-title", text: a.patient || "İsimsiz hasta" }),
+          a.red_flag ? tag("Kırmızı bayrak", "red") : null,
+          tag(stLbl, stCls),
+          h("span", { class: "ck-sub", text: `${a.treatment}${a.doctor ? " · " + a.doctor : ""}` })
+        ),
+        h("div", { class: "ck-actions" },
+          cancelledFuture ? h("button", {
+            class: "btn btn-sm btn-cta",
+            type: "button",
+            on: { click: () => openWaitlistFillModal({ starts_at: a.starts_at, duration_min: a.duration_min || 30, chair: a.chair || "1", treatment: a.treatment }) },
+          }, "Bekleme Listesinden Doldur (1 Tık)") : null,
+          live && a.status === "booked" ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => setDeskStatus(a.id, "confirmed") } }, "Teyitli Yap") : null,
+          live ? h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: () => setDeskStatus(a.id, "done") } }, "Koltukta / Geldi") : null,
+          live ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => editAppt(a) } }, "Saat Değiştir") : null,
+          a.patient_id ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient360(a.patient_id, "appointments") } }, "Hasta 360") : null
+        )
+      );
+    };
+    const seatBlock = h("section", { class: "card ck-block", "aria-label": "Bugünün koltuk akışı" },
+      h("div", { class: "ck-head" },
+        h("h3", { text: `Bugünün Koltuk Akışı (${todays.length})` }),
+        h("div", { class: "ck-actions" },
           h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openQuickSearch } }, "Hızlı Hasta Ara (Ctrl+K)"),
           h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: () => newAppt("") } }, "+ Hızlı Hasta & Randevu"),
           S.is_demo ? h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: runDemoFlow } }, "Canlı Demo Senaryosu Çalıştır") : null
         )
       ),
-      todayAppts.length ? h("div", { class: "sec-desk-list" }, todayAppts.slice(0, 12).map((a) => {
-        const [stLbl, stCls] = STATUS[a.status] || [a.status, ""];
-        const live = a.status === "booked" || a.status === "confirmed";
-        return h("div", { class: "sec-desk-row" },
-          h("div", { class: "sec-desk-meta" },
-            h("span", { class: "sec-desk-time", text: `${fmtD(a.starts_at)} ${fmtT(a.starts_at)} · K${a.chair}` }),
-            h("strong", { text: a.patient || "İsimsiz hasta" }),
-            a.red_flag ? tag("Kırmızı bayrak", "red") : null,
-            h("span", { style: "font-size:13px;color:var(--ink-2)", text: `${a.treatment}${a.doctor ? " · " + a.doctor : ""}` }),
-            tag(stLbl, stCls)
-          ),
-          h("div", { class: "actions" },
-            live && a.status === "booked" ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => setDeskStatus(a.id, "confirmed") } }, "Teyitli Yap") : null,
-            live ? h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: () => setDeskStatus(a.id, "done") } }, "Koltukta / Geldi") : null,
-            live ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => editAppt(a) } }, "Saat Değiştir") : null,
-            a.patient_id ? h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: () => openPatient(a.patient_id) } }, "Hasta Kartı") : null
-          )
-        );
-      })) : h("div", { class: "empty", style: "padding:14px", text: "Bugün için bekleyen randevu yok. '+ Hızlı Hasta & Randevu' ile tek adımda ekleyebilirsiniz." })
+      seatItems.length
+        ? h("div", { class: "ck-list" }, seatItems.map(seatRow))
+        : h("div", { class: "empty", text: "Bugün için randevu veya boş saat görünmüyor. '+ Hızlı Hasta & Randevu' ile ekleyebilirsiniz." })
+    );
+
+    // --- c) Günlük kasa ve kritik stok
+    const lowItems = (inv || []).filter((r) => r.low);
+    const lowRow = (r) => {
+      const addBtn = h("button", {
+        class: "btn btn-sm btn-ghost",
+        type: "button",
+        on: { click: () => { if (addToOrderList(r)) { addBtn.textContent = "Listede"; addBtn.disabled = true; } } },
+      }, "Siparişe Ekle");
+      return h("div", { class: "ck-row" },
+        h("div", { class: "ck-meta" },
+          h("strong", { class: "ck-title", text: r.name }),
+          tag(`Stok ${Number(r.qty)} / alt sınır ${Number(r.min_qty)} ${r.unit || ""}`, "red")
+        ),
+        h("div", { class: "ck-actions" },
+          h("button", { class: "btn btn-sm btn-teal", type: "button", on: { click: () => moveItem(r, 1) } }, "Stok Girişi"),
+          addBtn
+        )
+      );
+    };
+    const moneyBlock = h("section", { class: "card ck-block ck-wide", "aria-label": "Günlük kasa ve kritik stok" },
+      h("div", { class: "ck-head" },
+        h("h3", { text: "Günlük Kasa & Kritik Stok" }),
+        h("div", { class: "ck-actions" },
+          canPay ? h("button", { class: "btn btn-sm btn-cta", type: "button", on: { click: () => openQuickPayment() } }, "+ Hızlı Tahsilat") : null,
+          canFinance ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openQuickExpense } }, "+ Hızlı Gider") : null,
+          canStock ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openStockOrderModal } }, "Sipariş Listesi") : null
+        )
+      ),
+      kasa ? h("div", { class: "ck-sum" },
+        h("div", null, h("span", { text: "Bugünkü hizmet" }), h("b", { text: fmtTL(kasa.billed) })),
+        h("div", null, h("span", { text: "Bugünkü tahsilat" }), h("b", { text: fmtTL(kasa.paid) }))
+      ) : h("p", { class: "muted-s", text: canFinance ? "Bugünkü kasa özeti alınamadı." : "Kasa özeti yöneticiye özeldir; tahsilatı yine buradan girebilirsiniz." }),
+      h("div", { class: "section-t", text: `Kritik seviyenin altındaki stok (${lowItems.length})` }),
+      lowItems.length
+        ? h("div", { class: "ck-list" }, lowItems.slice(0, 6).map(lowRow))
+        : h("div", { class: "empty", text: "Kritik seviyenin altında stok kalemi yok." }),
+      lowItems.length > 6 ? h("p", { class: "muted-s" }, `${lowItems.length - 6} kalem daha var; `, h("a", { href: "#/inventory", text: "Envanter sayfasında görün" }), ".") : null
     );
 
     setMain(
@@ -1259,12 +1511,12 @@
         h("button", { class: "btn btn-ghost", type: "button", on: { click: openQuickSearch } }, "Hızlı Hasta Ara (Ctrl+K)"),
         h("a", { class: "btn btn-cta", href: "#/calendar" }, icon("plus"), "Randevu oluştur")),
       h("div", { class: "grid g4" },
-        occ,
-        kpi("Son 30 gün gelmeme", `%${o.attendance_30d.noshow_rate}`, `${o.attendance_30d.noshow} gelmeyen / ${o.attendance_30d.done} gelen`),
-        kpi("Gelmeyenlerden kayıp", o.loss ? fmtTL(o.loss.noshow_30d_try) : "-", o.loss ? `Ortalama işlem ${fmtTL(o.loss.avg_ticket_try)} üzerinden` : "Finans yetkisi gerektirir", "loss"),
-        kpi("LLM'siz cevap oranı", o.tokens_30d.llm_free_pct === null ? "-" : `%${o.tokens_30d.llm_free_pct}`, `${o.tokens_30d.replies} otomatik cevap, ${o.tokens_30d.tokens} token`, "good")
+        kpi({ label: "Bugünkü koltuk doluluğu", value: `%${o.today.occupancy}`, hint: `${o.today.appointments} randevu, ${o.today.confirmed} teyitli`, href: "#/calendar", bar: o.today.occupancy }),
+        kpi({ label: "Cevapsız mesaj", value: String(unanswered.length), hint: unanswered.length ? "Yanıt bekleyen hasta konuşması" : "Bekleyen konuşma yok", cls: unanswered.length ? "loss" : "good", href: "#/messages" }),
+        kpi({ label: "Son 30 gün gelmeme", value: `%${o.attendance_30d.noshow_rate}`, hint: `${o.attendance_30d.noshow} gelmeyen / ${o.attendance_30d.done} gelen`, href: "#/analytics" }),
+        kpi({ label: "Gelmeyenlerden kayıp", value: o.loss ? fmtTL(o.loss.noshow_30d_try) : "-", hint: o.loss ? `Ortalama işlem ${fmtTL(o.loss.avg_ticket_try)} üzerinden` : "Finans yetkisi gerektirir", cls: "loss", href: o.loss ? "#/kasa" : "" })
       ),
-      deskCard,
+      h("div", { class: "ck-grid" }, triageBlock, seatBlock, moneyBlock),
       h("div", { class: "grid g3", style: "margin-top:14px" },
         h("div", { class: "card span-2" },
           h("h3", null, "Son 14 gün: gelen mesaj ve açılan randevu",
@@ -1284,17 +1536,12 @@
             h("span", { text: "Bekleme listesi" }), h("a", { href: "#/waitlist", text: String(c.waitlist || 0) }),
             h("span", { text: "Kritik stok" }), h("a", { href: "#/inventory", text: String(c.low_stock || 0) }),
             h("span", { text: "Post-op alarm (7g)" }), h("b", { text: String(c.postop_alarms || 0) }),
-            h("span", { text: "Doldurulan koltuk (30g)" }), h("b", { text: String(c.refills || 0) })
+            h("span", { text: "Doldurulan koltuk (30g)" }), h("b", { text: String(c.refills || 0) }),
+            h("span", { text: "LLM'siz cevap oranı" }), h("b", { text: o.tokens_30d.llm_free_pct === null ? "-" : `%${o.tokens_30d.llm_free_pct}` })
           )
         )
       )
     );
-    const alertNav = document.querySelector('.nav a[data-k="alerts"]');
-    if (alertNav) {
-      const badge = alertNav.querySelector(".count");
-      if (badge) badge.textContent = c.alerts || "";
-      else if (c.alerts) alertNav.appendChild(h("span", { class: "count", text: c.alerts }));
-    }
   };
 
   function chart(series) {
