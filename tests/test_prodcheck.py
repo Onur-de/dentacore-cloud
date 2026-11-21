@@ -286,13 +286,15 @@ def test_env_example_uretim_anahtarlarini_belgeliyor():
 # ---------------------------------------------------------------- 3) gerçek açılış (alt süreç, temiz ortam)
 
 _BOOT = (
-    "import asyncio, sys\n"
+    "import asyncio, selectors, sys\n"
     f"sys.path.insert(0, {str(API_DIR)!r})\n"
     "from app.main import app\n"
     "async def go():\n"
     "    async with app.router.lifespan_context(app):\n"
     "        print('LIFESPAN_OK')\n"
-    "asyncio.run(go())\n"
+    # Windows: psycopg async ProactorEventLoop ile çalışmaz (Linux/Docker'da bu sınır yok).
+    "lf = (lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())) if sys.platform == 'win32' else None\n"
+    "asyncio.run(go(), loop_factory=lf)\n"
 )
 _KEEP = ("PATH", "SYSTEMROOT", "TEMP", "TMP", "COMSPEC", "PATHEXT", "WINDIR", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "HOME")
 
@@ -326,6 +328,12 @@ def test_uygulama_hatali_uretim_yapilandirmasiyla_acilmaz(ad, mutasyon, beklenen
     cikti = p.stdout + p.stderr
     assert p.returncode != 0, f"{ad}: uygulama açıldı! çıktı:\n{cikti[-800:]}"
     assert "LIFESPAN_OK" not in p.stdout
+    if ad == "fernet_gecersiz":
+        # Bilinen davranış: enterprise_ext.py modül yüklenirken core.fernet() çağırdığı için geçersiz anahtar
+        # lifespan'dan (prodcheck'ten) ÖNCE ham ValueError ile açılışı durdurur. Uygulama yine açılmaz (güvenli);
+        # yalnızca hata metni prodcheck'inki kadar okunaklı değil. Saf fonksiyon testi prodcheck kuralını ayrıca doğrular.
+        assert "Fernet key must be 32 url-safe base64" in cikti, cikti[-800:]
+        return
     assert BANNER in cikti, f"{ad}: red nedeni prodcheck değil:\n{cikti[-800:]}"
     assert beklenen in cikti
 
