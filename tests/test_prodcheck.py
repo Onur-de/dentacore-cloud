@@ -328,14 +328,21 @@ def test_uygulama_hatali_uretim_yapilandirmasiyla_acilmaz(ad, mutasyon, beklenen
     cikti = p.stdout + p.stderr
     assert p.returncode != 0, f"{ad}: uygulama açıldı! çıktı:\n{cikti[-800:]}"
     assert "LIFESPAN_OK" not in p.stdout
-    if ad == "fernet_gecersiz":
-        # Bilinen davranış: enterprise_ext.py modül yüklenirken core.fernet() çağırdığı için geçersiz anahtar
-        # lifespan'dan (prodcheck'ten) ÖNCE ham ValueError ile açılışı durdurur. Uygulama yine açılmaz (güvenli);
-        # yalnızca hata metni prodcheck'inki kadar okunaklı değil. Saf fonksiyon testi prodcheck kuralını ayrıca doğrular.
-        assert "Fernet key must be 32 url-safe base64" in cikti, cikti[-800:]
-        return
+    # Step 9: enterprise_ext artık import anında üretimde geçersiz anahtarla ham ValueError fırlatmaz; ret nedeni
+    # (fernet_gecersiz dahil) her zaman prodcheck'in okunaklı mesajıdır.
+    assert "Fernet key must be 32 url-safe base64" not in cikti, f"{ad}: ham cryptography hatası:\n{cikti[-800:]}"
     assert BANNER in cikti, f"{ad}: red nedeni prodcheck değil:\n{cikti[-800:]}"
     assert beklenen in cikti
+
+
+def test_uygulama_sizdirilmis_sifreleme_anahtariyla_acilmaz():
+    """c4d6a2f ile sızan (yasak listedeki) DATA_ENCRYPTION_KEY üretimde açılışı durdurur; hata metni anlaşılırdır."""
+    e = _boot_env()
+    e["DATA_ENCRYPTION_KEY"] = "Tet8XeZ17zgbFNprLrV7y-W8hnfGvpk4D-25FMXF2y8="
+    p = _boot(e)
+    cikti = p.stdout + p.stderr
+    assert p.returncode != 0 and "LIFESPAN_OK" not in p.stdout, cikti[-800:]
+    assert "sızıntı DATA_ENCRYPTION_KEY" in cikti, cikti[-800:]
 
 
 @pytest.mark.parametrize("eksik", ["ADMIN_TOKEN", "PHONE_HMAC_KEY", "DATA_ENCRYPTION_KEY", "DATABASE_URL"])

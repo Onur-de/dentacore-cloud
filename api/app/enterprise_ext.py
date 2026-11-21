@@ -2627,6 +2627,24 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
     app.router.routes.sort(key=lambda r: (1 if "{" in getattr(r, "path", "") else 0))
 
 
+def _eager_fernet():
+    """Anahtar tanımlıysa Fernet nesnesini import anında üretir; yoksa None (fernet_factory ilk kullanımda üretir).
+
+    Üretimde (DC_ENV=production) geçersiz anahtar burada ham bir cryptography hatasıyla uygulamayı düşürmez:
+    açılış doğrulaması (prodcheck, lifespan) anlaşılır mesajı verir ve açılışı durdurur. Üretim dışında hata aynen yükselir.
+    """
+    if not os.environ.get("DATA_ENCRYPTION_KEY"):
+        return None
+    from . import core
+    try:
+        return core.fernet()
+    except Exception:
+        from .prodcheck import is_production
+        if is_production():
+            return None
+        raise
+
+
 def register_enterprise_routes_for_pg(app: FastAPI) -> None:
     """PostgreSQL bulut katmanı (`api/app/main.py`) ile SQLite (`run_local.py`) arasında %100 uç ve çalışma zamanı eşitliği sağlar."""
     import atexit
@@ -2796,7 +2814,7 @@ def register_enterprise_routes_for_pg(app: FastAPI) -> None:
             "now_utc": lambda: datetime.now(timezone.utc),
             "client_ip": panel.client_ip,
             "root_dir": root_dir,
-            "fernet": core.fernet() if os.environ.get("DATA_ENCRYPTION_KEY") else None,
+            "fernet": _eager_fernet(),
             "fernet_factory": core.fernet,
             "phone_hmac_key": core.S.phone_hmac_key,
             "limiter": lambda: panel.limiter,
