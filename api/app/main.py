@@ -108,8 +108,8 @@ async def lifespan(app: FastAPI):
         state["sync_redis"] = None
         try:
             await asyncio.to_thread(sync_redis.close)
-        except Exception:  # noqa: BLE001 - kapanışta Redis zaten düşmüş olabilir; kapanışı engellemez
-            pass
+        except Exception as ex:  # noqa: BLE001 - kapanışta Redis zaten düşmüş olabilir; kapanışı engellemez
+            logging.getLogger("dentacore.ratelimit").warning("Senkron Redis istemcisi kapatılamadı: %s", type(ex).__name__)
     await wa.close_client()
     await ig.close_client()
     await db_close()
