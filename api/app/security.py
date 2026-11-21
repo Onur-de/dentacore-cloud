@@ -200,22 +200,17 @@ def clear_cookie_header() -> str:
 _RL_SYNC_LOCK = threading.Lock()
 
 class RateLimiter:
+    """Redis varsa tüm işçiler ortak sayaç kullanır. Redis anahtar/bağlantı hatası verirse (kesinti) istek 500 olmaz ve
+    sınır atlanmaz: o işçide süreç içi sayaca düşülür (sınır işçi başına uygulanır, yani geçici olarak gevşer).
+    `redis_errors` ve `degraded` sağlık/izleme için okunabilir."""
+
     def __init__(self, redis=None):
         self.redis = redis
         self.mem: dict[str, tuple[int, float]] = {}
+        self.redis_errors = 0
+        self.degraded = False
 
-    async def hit(self, key: str, limit: int, window: int) -> bool:
-        """True: izin var. False: sınır aşıldı."""
-        if self.redis:
-            k = f"dc:rl:{key}"
-            n = await self.redis.incr(k)
-            # Süreç kesilse bile anahtarın süresiz kalmaması için her çağrıda nx=True ile TTL güvencesi
-            try:
-                await self.redis.expire(k, window, nx=True)
-            except TypeError:
-                if n == 1:
-                    await self.redis.expire(k, window)
-            return n <= limit
+    def _hit_mem(self, key: str, limit: int, window: int) -> bool:
         now = time.time()
         if len(self.mem) > 2048:
             self.mem = {k: v for k, v in self.mem.items() if v[1] > now}
@@ -225,6 +220,28 @@ class RateLimiter:
         n += 1
         self.mem[key] = (n, exp)
         return n <= limit
+
+    async def hit(self, key: str, limit: int, window: int) -> bool:
+        """True: izin var. False: sınır aşıldı."""
+        if self.redis:
+            k = f"dc:rl:{key}"
+            try:
+                n = await self.redis.incr(k)
+                # Süreç kesilse bile anahtarın süresiz kalmaması için her çağrıda nx=True ile TTL güvencesi
+                try:
+                    await self.redis.expire(k, window, nx=True)
+                except TypeError:
+                    if n == 1:
+                        await self.redis.expire(k, window)
+                self.degraded = False
+                return n <= limit
+            except Exception:  # noqa: BLE001 - Redis kesintisi: süreç içi sayaca düş (loglanır, sayılır)
+                self.redis_errors += 1
+                self.degraded = True
+                if self.redis_errors == 1 or self.redis_errors % 100 == 0:
+                    import logging
+                    logging.getLogger("dentacore.ratelimit").error("Redis hız sınırı hatası (toplam %d); süreç içi sayaca düşüldü", self.redis_errors)
+        return self._hit_mem(key, limit, window)
 
     def hit_sync(self, key: str, limit: int, window: int) -> bool:
         """Senkron uçlar için süreç içi sayaç (thread güvenli). True: izin var."""
@@ -241,7 +258,10 @@ class RateLimiter:
 
     async def reset(self, key: str):
         if self.redis:
-            await self.redis.delete(f"dc:rl:{key}")
+            try:
+                await self.redis.delete(f"dc:rl:{key}")
+            except Exception:  # noqa: BLE001 - Redis kesintisinde sıfırlama sessizce yalnız yerelde yapılır
+                self.redis_errors += 1
         self.mem.pop(key, None)
 
 

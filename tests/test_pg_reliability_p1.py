@@ -90,8 +90,17 @@ async def _fresh_db(apply_migrations: bool = True) -> None:
         await _exec("INSERT INTO clinics (id, name, slug) VALUES (1, 'Test Klinik', 'test') ON CONFLICT DO NOTHING")
 
 
+def _selector_loop():
+    import selectors
+    return asyncio.SelectorEventLoop(selectors.SelectSelector())
+
+
+# Windows: psycopg async ProactorEventLoop ile çalışmaz; TestClient'ın anyio portalı da Selector döngüsü kullanmalı
+_BACKEND_OPTS = {"loop_factory": _selector_loop} if sys.platform == "win32" else {}
+
+
 def _run(coro):
-    """asyncio.run; Windows'ta psycopg ProactorEventLoop ile ?al??maz -> SelectorEventLoop kullan."""
+    """asyncio.run; Windows'ta psycopg ProactorEventLoop ile çalışmaz -> SelectorEventLoop kullan."""
     if sys.platform == "win32":
         import selectors
         return asyncio.run(coro, loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))
@@ -476,7 +485,7 @@ def test_http_webhook_is_persisted_deduped_ready_and_503_on_persist_failure(monk
     monkeypatch.setattr(modules, "mine_sleeping_plans", noop)
     main.app.dependency_overrides[panel.HQ_OWNER] = lambda: {"id": 1, "role": "owner", "clinic_id": 1}
     try:
-        with TestClient(main.app) as c:
+        with TestClient(main.app, backend_options=_BACKEND_OPTS) as c:
             with psycopg.connect(DSN, autocommit=True) as conn:  # lifespan migrations'ı uyguladı
                 conn.execute("INSERT INTO clinics (id, name, slug) VALUES (1,'T','t') ON CONFLICT DO NOTHING")
                 conn.execute("UPDATE clinics SET wa_phone_id='PID-P1', active=true WHERE id=1")

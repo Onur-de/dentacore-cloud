@@ -72,6 +72,8 @@ async def lifespan(app: FastAPI):
         if not env(k):
             raise RuntimeError(f"{k} tanımlı değil")
     assert_no_compromised_secrets()
+    from .prodcheck import enforce_production_config
+    enforce_production_config()  # DC_ENV=production: eksik/zayıf yapılandırmada açılışı durdurur (demo/yerel etkilenmez)
     await db_open()
     await run_migrations(str(MIGRATION))
     await panel.bootstrap_owner()

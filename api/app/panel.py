@@ -301,6 +301,9 @@ async def bootstrap_owner():
         return
     email, pw = env("OWNER_EMAIL").strip().lower(), env("OWNER_PASSWORD")
     if not email or len(pw) < 12:
+        from .prodcheck import is_production
+        if is_production():
+            raise RuntimeError("Üretimde ilk açılış için OWNER_EMAIL ve en az 12 karakterli OWNER_PASSWORD gerekli (hiç personel kaydı yok)")
         return
     h = await asyncio.to_thread(sec.hash_password, pw)
     await q("INSERT INTO staff_users (clinic_id, email, full_name, role, pw_hash) VALUES (1,%s,%s,'owner',%s)",
