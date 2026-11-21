@@ -954,11 +954,11 @@ async def _anonymize_patient_impl(pid: int, u: dict) -> dict:
         phone_plain = dec(p["phone_enc"]) if p.get("phone_enc") else ""
     except Exception:
         phone_plain = ""
-    # Dosyalar ?NCE depodan silinir: silinemeyen varsa hasta verisine dokunulmaz (yeniden denenebilir), yetim dosya kalmaz.
+    # Dosyalar ÖNCE depodan silinir: silinemeyen varsa hasta verisine dokunulmaz (yeniden denenebilir), yetim dosya kalmaz.
     media_res = await privacy.purge_media(cid, pid)
     if media_res["failed"]:
-        raise HTTPException(502, f"{len(media_res['failed'])} hasta dosyas? depodan silinemedi; hasta kayd? anonimle?tirilmedi. "
-                                 "Depo eri?imini kontrol edip yeniden deneyin.")
+        raise HTTPException(502, f"{len(media_res['failed'])} hasta dosyası depodan silinemedi; hasta kaydı anonimleştirilmedi. "
+                                 "Depo erişimini kontrol edip yeniden deneyin.")
     now_s = datetime.now(timezone.utc).isoformat()
     anon_hmac = hmac.new(os.environ.get("PHONE_HMAC_KEY", "").encode(), f"anon:{cid}:{pid}:{secrets.token_hex(8)}".encode(), hashlib.sha256).hexdigest()
     anon_enc = enc(f"anon-{pid}")
