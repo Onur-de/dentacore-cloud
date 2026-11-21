@@ -74,6 +74,8 @@ async def lifespan(app: FastAPI):
     assert_no_compromised_secrets()
     from .prodcheck import enforce_production_config
     enforce_production_config()  # DC_ENV=production: eksik/zayıf yapılandırmada açılışı durdurur (demo/yerel etkilenmez)
+    if media.backend_name() == "s3" or env("DC_ENV") == "production":
+        await asyncio.to_thread(media.selfcheck)  # hasta dosyası deposu yazılamıyorsa açılış başarısız olur (sessizce kaybetmez)
     await db_open()
     await run_migrations(str(MIGRATION))
     await panel.bootstrap_owner()
@@ -580,10 +582,14 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa",
             return await reply("Görsel paylaşmadan önce sağlık verisi açık rıza formunu onaylamanız gerekir. "
                                f"Form (1 dk): {link} Onaydan sonra görseli tekrar gönderebilirsiniz.", "L1-onam", "gorsel")
         data, mime = await wa.download_media(m[mtype]["id"])
-        result = media.assess_image(data)
+        try:
+            result = media.assess_media_file(data, mime=mime)
+        except (ValueError, OSError):
+            result = {"verdict": "invalid", "possible_opg": False}
         if result["verdict"] == "ok":
-            path = media.store_encrypted(pid, data, mime)
-            await add_alert(pid, "gorsel_alindi", f"Hasta #{pid} değerlendirmeye uygun görsel gönderdi ({result['w']}x{result['h']}). Dosya: {path}")
+            ext = {"image/png": "png", "image/webp": "webp"}.get(str(result.get("mime_type")), "jpg")
+            mid, _key = await media.persist_patient_media(clinic_id, pid, data, filename=f"whatsapp.{ext}", qc=result)
+            await add_alert(pid, "gorsel_alindi", f"Hasta #{pid} değerlendirmeye uygun görsel gönderdi ({result['w']}x{result['h']}). Dosya: hasta dosyaları #{mid}")
         return await reply(media.qc_reply(result, lang if lang in ("tr", "en") else "en"), "L1-gorsel-qc", "gorsel_" + result["verdict"])
 
     if not text:

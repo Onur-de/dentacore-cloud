@@ -8,3 +8,4 @@ redis==5.2.1
 cryptography==50.0.2
 Pillow==13.0.0
 python-multipart==0.0.34
+botocore==1.43.0

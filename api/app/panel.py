@@ -857,7 +857,7 @@ async def get_patient(pid: int, reveal: bool = False, u: dict = Depends(require_
         "finance_summary": {"balance": tl(p["balance"])} if can_fin_view else {"masked": True},
         "appointments": appts,
         "payments": pays if can_fin_view else [],
-        "anamnesis": anam, "consents": consents,
+        "anamnesis": anam, "consents": consents, "media_files": await _patient_media_rows(cid, pid),
         "anamnesis_links": {a["id"]: modules.sign(f"/view/anamnez/{a['id']}", ttl=900) for a in anam} if u["role"] in ("owner", "doctor") else {},
     }
     if can_fin_view:
@@ -2314,6 +2314,72 @@ async def check_duplicate_patient_pg(phone: str = "", name: str = "", u: dict = 
     return {"duplicate": len(matches) > 0, "matches": matches}
 
 
+async def _read_limited_body(request: Request, limit: int) -> bytes:
+    """Gövdeyi sınırı aşar aşmaz keser: 15 MB'tan büyük istek belleği şişiremez."""
+    cl = request.headers.get("content-length", "")
+    if cl.isdigit() and int(cl) > limit:
+        raise HTTPException(413, f"Dosya çok büyük (en fazla {limit // (1024 * 1024)} MB)")
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf += chunk
+        if len(buf) > limit:
+            raise HTTPException(413, f"Dosya çok büyük (en fazla {limit // (1024 * 1024)} MB)")
+    return bytes(buf)
+
+
+async def _patient_media_rows(cid: int, pid: int) -> list[dict]:
+    """Panele giden dosya listesi. Depo anahtarı (encrypted_path) istemciye asla verilmez."""
+    rows = await q(
+        """SELECT pm.id, pm.category, pm.stage, pm.mime_type, pm.qc_verdict, pm.is_dicom, pm.width, pm.height, pm.note,
+                  pm.uploaded_by, pm.created_at,
+                  COALESCE(NULLIF(pm.original_filename,''), pm.filename) AS filename,
+                  GREATEST(pm.file_size_bytes, pm.size_bytes) AS size_bytes,
+                  COALESCE(NULLIF(pm.sha256_hash,''), pm.sha256) AS sha256,
+                  s.full_name AS uploaded_by_name
+           FROM patient_media pm LEFT JOIN staff_users s ON s.id = pm.uploaded_by
+           WHERE pm.clinic_id=%s AND pm.patient_id=%s ORDER BY pm.id DESC""", cid, pid)
+    for r in rows:
+        r["is_dicom"] = bool(r["is_dicom"])
+        r["size_bytes"] = int(r["size_bytes"] or 0)
+    return rows
+
+
+async def _media_row(cid: int, pid: int, mid: int) -> dict:
+    row = await q1(
+        """SELECT id, clinic_id, patient_id, mime_type, original_filename, filename, encrypted_path,
+                  COALESCE(NULLIF(sha256_hash,''), sha256) AS sha256
+           FROM patient_media WHERE id=%s AND patient_id=%s AND clinic_id=%s""", mid, pid, cid)
+    if not row:
+        raise HTTPException(404, "dosya kaydı bulunamadı")
+    return row
+
+
+async def _media_response(row: dict, u: dict, action: str) -> Response:
+    target = f"patient:{row['patient_id']}:media:{row['id']}"
+    try:
+        data = await asyncio.to_thread(media.load_decrypted, str(row["encrypted_path"]), str(row.get("sha256") or ""))
+    except media.MediaNotFound:
+        raise HTTPException(404, "Şifreli dosya depoda bulunamadı") from None
+    except media.MediaIntegrityError:
+        await log(u, "patient.media_integrity_fail", target)
+        raise HTTPException(500, "Dosya bütünlük doğrulamasından geçemedi; dosya bozulmuş olabilir") from None
+    except media.MediaStorageError:
+        raise HTTPException(503, "Dosya deposuna şu anda ulaşılamıyor") from None
+    except media.MediaError:
+        raise HTTPException(500, "Dosya kaydındaki depo anahtarı geçersiz") from None
+    mime = str(row.get("mime_type") or "application/octet-stream")
+    disp = "inline" if mime.startswith("image/") and "svg" not in mime.lower() else "attachment"
+    safe_fn = re.sub(r"[^a-zA-Z0-9._-]", "_", row.get("original_filename") or row.get("filename") or "dosya.bin")[:120] or "dosya.bin"
+    await log(u, action, target)
+    return Response(content=data, media_type=mime, headers={
+        "content-disposition": f'{disp}; filename="{safe_fn}"',
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store, private",
+        "content-security-policy": "default-src 'none'; sandbox",
+        "x-dentacore-sha256": str(row.get("sha256") or ""),
+    })
+
+
 @router.post("/app/api/patients/{pid}/media")
 async def upload_patient_media_pg(pid: int, request: Request, u: dict = Depends(require_perm("patient_edit"))):
     cid = u["clinic_id"]
@@ -2321,9 +2387,9 @@ async def upload_patient_media_pg(pid: int, request: Request, u: dict = Depends(
     p_row = await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
     if not p_row:
         raise HTTPException(404, "hasta yok")
-    data = await request.body()
-    if not data or len(data) > 15 * 1024 * 1024:
-        raise HTTPException(400, "Geçersiz dosya boyutu (en fazla 15 MB)")
+    data = await _read_limited_body(request, media.MAX_UPLOAD_BYTES)
+    if not data:
+        raise HTTPException(400, "Boş dosya yüklenemez")
     qp = request.query_params
     raw_base_fn = Path(str(qp.get("filename") or "upload.jpg").replace("\\", "/")).name
     safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", raw_base_fn)[:120] or "upload.jpg"
@@ -2333,23 +2399,84 @@ async def upload_patient_media_pg(pid: int, request: Request, u: dict = Depends(
         qc = media.assess_media_file(data, filename=safe_filename)
     except ValueError as ve:
         raise HTTPException(400, str(ve)) from None
-    is_dcm = bool(qc.get("is_dicom") or qc.get("kind") == "dicom")
-    eff_mime = str(qc.get("mime_type") or qc.get("mime") or "image/jpeg")
-    enc_path = media.store_encrypted(pid, data, eff_mime)
-    enc_name = Path(enc_path).name
-    m_row = await q1(
-        """INSERT INTO patient_media
-           (clinic_id,patient_id,category,stage,original_filename,mime_type,file_size_bytes,
-            sha256_hash,encrypted_path,is_dicom,width,height,sharpness,brightness,qc_verdict,uploaded_by,created_at)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-        cid, pid, "xray" if is_dcm else category, stage, safe_filename, eff_mime, len(data),
-        qc.get("sha256", ""), enc_name, 1 if is_dcm else 0, int(qc.get("w") or 0), int(qc.get("h") or 0),
-        float(qc.get("sharpness") or 0), float(qc.get("brightness") or 0), qc["verdict"], u["id"],
-        datetime.now(timezone.utc).isoformat(),
-    )
-    mid = m_row["id"] if m_row else None
-    await log(u, "patient.media_upload", f"patient:{pid}:media:{mid}", {"verdict": qc["verdict"]})
-    return {**qc, "id": mid, "media_id": mid, "patient_id": pid, "filename": safe_filename, "encrypted_file": enc_name}
+    except OSError:
+        raise HTTPException(400, "Görsel dosyası çözülemedi (bozuk ya da desteklenmeyen biçim)") from None
+    try:
+        mid, _key = await media.persist_patient_media(
+            cid, pid, data, filename=safe_filename, category=category, stage=stage, uploaded_by=u["id"], qc=qc)
+    except media.MediaError:
+        raise HTTPException(503, "Dosya kalıcı depoya yazılamadı; lütfen tekrar deneyin") from None
+    await log(u, "patient.media_upload", f"patient:{pid}:media:{mid}", {"verdict": qc["verdict"], "backend": media.backend_name()})
+    return {**qc, "id": mid, "media_id": mid, "patient_id": pid, "filename": safe_filename}
+
+
+@router.get("/app/api/patients/{pid}/media")
+async def list_patient_media_pg(pid: int, u: dict = Depends(require_perm("patient_view"))):
+    cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
+    if not await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid):
+        raise HTTPException(404, "hasta yok")
+    rows = await _patient_media_rows(cid, pid)
+    before = [r for r in rows if r["category"] == "photo" and r["stage"] == "before"]
+    after = [r for r in rows if r["category"] == "photo" and r["stage"] == "after"]
+    return {
+        "disclaimer": media.QC_DISCLAIMER_TR,
+        "files": rows,
+        "before_after_summary": {"before_count": len(before), "after_count": len(after)},
+    }
+
+
+@router.get("/app/api/patients/{pid}/media/{mid}")
+async def download_patient_media_pg(pid: int, mid: int, u: dict = Depends(require_perm("patient_view"))):
+    cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
+    return await _media_response(await _media_row(cid, pid, mid), u, "patient.media_download")
+
+
+@router.post("/app/api/patients/{pid}/media/{mid}/link")
+async def patient_media_link_pg(pid: int, mid: int, ttl: int = Query(media.LINK_DEFAULT_TTL, ge=media.LINK_MIN_TTL, le=media.LINK_MAX_TTL),
+                                u: dict = Depends(require_perm("patient_view"))):
+    """Süreli, imzalı indirme bağlantısı. Bağlantı yalnızca bu kullanıcı ve bu klinik için çalışır."""
+    cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
+    await _media_row(cid, pid, mid)
+    token, exp = media.sign_link(mid, cid, u["id"], ttl)
+    await log(u, "patient.media_link", f"patient:{pid}:media:{mid}", {"ttl": ttl})
+    return {"url": f"/app/api/media/dl/{token}", "expires_at": datetime.fromtimestamp(exp, timezone.utc).isoformat(), "expires_in": ttl}
+
+
+@router.get("/app/api/media/dl/{token}")
+async def download_media_by_link_pg(token: str, u: dict = Depends(require_perm("patient_view"))):
+    try:
+        claims = media.verify_link(token)
+    except media.MediaLinkError as ex:
+        if ex.reason == "expired":
+            raise HTTPException(410, "Bağlantının süresi dolmuş") from None
+        raise HTTPException(403, "Bağlantı geçersiz") from None
+    # İmza geçerli olsa bile: oturumdaki kullanıcı ve klinik, bağlantıyı üretenle aynı olmak zorunda.
+    if claims["user_id"] != u["id"] or claims["clinic_id"] != u["clinic_id"]:
+        raise HTTPException(403, "Bu bağlantı bu oturum için üretilmemiş")
+    row = await q1("SELECT patient_id FROM patient_media WHERE id=%s AND clinic_id=%s", claims["media_id"], claims["clinic_id"])
+    if not row:
+        raise HTTPException(404, "dosya kaydı bulunamadı")
+    await _enforce_doc_own_patient_pg(u["clinic_id"], int(row["patient_id"]), u)
+    return await _media_response(await _media_row(u["clinic_id"], int(row["patient_id"]), claims["media_id"]), u, "patient.media_download_link")
+
+
+@router.delete("/app/api/patients/{pid}/media/{mid}")
+async def delete_patient_media_pg(pid: int, mid: int, u: dict = Depends(require_perm("delete_cancel"))):
+    """Önce fiziksel/nesne deposundan, sonra veritabanından siler. Depo silinemezse kayıt korunur (sahipsiz dosya kalmaz)."""
+    cid = u["clinic_id"]
+    await _enforce_doc_own_patient_pg(cid, pid, u)
+    row = await _media_row(cid, pid, mid)
+    try:
+        existed = await asyncio.to_thread(media.delete_stored, str(row["encrypted_path"]))
+    except media.MediaError:
+        await log(u, "patient.media_delete_failed", f"patient:{pid}:media:{mid}")
+        raise HTTPException(502, "Dosya depodan silinemedi; kayıt korundu, lütfen tekrar deneyin") from None
+    await q("DELETE FROM patient_media WHERE id=%s AND clinic_id=%s", mid, cid)
+    await log(u, "patient.media_delete", f"patient:{pid}:media:{mid}", {"object_existed": existed})
+    return {"ok": True, "storage_deleted": existed}
 
 
 class PostopSchedPgIn(BaseModel):
