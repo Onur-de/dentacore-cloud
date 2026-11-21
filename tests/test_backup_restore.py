@@ -150,6 +150,29 @@ def test_non_empty_target_is_refused_and_left_intact(drill):
     assert d.fingerprint(d.src) == before
 
 
+def test_restore_into_freshly_initialised_compose_target(drill):
+    """Üretim 'yeni sunucu' senaryosu: compose'un postgres'i init.sql ile şemayı kurar (tablolar var, SATIR yok) -> reddedilmemeli."""
+    d = drill
+    dst = d.start_pg("dst-init", with_init=True)
+    assert d.psql(dst, "dentacore", "select count(*) from pg_tables where schemaname='public'").strip() != "0"
+    r = d.restore(d.fname, d.key, dst)
+    assert r.rc == 0, r
+    assert d.fingerprint(d.src) == d.fingerprint(dst)
+
+
+def test_initialised_target_with_any_row_is_refused_unless_forced(drill):
+    d = drill
+    dst = d.start_pg("dst-init-row", with_init=True)
+    d.psql(dst, "dentacore", "CREATE TABLE scratch_live(x int); INSERT INTO scratch_live VALUES (1)")
+    r = d.restore(d.fname, d.key, dst)
+    assert r.rc == 4 and "BOS DEGIL" in r.err, r
+    assert d.psql(dst, "dentacore", "select count(*) from scratch_live").strip() == "1"  # dokunulmadı
+    forced = d.restore(d.fname, d.key, dst, "--force-nonempty")  # bilinçli ezme yolu
+    assert forced.rc == 0, forced
+    assert d.fingerprint(d.src) == d.fingerprint(dst)
+    assert "scratch_live" not in d.fingerprint(dst)["tables"]
+
+
 # ------------------------------------------------------------------ off-host
 def test_offhost_success_copies_file_and_checksum(drill):
     d = drill

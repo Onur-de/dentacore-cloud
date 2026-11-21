@@ -236,12 +236,13 @@ ANALYZE;
         return {"audit_chain": chain, "patients_checked": len(pats), "patients_bad": bad}
 
 
-def run_drill(patients: int, keep: bool = False) -> dict:
-    m: dict = {"patients_seeded": patients}
+def run_drill(patients: int, keep: bool = False, init_target: bool = False) -> dict:
+    """init_target=True: hedef, üretim compose'unun taze PostgreSQL'ini taklit eder (init.sql uygulanmış, veri yok)."""
+    m: dict = {"patients_seeded": patients, "target": "init.sql uygulanmis taze kume" if init_target else "çıplak boş küme"}
     with Drill(keep=keep) as d:
         d.build_image()
         src = d.start_pg("src", with_init=True)
-        dst = d.start_pg("dst", with_init=False)
+        dst = d.start_pg("dst", with_init=init_target)
         d.migrate(src)
         m["seed"] = d.seed(src, patients)
         m["source_db_size"] = d.psql(src, "dentacore", "select pg_size_pretty(pg_database_size('dentacore'))").strip()
@@ -269,7 +270,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--patients", type=int, default=2000)
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--init-target", action="store_true", help="hedef: init.sql uygulanmış taze compose PG'si (üretim yeni-sunucu senaryosu)")
     a = ap.parse_args()
     if not docker_available():
         sys.exit("docker erisilemiyor")
-    print(json.dumps(run_drill(a.patients, a.keep), indent=2, ensure_ascii=False))
+    print(json.dumps(run_drill(a.patients, a.keep, a.init_target), indent=2, ensure_ascii=False))
