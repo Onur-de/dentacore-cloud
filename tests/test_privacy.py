@@ -16,7 +16,6 @@ import json
 import pathlib
 import secrets
 import sys
-import uuid
 
 import psycopg
 import pytest
@@ -30,7 +29,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from pg_app_harness import make_jpeg, pg_app  # noqa: E402
 from test_media_storage import S3_ENDPOINT, _raw_s3, _s3_env, _s3_unavailable  # noqa: E402,F401
 
-from app import media, privacy  # noqa: E402
+from app import privacy  # noqa: E402
 
 TEXT_TYPES = ("text", "character varying", "json", "jsonb", "ARRAY")
 
@@ -75,7 +74,7 @@ class Db:
                 row[n] = self.conn.execute("SELECT now() AS n").fetchone()["n"]
         names = ", ".join(row)
         ph = ", ".join(["%s"] * len(row))
-        return self.conn.execute(f"INSERT INTO {table} ({names}) VALUES ({ph}) RETURNING id", list(row.values())).fetchone()["id"]
+        return self.conn.execute(f"INSERT INTO {table} ({names}) VALUES ({ph}) RETURNING id", list(row.values())).fetchone()["id"]  # noqa: S608
 
     def one(self, sql: str, *a):
         return self.conn.execute(sql, a).fetchone()
@@ -91,7 +90,7 @@ class Db:
         """Tüm tablolar/sütunlar: ham ya da (Fernet ise) çözülmüş değerde kanarya geçen (tablo, sütun) kümesi."""
         found: set[tuple[str, str]] = set()
         for t in self.tables():
-            for r in self.all(f"SELECT * FROM {t}"):
+            for r in self.all(f"SELECT * FROM {t}"):  # noqa: S608
                 for k, v in r.items():
                     if v is None:
                         continue
@@ -210,8 +209,8 @@ def test_policy_classifies_every_patient_table_in_live_schema(world):
         assert privacy.POLICY[t]["anonymize"] == "scrub", t
         have = {r["column_name"] for r in db.all("SELECT column_name FROM information_schema.columns WHERE table_name=%s", t)}
         assert set(cols) <= have, (t, set(cols) - have)
-    for key, (t, cols, _s) in privacy.EXPORT_SECTIONS.items():
-        db.all(f"SELECT {cols} FROM {t} LIMIT 0")  # sütun adları şemada var mı
+    for _key, (t, cols, _s) in privacy.EXPORT_SECTIONS.items():
+        db.all(f"SELECT {cols} FROM {t} LIMIT 0")  # noqa: S608  # sütun adları şemada var mı
     for t, v in privacy.POLICY.items():
         assert v["anonymize"] in ("special", "scrub", "delete", "purge", "keep") and v["why"].strip(), t
 
@@ -407,6 +406,7 @@ def test_anonymize_deletes_objects_from_s3_and_leaves_other_patients_files(s3_bu
             assert not (k1 & left), "S3'te hasta nesneleri kaldı"
             assert k2 <= left, "komşu hastanın nesnesi silinmemeli"
             assert db.one("SELECT count(*) n FROM patient_media WHERE patient_id=%s", p1)["n"] == 0
-            assert a.get(f"/app/api/patients/{p2}/media/{db.one('SELECT id FROM patient_media WHERE patient_id=%s', p2)['id']}").status_code == 200
+            p2_media_id = db.one("SELECT id FROM patient_media WHERE patient_id=%s", p2)["id"]
+            assert a.get(f"/app/api/patients/{p2}/media/{p2_media_id}").status_code == 200
         finally:
             db.close()

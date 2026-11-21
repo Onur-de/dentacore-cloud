@@ -85,11 +85,31 @@ EXPORT_SECTIONS: dict[str, tuple[str, str, bool]] = {
 }
 
 
+_IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def _assert_safe_identifiers() -> None:
+    """SQL'e f-string ile giren tablo/sütun adları YALNIZ bu modüldeki sabitlerden gelir (kullanıcı girdisi değil).
+    Yine de içe aktarma anında sıkı biçimde doğrulanır: hatalı bir sabit sunucu açılmadan patlar (S608 için gerçek kalkan)."""
+    names: list[str] = []
+    for table, cols in SCRUB.items():
+        names += [table, *cols]
+    for table, cols, _scoped in EXPORT_SECTIONS.values():
+        names += [table, *(c.strip() for c in cols.split(","))]
+    bad = [n for n in names if not _IDENT_RE.match(n)]
+    if bad:
+        raise RuntimeError(f"privacy: güvensiz SQL tanımlayıcısı: {bad}")
+
+
+_assert_safe_identifiers()
+
+
 async def export_sections(cid: int, pid: int) -> dict[str, list[dict]]:
     """Panel dışa aktarmasına eklenen bölümler. Dosya baytları dahil DEĞİLDİR; media_files yalnızca üst veridir."""
     out: dict[str, list[dict]] = {}
     for key, (table, cols, scoped) in EXPORT_SECTIONS.items():
-        sql = f"SELECT {cols} FROM {table} WHERE patient_id=%s" + (" AND clinic_id=%s" if scoped else "") + " ORDER BY id"
+        # tablo/sütun adları sabit tablodan (_assert_safe_identifiers ile doğrulanır); değerler %s ile bağlanır
+        sql = f"SELECT {cols} FROM {table} WHERE patient_id=%s" + (" AND clinic_id=%s" if scoped else "") + " ORDER BY id"  # noqa: S608  # nosec B608
         rows = await (q(sql, pid, cid) if scoped else q(sql, pid))
         if key == "messages":
             for r in rows:
@@ -135,7 +155,7 @@ async def scrub_in_tx(t, cid: int, pid: int, phone: str) -> dict:
     done: dict[str, int] = {}
     for table, cols in SCRUB.items():
         sets = ", ".join(f"{c}=%s" for c in cols)
-        rows = await t.q(f"UPDATE {table} SET {sets} WHERE clinic_id=%s AND patient_id=%s RETURNING id", *cols.values(), cid, pid)
+        rows = await t.q(f"UPDATE {table} SET {sets} WHERE clinic_id=%s AND patient_id=%s RETURNING id", *cols.values(), cid, pid)  # noqa: S608  # nosec B608
         done[table] = len(rows or [])
     rows = await t.q(
         "UPDATE patients SET notes='', birth_date='', click_id='', utm_source='', utm_medium='', utm_campaign='' "
