@@ -21,7 +21,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Res
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 
-from . import cal, media, modules, security as sec
+from . import cal, media, modules, privacy, security as sec
 from .core import (S, add_alert, dec, dec_msg_body, enc, env, has_consent, ip_hash, log_msg, norm_phone, phone_hmac, q, q1, tx, upsert_patient)
 from .dental_catalog import (PATIENT_SOURCE_LABELS, PERMISSION_LABELS_TR, detect_acquisition_source, is_bot_traffic, resolve_permissions)
 from .router import TokenRouter
@@ -905,6 +905,10 @@ async def export_patient_data(pid: int, u: dict = Depends(OWNER)):
         phone = dec(p["phone_enc"])
     except Exception:
         phone = "***"
+    try:
+        notes_private = dec(p["notes_enc"]) if p.get("notes_enc") else None
+    except Exception:
+        notes_private = None
     anam_rows = await q("SELECT id, answers_enc, red_flags, signer_name, signature_sha256, signed_at FROM anamnesis WHERE patient_id=%s ORDER BY id", pid)
     anam_out = []
     for a in anam_rows:
@@ -927,6 +931,7 @@ async def export_patient_data(pid: int, u: dict = Depends(OWNER)):
         "patient": {
             "id": p["id"], "display_name": p["display_name"], "phone": phone,
             "lang": p["lang"], "channel": p["channel"], "active": bool(p.get("active", True)), "created_at": p["created_at"],
+            "birth_date": p.get("birth_date"), "notes": p.get("notes"), "private_notes": notes_private,
         },
         "consents": await q("SELECT id, kind, text_version, text_sha256, channel, granted_at, revoked_at FROM consents WHERE patient_id=%s ORDER BY id", pid),
         "anamnesis": anam_out,
@@ -936,14 +941,24 @@ async def export_patient_data(pid: int, u: dict = Depends(OWNER)):
         "payments": pays,
         "waitlist": await q("SELECT id, treatment, earliest, active, created_at FROM waitlist WHERE patient_id=%s ORDER BY id", pid),
         "postop_checks": await q("SELECT id, procedure, stage, due_at, sent_at, pain_score, answered_at, alarm FROM postop_checks WHERE patient_id=%s ORDER BY id", pid),
+        **await privacy.export_sections(cid, pid),
     }
 
 
 async def _anonymize_patient_impl(pid: int, u: dict) -> dict:
     cid = u["clinic_id"]
-    p = await q1("SELECT id FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
+    p = await q1("SELECT id, phone_enc FROM patients WHERE id=%s AND clinic_id=%s", pid, cid)
     if not p:
         raise HTTPException(404, "hasta yok")
+    try:
+        phone_plain = dec(p["phone_enc"]) if p.get("phone_enc") else ""
+    except Exception:
+        phone_plain = ""
+    # Dosyalar ?NCE depodan silinir: silinemeyen varsa hasta verisine dokunulmaz (yeniden denenebilir), yetim dosya kalmaz.
+    media_res = await privacy.purge_media(cid, pid)
+    if media_res["failed"]:
+        raise HTTPException(502, f"{len(media_res['failed'])} hasta dosyas? depodan silinemedi; hasta kayd? anonimle?tirilmedi. "
+                                 "Depo eri?imini kontrol edip yeniden deneyin.")
     now_s = datetime.now(timezone.utc).isoformat()
     anon_hmac = hmac.new(os.environ.get("PHONE_HMAC_KEY", "").encode(), f"anon:{cid}:{pid}:{secrets.token_hex(8)}".encode(), hashlib.sha256).hexdigest()
     anon_enc = enc(f"anon-{pid}")
@@ -966,8 +981,11 @@ async def _anonymize_patient_impl(pid: int, u: dict) -> dict:
         await t.q("UPDATE alerts SET detail=%s, acknowledged_at=coalesce(acknowledged_at, now()) WHERE patient_id=%s",
                   f"Anonimleştirilmiş hasta (#{pid}) kaydı.", pid)
         await t.q("UPDATE waitlist SET active=false WHERE patient_id=%s", pid)
-    await log(u, "patient.anonymize", f"patient:{pid}", {"financial_records_preserved": True})
-    return {"ok": True, "patient_id": pid, "anonymized": True, "financial_records_preserved": True}
+        scrubbed = await privacy.scrub_in_tx(t, cid, pid, phone_plain)
+    await log(u, "patient.anonymize", f"patient:{pid}", {"financial_records_preserved": True, "media_files_deleted": media_res["deleted"],
+                                                          "scrubbed": scrubbed})
+    return {"ok": True, "patient_id": pid, "anonymized": True, "financial_records_preserved": True,
+            "media_files_deleted": media_res["deleted"], "scrubbed": scrubbed}
 
 
 @router.post("/app/api/patients/{pid}/anonymize")
