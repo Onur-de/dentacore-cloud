@@ -138,7 +138,7 @@ async def scrub_in_tx(t, cid: int, pid: int, phone: str) -> dict:
         rows = await t.q(f"UPDATE {table} SET {sets} WHERE clinic_id=%s AND patient_id=%s RETURNING id", *cols.values(), cid, pid)
         done[table] = len(rows or [])
     rows = await t.q(
-        "UPDATE patients SET notes='', birth_date=NULL, click_id='', utm_source='', utm_medium='', utm_campaign='' "
+        "UPDATE patients SET notes='', birth_date='', click_id='', utm_source='', utm_medium='', utm_campaign='' "
         "WHERE id=%s AND clinic_id=%s RETURNING id", pid, cid)
     done["patients_extra"] = len(rows or [])
     rows = await t.q(
