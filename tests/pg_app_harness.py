@@ -118,7 +118,7 @@ class PgApp:
     def new_clinic(self, hq: Session, name: str) -> Session:
         """HQ ile yeni klinik + o kliniğin (HQ olmayan) sahibi; sahibi olarak oturum açılmış Session döner."""
         email = f"sahip-{uuid.uuid4().hex[:8]}@klinik.example"
-        pw = secrets.token_urlsafe(18)
+        pw = secrets.token_urlsafe(18) + 'aZ7q'
         r = hq.post("/app/api/clinics", json={
             "clinic_name": name, "owner_name": "Klinik Sahibi", "owner_email": email, "owner_password": pw})
         assert r.status_code == 200, r.text[:300]
@@ -183,7 +183,7 @@ def pg_app(extra_env: dict[str, str] | None = None):
     try:
         base_dsn, _, _ = PG_DSN.rpartition("/")
         media_dir = pathlib.Path(tmp.name) / "images"
-        owner_pw = secrets.token_urlsafe(20)
+        owner_pw = secrets.token_urlsafe(20) + 'aZ7q'
         env = {k: v for k, v in os.environ.items() if k in _KEEP}
         env.update({
             "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "Europe/Istanbul",
