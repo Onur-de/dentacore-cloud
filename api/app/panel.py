@@ -1129,6 +1129,8 @@ async def update_odontogram_record(pid: int, rid: int, b: OdontogramUpdateIn, u:
     new_name = b.procedure_name if b.procedure_name is not None else rec["procedure_name"]
     new_amt = kurus(b.amount) if b.amount is not None else rec["amount_kurus"]
     new_doc = b.doctor_id if b.doctor_id is not None else rec["doctor_id"]
+    if b.doctor_id is not None and not await q1("SELECT id FROM staff_users WHERE id=%s AND clinic_id=%s", b.doctor_id, cid):
+        raise HTTPException(404, "hekim yok")
     new_note = b.note if b.note is not None else rec["note"]
     voided: list = []
     new_charge_id = None
@@ -1411,7 +1413,7 @@ class StockTransferIn(BaseModel):
 
 
 @router.post("/app/api/inventory/{iid}/transfer")
-async def transfer_item(iid: int, b: StockTransferIn, u: dict = Depends(CLINICAL)):
+async def transfer_item(iid: int, b: StockTransferIn, u: dict = Depends(HQ_OWNER)):
     cid = u["clinic_id"]
     if b.target_clinic_id == cid:
         raise HTTPException(400, "Hedef şube kaynak şubeyle aynı olamaz")
@@ -1433,7 +1435,8 @@ async def transfer_item(iid: int, b: StockTransferIn, u: dict = Depends(CLINICAL
         )
         dst = await t.q1("SELECT id FROM inventory_items WHERE clinic_id=%s AND name=%s AND active FOR UPDATE", b.target_clinic_id, src["name"])
         if dst:
-            dst_upd = await t.q1("UPDATE inventory_items SET qty = qty + %s WHERE id=%s RETURNING id, qty", b.qty, dst["id"])
+            dst_upd = await t.q1("UPDATE inventory_items SET qty = qty + %s WHERE id=%s AND clinic_id=%s RETURNING id, qty",
+                                 b.qty, dst["id"], b.target_clinic_id)
         else:
             dst_upd = await t.q1(
                 """INSERT INTO inventory_items (clinic_id, name, sku, unit, qty, min_qty, unit_cost_kurus)
