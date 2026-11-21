@@ -4143,7 +4143,7 @@ textarea.input { min-height: 84px; }
             a.status === "cancelled" && new Date(a.starts_at) > new Date() ? act(a, "booked", "Geri al") : null,
             h("a", { class: "btn btn-sm btn-ghost", href: `/app/api/appointments/${a.id}/ics`, download: `randevu-${a.id}.ics` }, "+ iPhone (.ics)"),
             a.google_cal_url ? h("a", { class: "btn btn-sm btn-ghost", href: a.google_cal_url, target: "_blank", rel: "noopener noreferrer" }, "+ Android / Google") : null,
-            a.patient_id ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient(a.patient_id) } }, "Hasta") : null
+            a.patient_id ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient360(a.patient_id, "appointments") } }, "Hasta") : null
           )
         );
       })) : h("div", { class: "card empty", text: "Bu gün için randevu yok. Yeni randevu düğmesiyle ekleyebilirsiniz." })
@@ -4283,7 +4283,7 @@ textarea.input { min-height: 84px; }
       await api(`/app/api/appointments/${a.id}`, { method: "PATCH", body });
       toast("Randevu güncellendi");
       S.day = sod(new Date(body.starts_at));
-      route();
+      afterChange(a.patient_id);
     }, "Değişikliği Kaydet");
   }
 
@@ -4586,7 +4586,7 @@ textarea.input { min-height: 84px; }
       if (curPage > totalPages) curPage = totalPages;
       const slice = pageSize > 0 ? filtered.slice((curPage - 1) * pageSize, curPage * pageSize) : filtered;
 
-      ptbody.replaceChildren(...(slice.length ? slice.map((p) => h("tr", { class: "click", on: { click: () => openPatient(p.id) } },
+      ptbody.replaceChildren(...(slice.length ? slice.map((p) => h("tr", { class: "click", on: { click: () => openPatient360(p.id, "summary") } },
         h("td", null,
           h("b", { text: p.display_name || `Hasta #${p.id}` }), " ",
           p.red_flag ? tag("Kırmızı bayrak", "red") : null,
@@ -4603,7 +4603,7 @@ textarea.input { min-height: 84px; }
           p.balance > 0 ? h("b", { style: "color:var(--amber-hover)", text: fmtTL(p.balance) }) : fmtTL(p.balance),
           p.planned_total > 0 ? h("small", { style: "display:block;color:var(--muted)", text: `Plan: ${fmtTL(p.planned_total)}` }) : null
         ),
-        h("td", null, h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": `${p.display_name || "Hasta"} kartını aç`, on: { click: (ev) => { ev.stopPropagation(); openPatient(p.id); } } }, "Aç"))
+        h("td", null, h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": `${p.display_name || "Hasta"} kartını aç`, on: { click: (ev) => { ev.stopPropagation(); openPatient360(p.id, "summary"); } } }, "Aç"))
       )) : [h("tr", null, h("td", { colSpan: 7, class: "empty", text: "Hasta kaydı bulunamadı." }))]));
 
       if (total > 25) {
@@ -5109,28 +5109,182 @@ textarea.input { min-height: 84px; }
     }
 
     const drawerTabDefs = [
-      ["all", "Tümü (Tam Görünüm)"],
-      ["summary", "1. Özet & İletişim"],
-      ["odo", "2. Diş Haritası & Perio"],
-      ["finance", "3. Finans & Avans & İade"],
-      ["clinical", "4. Onam / Lab / İmplant / Röntgen"],
+      ["summary", "Özet & Anamnez"],
+      ["messages", "WhatsApp"],
+      ["odontogram", "Odontogram & Not"],
+      ["appointments", "Randevu & .ics"],
+      ["finance", "Kasa & Medya"],
     ];
-    const drawerTabsBar = h("div", { class: "drawer-tabs", role: "tablist", "aria-label": "Hasta kartı bölümleri" },
+    let loadMessagesTab = async () => {};
+    const applyTab = (tk, moveFocus) => {
+      if (S.drawer && activeDrawerCleanup === close) S.drawer.tab = tk;
+      drawerTabsBar.querySelectorAll(".drawer-tab").forEach((b) => {
+        const on = b.dataset.tk === tk;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
+        if (on && moveFocus) b.focus();
+      });
+      drawer.querySelectorAll("[data-dtab]").forEach((secEl) => {
+        const tags = (secEl.getAttribute("data-dtab") || "").split(" ");
+        secEl.classList.toggle("hidden", !tags.includes(tk));
+      });
+      if (tk === "messages") loadMessagesTab();
+    };
+    const drawerTabsBar = h("div", {
+      class: "drawer-tabs",
+      role: "tablist",
+      "aria-label": "Hasta kartı bölümleri",
+      on: {
+        keydown: (ev) => {
+          if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft" && ev.key !== "Home" && ev.key !== "End") return;
+          const keys = drawerTabDefs.map((d) => d[0]);
+          const cur = Math.max(0, keys.indexOf((S.drawer && S.drawer.tab) || startTab));
+          let nxt = cur;
+          if (ev.key === "ArrowRight") nxt = (cur + 1) % keys.length;
+          else if (ev.key === "ArrowLeft") nxt = (cur - 1 + keys.length) % keys.length;
+          else if (ev.key === "Home") nxt = 0;
+          else nxt = keys.length - 1;
+          ev.preventDefault();
+          applyTab(keys[nxt], true);
+        },
+      },
+    },
       drawerTabDefs.map(([tk, tlbl]) => h("button", {
         type: "button",
         role: "tab",
-        class: "drawer-tab" + (tk === "all" ? " active" : ""),
+        class: "drawer-tab" + (tk === startTab ? " active" : ""),
         "data-tk": tk,
+        "aria-selected": tk === startTab ? "true" : "false",
+        tabindex: tk === startTab ? "0" : "-1",
+        on: { click: () => applyTab(tk, false) },
+      }, tlbl))
+    );
+
+    // Özet sekmesi üstü: kimlik, dil, KVKK onayları, kırmızı bayraklar, borç/bakiye ve hızlı düzenleme
+    const redFlagList = [...new Set((p.anamnesis || []).flatMap((a) => a.red_flags || []))];
+    const activeConsent = (k) => (p.consents || []).some((c) => c.kind === k && !c.revoked_at);
+    const summaryTop = h("div", { class: "cal-box", style: "margin:10px 0", "data-dtab": "summary" },
+      h("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px" },
+        h("b", { text: "Kimlik, onay ve risk özeti" }),
+        h("div", { class: "actions" },
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openEditPatientModal } }, "Hızlı Düzenle"),
+          Number(fin.net_remaining_debt) > 0 ? h("button", { class: "btn btn-sm btn-cta", type: "button", on: { click: () => openQuickPayment(pid) } }, "+ Hızlı Tahsilat") : null
+        )
+      ),
+      h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center" },
+        tag(`Dil: ${(p.lang || "tr").toUpperCase()}`, "teal"),
+        ...Object.entries(consentNames).map(([k, lbl]) => tag(`${lbl}: ${activeConsent(k) ? "Var" : "Yok"}`, activeConsent(k) ? "green" : "yellow")),
+        redFlagList.length ? tag(`${redFlagList.length} kırmızı bayrak`, "red") : tag("Kırmızı bayrak yok", "green"),
+        Number(fin.net_remaining_debt) > 0 ? tag(`Net borç ${fmtTL(fin.net_remaining_debt)}`, "red") : tag("Borç yok", "green"),
+        Number(fin.available_advance) > 0 ? tag(`Avans ${fmtTL(fin.available_advance)}`, "teal") : null
+      ),
+      redFlagList.length ? h("p", { style: "margin:8px 0 0;font-size:13px;color:var(--ink-2)", text: `Anamnez uyarıları: ${redFlagList.join(", ")}` }) : null
+    );
+
+    // WhatsApp sekmesi: konuşma geçmişi + çekmeceden çıkmadan mesaj / şablon gönderme (sekme açılınca yüklenir)
+    const msgBody = h("div");
+    const msgPanel = h("div", { "data-dtab": "messages" }, h("div", { class: "section-t", text: "WhatsApp konuşması" }), msgBody);
+    let msgLoaded = false;
+    loadMessagesTab = async () => {
+      if (msgLoaded) return;
+      msgLoaded = true;
+      msgBody.replaceChildren(h("div", { class: "empty", text: "Mesajlar yükleniyor..." }));
+      const [msgs, tpls] = await Promise.all([
+        api(`/app/api/conversations/${pid}/messages`).catch(() => null),
+        api("/app/api/templates").catch(() => []),
+      ]);
+      if (!msgs) {
+        msgLoaded = false;
+        msgBody.replaceChildren(
+          h("div", { class: "empty", text: "Mesajlar yüklenemedi." }),
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => loadMessagesTab() } }, "Yeniden dene")
+        );
+        return;
+      }
+      const conv = (S.convs || []).find((c) => Number(c.id) === Number(pid));
+      const ta = h("textarea", { class: "input", name: "text", rows: 3, placeholder: "Hastaya iletilecek mesaj...", "aria-label": "Doğrudan mesaj" });
+      const sendBtn = h("button", {
+        class: "btn btn-sm btn-primary",
+        type: "button",
         on: {
-          click: () => {
-            drawerTabsBar.querySelectorAll(".drawer-tab").forEach((b) => b.classList.toggle("active", b.dataset.tk === tk));
-            drawer.querySelectorAll("[data-dtab]").forEach((secEl) => {
-              const tags = (secEl.getAttribute("data-dtab") || "").split(" ");
-              secEl.classList.toggle("hidden", tk !== "all" && !tags.includes(tk));
-            });
+          click: async () => {
+            const text = ta.value.trim();
+            if (!text) { toast("Mesaj metni boş olamaz.", true); return; }
+            sendBtn.disabled = true;
+            try {
+              await sendConv(pid, text);
+              await afterChange(pid);
+            } catch (x) {
+              if (x.message !== "oturum") toast(x.message || "Mesaj gönderilemedi", true);
+              sendBtn.disabled = false;
+            }
           },
         },
-      }, tlbl))
+      }, "Gönder");
+      msgBody.replaceChildren(
+        conv && isUnanswered(conv) ? h("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px" },
+          tag("Yanıt bekliyor", "yellow"),
+          h("button", {
+            class: "btn btn-sm btn-ghost",
+            type: "button",
+            on: { click: async () => { markResolved(pid, conv.last_at || "1"); toast("Konuşma çözüldü olarak işaretlendi"); await afterChange(pid); } },
+          }, "Çözüldü İşaretle")
+        ) : null,
+        convThreadNode(msgs),
+        templatePicker(tpls, ta, p.name),
+        fld("Doğrudan mesaj", ta),
+        h("div", { class: "actions" }, sendBtn)
+      );
+    };
+
+    // Odontogram sekmesi: tedavi / işlem notu (diş seçtirir, ardından mevcut diş kaydı penceresini açar)
+    const openToothNotePicker = () => {
+      const fdiOk = (n) => (n >= 11 && n <= 18) || (n >= 21 && n <= 28) || (n >= 31 && n <= 38) || (n >= 41 && n <= 48) || (n >= 51 && n <= 55) || (n >= 61 && n <= 65) || (n >= 71 && n <= 75) || (n >= 81 && n <= 85);
+      modal("Tedavi / işlem notu ekle", [
+        h("p", { style: "margin:0 0 8px;font-size:13px;color:var(--muted)", text: "Notun ekleneceği dişin FDI numarasını girin; tedavi, hekim ve not alanları bir sonraki adımda açılır." }),
+        fld("Diş numarası (FDI)", inp("fdi", { type: "number", min: 11, max: 85, required: true, placeholder: "Örn. 26", value: "" })),
+      ], async (f) => {
+        const n = Number(f.get("fdi"));
+        if (!fdiOk(n)) throw new Error("Geçerli bir FDI diş numarası girin (11-48 veya 51-85).");
+        setTimeout(() => openToothModal(n), 0);
+      }, "Devam");
+    };
+    const odoNoteBar = h("div", { class: "actions", style: "margin:10px 0", "data-dtab": "odontogram" },
+      h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: openToothNotePicker } }, "+ Tedavi / İşlem Notu")
+    );
+
+    // Randevu sekmesi: randevu ver, düzenle ve .ics indir
+    const apptDoctorId = (a) => a.doctor_id || ((doctors.find((d) => d.full_name === a.doctor_name) || {}).id) || null;
+    const apptPanel = h("div", { "data-dtab": "appointments" },
+      h("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px" },
+        h("div", { class: "section-t", style: "margin:0", text: `Randevular (${(p.appointments || []).length})` }),
+        h("div", { class: "actions" },
+          h("button", { class: "btn btn-sm btn-cta", type: "button", on: { click: () => newAppt(pid) } }, "Randevu Ver"),
+          h("a", { class: "btn btn-sm btn-ghost", href: "/app/api/calendar/all.ics", download: "dentacore-takvim.ics" }, "Tüm takvim .ics")
+        )
+      ),
+      (p.appointments || []).length ? tblWrap(h("table", { class: "table" },
+        h("thead", null, h("tr", null, ["Tarih", "İşlem / Hekim", "Durum", "İşlem"].map((t) => h("th", { text: t })))),
+        h("tbody", null, [...p.appointments].sort((a, b) => new Date(b.starts_at) - new Date(a.starts_at)).map((a) => h("tr", null,
+          h("td", { text: fmtDT(a.starts_at) }),
+          h("td", { text: `${a.treatment}${a.doctor_name ? " · " + a.doctor_name : ""}` }),
+          h("td", null, tag(...(STATUS[a.status] || [a.status, ""]))),
+          h("td", null, h("div", { class: "actions" },
+            h("button", {
+              class: "btn btn-sm btn-ghost",
+              type: "button",
+              on: { click: () => editAppt({ ...a, patient: p.name, patient_id: pid, doctor_id: apptDoctorId(a) }) },
+            }, "Düzenle"),
+            h("a", { class: "btn btn-sm btn-ghost", href: `/app/api/appointments/${a.id}/ics`, download: `randevu-${a.id}.ics` }, ".ics")
+          ))
+        )))
+      ), "Hasta randevuları tablosu") : h("div", { class: "empty", text: "Bu hasta için randevu yok. Yukarıdaki Randevu Ver düğmesiyle ekleyin." })
+    );
+
+    // Kasa sekmesi: hızlı tahsilat
+    const quickPayBar = h("div", { class: "actions", style: "margin:10px 0", "data-dtab": "finance" },
+      h("button", { class: "btn btn-sm btn-cta", type: "button", on: { click: () => openQuickPayment(pid) } }, "+ Hızlı Tahsilat")
     );
 
     const drawer = h("div", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-label": p.name || `Hasta #${p.id}` },
@@ -5169,6 +5323,9 @@ textarea.input { min-height: 84px; }
         )
       ),
       drawerTabsBar,
+      summaryTop,
+      msgPanel,
+      apptPanel,
       h("div", { class: "kv", "data-dtab": "summary" },
         h("span", { text: "Telefon" }),
         h("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:wrap" },
@@ -5188,6 +5345,7 @@ textarea.input { min-height: 84px; }
           h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: openAddGroupModal } }, "+ Grup Ekle")
         )
       ),
+      quickPayBar,
       // 10 Kalemlik Finansal Özet Kutusu (Bölüm 11)
       h("div", { class: "cal-box", style: "margin:10px 0", "data-dtab": "finance summary" },
         h("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px" },
@@ -5480,8 +5638,9 @@ textarea.input { min-height: 84px; }
           },
         }, "İmplant / Lot")
       ),
-      h("div", { "data-dtab": "odo" }, odoSection),
-      (p.periodontal_exams || []).length || (p.lab_orders || []).length || (p.implant_records || []).length ? h("div", { class: "cal-box", style: "margin:10px 0", "data-dtab": "odo clinical" },
+      odoNoteBar,
+      h("div", { "data-dtab": "odontogram" }, odoSection),
+      (p.periodontal_exams || []).length || (p.lab_orders || []).length || (p.implant_records || []).length ? h("div", { class: "cal-box", style: "margin:10px 0", "data-dtab": "odontogram" },
         (p.periodontal_exams || []).length ? [
           h("div", { class: "section-t", style: "margin-top:0", text: `Periodontal Muayeneler (${p.periodontal_exams.length})` }),
           ...p.periodontal_exams.map((pe) => h("div", { style: "font-size:13px;margin-bottom:4px" },
@@ -5501,7 +5660,7 @@ textarea.input { min-height: 84px; }
           )),
         ] : null
       ) : null,
-      h("div", { "data-dtab": "clinical" },
+      h("div", { "data-dtab": "finance" },
         h("div", { class: "section-t", text: `Röntgen, DICOM, Fotoğraf (Öncesi/Sonrası) & Belgeler (${(p.media_files || []).length})` }),
         (p.media_files || []).length ? tblWrap(h("table", { class: "table" },
           h("thead", null, h("tr", null, ["Tür / Aşama", "Dosya", "Kalite Kontrol (Teşhissiz)", "Tarih", "İşlem"].map((t) => h("th", { text: t })))),
@@ -5521,7 +5680,9 @@ textarea.input { min-height: 84px; }
               },
             }, "Sil"))
           )))
-        ), "Hasta dosyaları tablosu") : h("div", { class: "empty", text: "Henüz yüklenmiş röntgen veya fotoğraf yok." }),
+        ), "Hasta dosyaları tablosu") : h("div", { class: "empty", text: "Henüz yüklenmiş röntgen veya fotoğraf yok." })
+      ),
+      h("div", { "data-dtab": "summary" },
         h("div", { class: "section-t", text: "Anamnez" }),
         p.anamnesis.length ? p.anamnesis.map((a) => h("div", { class: "alert-item" },
           h("div", { class: "k" }, a.red_flags.length ? tag(`${a.red_flags.length} kırmızı bayrak`, "red") : tag("Temiz", "green")),
@@ -5539,12 +5700,6 @@ textarea.input { min-height: 84px; }
             tag(tc.status === "signed" ? "İmzalandı" : "Bekliyor", tc.status === "signed" ? "green" : "yellow")
           )),
         ] : h("div", { class: "empty", text: "Onam kaydı yok." })
-      ),
-      h("div", { "data-dtab": "summary" },
-        h("div", { class: "section-t", text: "Randevular" }),
-        p.appointments.length ? tblWrap(h("table", { class: "table" }, h("tbody", null, p.appointments.map((a) =>
-          h("tr", null, h("td", { text: fmtDT(a.starts_at) }), h("td", { text: `${a.treatment}${a.doctor_name ? " · " + a.doctor_name : ""}` }), h("td", null, tag(...(STATUS[a.status] || [a.status, ""]))))
-        ))), "Hasta randevuları tablosu") : h("div", { class: "empty", text: "Randevu yok." })
       ),
       h("div", { "data-dtab": "finance" },
         h("div", { class: "section-t", text: "Hesap hareketleri" }),
@@ -5580,6 +5735,23 @@ textarea.input { min-height: 84px; }
         ))) : h("div", { class: "empty", text: "Zaman çizelgesi kaydı yok." })
       )
     );
+    // İşlem düğmelerini ilgili sekmeye dağıt, sonra başlangıç sekmesini uygula.
+    const BTN_TABS = {
+      "Hizmet ekle": "finance",
+      "Tahsilat al": "finance",
+      "Röntgen / Görsel Yükle": "finance",
+      "Tedavi Onamı Oluştur": "summary",
+      "Anamnez gönder": "summary",
+      "Bekleme listesi": "appointments",
+      "Periodontal Ölçüm": "odontogram",
+      "Lab Emri": "odontogram",
+      "İmplant / Lot": "odontogram",
+    };
+    drawer.querySelectorAll(".actions > .btn").forEach((b) => {
+      const tk = BTN_TABS[b.textContent.trim()];
+      if (tk) b.setAttribute("data-dtab", tk);
+    });
+    applyTab(startTab, false);
     const wrap = h("div", { class: "drawer-wrap" },
       h("div", { class: "overlay", on: { click: () => close(true) } }),
       drawer
@@ -5604,7 +5776,7 @@ textarea.input { min-height: 84px; }
         h("thead", null, h("tr", null, ["Sıra", "Hasta", "İşlem", "Eklenme", "İşlemler"].map((t) => h("th", { text: t })))),
         h("tbody", null, rows.length ? rows.map((w, i) => h("tr", null,
           h("td", { text: i + 1 }),
-          h("td", null, h("a", { href: "#", on: { click: (e) => { e.preventDefault(); openPatient(w.patient_id); } }, text: w.patient || `Hasta #${w.patient_id}` })),
+          h("td", null, h("a", { href: "#", on: { click: (e) => { e.preventDefault(); openPatient360(w.patient_id, "appointments"); } }, text: w.patient || `Hasta #${w.patient_id}` })),
           h("td", { text: w.treatment }),
           h("td", { text: fmtDT(w.created_at) }),
           h("td", null, h("button", {
@@ -5634,7 +5806,7 @@ textarea.input { min-height: 84px; }
           const [ost, ocls] = OFFER_ST[o.status] || [o.status, ""];
           return h("tr", null,
             h("td", { text: `#${o.id}` }),
-            h("td", null, h("a", { href: "#", on: { click: (e) => { e.preventDefault(); openPatient(o.patient_id); } }, text: o.patient || `Hasta #${o.patient_id}` })),
+            h("td", null, h("a", { href: "#", on: { click: (e) => { e.preventDefault(); openPatient360(o.patient_id, "messages"); } }, text: o.patient || `Hasta #${o.patient_id}` })),
             h("td", { text: `${fmtDT(o.starts_at)} · ${o.treatment} (K${o.chair})` }),
             h("td", { text: `Dalga ${o.wave}` }),
             h("td", null, tag(ost, ocls)),
@@ -5688,7 +5860,7 @@ textarea.input { min-height: 84px; }
         return h("div", { class: "alert-item" },
           h("div", { class: "k" }, tag(t, c)),
           h("div", { class: "d" }, a.detail, h("small", { text: fmtDT(a.created_at) })),
-          a.patient_id ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient(a.patient_id) } }, "Hasta") : null,
+          a.patient_id ? h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient360(a.patient_id, "summary") } }, "Hasta") : null,
           h("button", { class: "btn btn-sm btn-primary", type: "button", on: { click: async () => { await run(() => api(`/app/api/alerts/${a.id}/ack`, { method: "POST" })); route(); } } }, "Okundu")
         );
       }) : h("div", { class: "empty", text: "Okunmamış uyarı yok." }))
@@ -6465,7 +6637,7 @@ textarea.input { min-height: 84px; }
             type: "button",
             on: { click: () => openReplyModal(r) },
           }, "Yanıtla"),
-          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient(r.id) } }, "Kart")
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", on: { click: () => openPatient360(r.id, "messages") } }, "Kart")
         ))
       );
     }) : [h("tr", null, h("td", { colSpan: 9, class: "empty", text: "Henüz mesaj kaydı yok." }))];
