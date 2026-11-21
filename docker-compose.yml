@@ -117,6 +117,14 @@ services:
       PUBLIC_URL: https://api.${DOMAIN}
       TRUSTED_PROXY: "1"
       TZ: Europe/Istanbul
+      # Üretim başlangıç doğrulaması (api/app/prodcheck.py) bu değerleri ister; eksikse uygulama açılmaz.
+      DC_ENV: production
+      WEB_CONCURRENCY: "2"
+      # Hasta görselleri varsayılan olarak apidata volume'una (/data/images) yazılır; volume kalıcı olduğu için
+      # DC_MEDIA_PERSISTENT=1 bildirimi doğrudur. Nesne depolamaya (S3/R2) geçmek için .env'de MEDIA_BACKEND=s3 ve S3_* verin.
+      MEDIA_BACKEND: ${MEDIA_BACKEND:-local}
+      IMAGE_DIR: /data/images
+      DC_MEDIA_PERSISTENT: "1"
     volumes:
       - apidata:/data
     depends_on:

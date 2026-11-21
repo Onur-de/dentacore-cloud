@@ -1,6 +1,16 @@
 # DentaCore Bulut Dağıtım Manifestosu (Render.com)
-# UYARI: Ücretsiz (free) planda yerel dosya sistemi geçicidir; yeniden başlatmada SQLite silinir.
-# Üretim klinikleri için kalıcı PostgreSQL (DATABASE_URL) ve Render Dashboard'dan gizli anahtarlar zorunludur.
+#
+# Birincil üretim hedefi Docker Compose'tur (VPS: PostgreSQL, Redis, şifreli yedek, KVKK veri egemenliği).
+# Bu dosya, Render'ı tercih eden dağıtımlar için kodla uyumlu tutulur: DATABASE_URL tanımlı olduğundan
+# run_cloud.py, api/app/main.py (PostgreSQL motoru) çalıştırır; SQLite motoru (run_local.py) devreye girmez.
+#
+# Açılışta api/app/prodcheck.py şunları ister; eksikse uygulama bilerek açılmaz:
+#   - ADMIN_TOKEN, PHONE_HMAC_KEY (en az 32 karakter), DATA_ENCRYPTION_KEY (geçerli Fernet anahtarı)
+#   - PUBLIC_URL (https, yerel olmayan), REDIS_URL (işçiler arası hız sınırı), kalıcı görsel deposu
+#
+# Render'da hasta görselleri /data diskine yazılır. Disk bağlı bir servis tek örnekle çalışır (yatay ölçeklenemez);
+# işçi sayısı WEB_CONCURRENCY ile artar ve Redis sayesinde hız sınırı işçiler arasında paylaşılır.
+# Ücretsiz (free) planda disk yoktur: üretimde kullanmayın.
 services:
   - type: web
     name: dentacore-cloud
@@ -9,6 +19,10 @@ services:
     buildCommand: pip install --no-cache-dir -r requirements.txt
     startCommand: python run_cloud.py
     healthCheckPath: /health
+    disk:
+      name: dentacore-data
+      mountPath: /data
+      sizeGB: 10
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
@@ -24,16 +38,43 @@ services:
         value: "127.0.0.1"
       - key: WEB_CONCURRENCY
         value: "2"
+      # Hasta görselleri: /data diski (yukarıdaki disk) kalıcıdır, bu yüzden DC_MEDIA_PERSISTENT=1 doğrudur.
+      - key: MEDIA_BACKEND
+        value: local
+      - key: IMAGE_DIR
+        value: /data/images
+      - key: DC_MEDIA_PERSISTENT
+        value: "1"
       - key: DATABASE_URL
         fromDatabase:
           name: dentacore-pg
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: dentacore-redis
+          property: connectionString
+      # Aşağıdakiler Render Dashboard'da elle girilir (depoya yazılmaz).
+      # PUBLIC_URL: canlı alan adınız, örn. https://[ALAN-ADI]. Değer https ile başlamalı.
+      - key: PUBLIC_URL
+        sync: false
       - key: DATA_ENCRYPTION_KEY
         sync: false
       - key: PHONE_HMAC_KEY
         sync: false
       - key: ADMIN_TOKEN
         sync: false
+      # İlk açılışta (hiç personel yokken) yönetici hesabı bunlarla oluşur; parola en az 12 karakter.
+      - key: OWNER_EMAIL
+        sync: false
+      - key: OWNER_PASSWORD
+        sync: false
+
+  - type: keyvalue
+    name: dentacore-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
 
 databases:
   - name: dentacore-pg
