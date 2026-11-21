@@ -20,6 +20,7 @@ import hmac
 import json
 import os
 import pathlib
+import sys
 import time
 import urllib.parse
 from collections import Counter
@@ -89,6 +90,14 @@ async def _fresh_db(apply_migrations: bool = True) -> None:
         await _exec("INSERT INTO clinics (id, name, slug) VALUES (1, 'Test Klinik', 'test') ON CONFLICT DO NOTHING")
 
 
+def _run(coro):
+    """asyncio.run; Windows'ta psycopg ProactorEventLoop ile ?al??maz -> SelectorEventLoop kullan."""
+    if sys.platform == "win32":
+        import selectors
+        return asyncio.run(coro, loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))
+    return asyncio.run(coro)
+
+
 def pg_test(fn=None, *, migrations: bool = True):
     def deco(f):
         @functools.wraps(f)
@@ -99,7 +108,7 @@ def pg_test(fn=None, *, migrations: bool = True):
                     await asyncio.wait_for(f(**fixtures), 120)
                 finally:
                     await core.db_close()
-            asyncio.run(main())
+            _run(main())
         return wrapper
     return deco(fn) if fn else deco
 
@@ -452,7 +461,7 @@ def test_http_webhook_is_persisted_deduped_ready_and_503_on_persist_failure(monk
         finally:
             await core.db_close()
 
-    asyncio.run(reset())
+    _run(reset())
 
     handled: list[str] = []
 
