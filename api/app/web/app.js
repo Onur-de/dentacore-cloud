@@ -1979,7 +1979,14 @@
   let activeDrawerCleanup = null;
   let activeDrawerOpener = null;
 
-  async function openPatient(pid, reveal) {
+  // Hasta 360 çekmecesi: 5 sekme (özet, WhatsApp, odontogram, randevu, kasa). Eski sekme adları yeni adlara eşlenir.
+  const DRAWER_TAB_ALIAS = { all: "summary", odo: "odontogram", clinical: "finance" };
+  const DRAWER_TABS = ["summary", "messages", "odontogram", "appointments", "finance"];
+  async function openPatient(pid, reveal, initialTab) {
+    // Aynı hastanın çekmecesi yeniden açılıyorsa (kayıt sonrası tazeleme) kullanıcının bulunduğu sekme korunur.
+    const prevTab = S.drawer && Number(S.drawer.pid) === Number(pid) ? S.drawer.tab : "";
+    const wantTab = DRAWER_TAB_ALIAS[initialTab || prevTab] || initialTab || prevTab;
+    const startTab = DRAWER_TABS.includes(wantTab) ? wantTab : "summary";
     if (!activeDrawerCleanup) activeDrawerOpener = document.activeElement;
     else activeDrawerCleanup(false);
     document.querySelectorAll(".drawer-wrap").forEach((el) => el.remove());
@@ -2012,7 +2019,7 @@
     const close = (restoreFocus = true) => {
       document.removeEventListener("keydown", onKey);
       wrap.remove();
-      if (activeDrawerCleanup === close) activeDrawerCleanup = null;
+      if (activeDrawerCleanup === close) { activeDrawerCleanup = null; S.drawer = null; }
       if (restoreFocus !== false) {
         const target = activeDrawerOpener;
         activeDrawerOpener = null;
@@ -2020,6 +2027,7 @@
       }
     };
     activeDrawerCleanup = close;
+    S.drawer = { pid, tab: startTab, reveal: Boolean(reveal) };
     document.addEventListener("keydown", onKey);
 
     const consentNames = { kvkk_aydinlatma: "KVKK aydınlatma", saglik_verisi_acik_riza: "Sağlık verisi açık rıza", iletisim: "İletişim izni", yurt_disi_aktarim: "Yurt dışı aktarım" };
