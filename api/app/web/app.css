@@ -1306,11 +1306,10 @@ textarea.input { min-height: 84px; }
   }
 }
 
-/* Kokpit katman?: men? gruplar?, h?zl? eylem bar?, komut paleti */
+/* Kokpit katmanı: menü grupları, hızlı eylem barı, komut paleti */
 .work { min-width: 0; }
 .qbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 30;
   display: flex;
   flex-wrap: wrap;
