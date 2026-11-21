@@ -204,8 +204,9 @@ class RateLimiter:
     sınır atlanmaz: o işçide süreç içi sayaca düşülür (sınır işçi başına uygulanır, yani geçici olarak gevşer).
     `redis_errors` ve `degraded` sağlık/izleme için okunabilir."""
 
-    def __init__(self, redis=None):
-        self.redis = redis
+    def __init__(self, redis=None, sync_redis=None):
+        self.redis = redis              # redis.asyncio istemcisi (async uçlar: hit/reset)
+        self.sync_redis = sync_redis    # senkron redis istemcisi (hit_sync: `def` uçlar, kısa timeout'lu)
         self.mem: dict[str, tuple[int, float]] = {}
         self.redis_errors = 0
         self.degraded = False
@@ -244,17 +245,30 @@ class RateLimiter:
         return self._hit_mem(key, limit, window)
 
     def hit_sync(self, key: str, limit: int, window: int) -> bool:
-        """Senkron uçlar için süreç içi sayaç (thread güvenli). True: izin var."""
+        """Senkron uçlar için hız sınırı. `sync_redis` varsa sayaç `hit` ile AYNI `dc:rl:*` anahtarında ve tüm işçiler
+        arasında paylaşılır (TTL güvencesi + yetim sayaç onarımı dahil). Redis hata verirse (kesinti/zaman aşımı) istek
+        500 olmaz ve sınır atlanmaz: süreç içi sayaca (thread güvenli) düşülür. True: izin var."""
+        r = self.sync_redis
+        if r is not None:
+            k = f"dc:rl:{key}"
+            try:
+                n = r.incr(k)
+                # Süreç kesilse bile anahtarın süresiz kalmaması için her çağrıda nx=True ile TTL güvencesi
+                try:
+                    r.expire(k, window, nx=True)
+                except TypeError:
+                    if n == 1:
+                        r.expire(k, window)
+                self.degraded = False
+                return n <= limit
+            except Exception:  # noqa: BLE001 - Redis kesintisi: süreç içi sayaca düş (loglanır, sayılır)
+                self.redis_errors += 1
+                self.degraded = True
+                if self.redis_errors == 1 or self.redis_errors % 100 == 0:
+                    import logging
+                    logging.getLogger("dentacore.ratelimit").error("Redis hız sınırı hatası (senkron; toplam %d); süreç içi sayaca düşüldü", self.redis_errors)
         with _RL_SYNC_LOCK:
-            now = time.time()
-            if len(self.mem) > 2048:
-                self.mem = {k: v for k, v in self.mem.items() if v[1] > now}
-            n, exp = self.mem.get(key, (0, now + window))
-            if now > exp:
-                n, exp = 0, now + window
-            n += 1
-            self.mem[key] = (n, exp)
-            return n <= limit
+            return self._hit_mem(key, limit, window)
 
     async def reset(self, key: str):
         if self.redis:
