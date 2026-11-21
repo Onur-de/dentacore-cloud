@@ -80,11 +80,17 @@ async def lifespan(app: FastAPI):
     await run_migrations(str(MIGRATION))
     await panel.bootstrap_owner()
     redis = None
+    sync_redis = None
     if S.redis_url:
+        import redis as redis_sync
         import redis.asyncio as aioredis
         redis = aioredis.from_url(S.redis_url, decode_responses=True)
+        # Senkron uçlar (`def`, herkese açık hız sınırları) için ayrı, 1 sn timeout'lu istemci: Redis düşse bile istek asılı kalmaz
+        sync_redis = redis_sync.Redis.from_url(S.redis_url, decode_responses=True, socket_timeout=1, socket_connect_timeout=1)
     state["redis"] = redis
+    state["sync_redis"] = sync_redis
     panel.limiter.redis = redis
+    panel.limiter.sync_redis = sync_redis
     state["router"] = TokenRouter(redis=redis)
     _WEBHOOK_WAKE.clear()
     _WEBHOOK_WORKERS = [asyncio.create_task(inbox.worker_loop(_run_webhook_job, _WEBHOOK_WAKE, i)) for i in range(INBOX_WORKERS)]
@@ -97,6 +103,13 @@ async def lifespan(app: FastAPI):
     await asyncio.gather(*_BG_TASKS, *_WEBHOOK_WORKERS, return_exceptions=True)
     _BG_TASKS.clear()
     _WEBHOOK_WORKERS.clear()
+    if sync_redis is not None:
+        panel.limiter.sync_redis = None
+        state["sync_redis"] = None
+        try:
+            await asyncio.to_thread(sync_redis.close)
+        except Exception:  # noqa: BLE001 - kapanışta Redis zaten düşmüş olabilir; kapanışı engellemez
+            pass
     await wa.close_client()
     await ig.close_client()
     await db_close()

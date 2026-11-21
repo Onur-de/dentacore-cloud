@@ -16,6 +16,7 @@ uçlarını sağlar.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import hmac
@@ -1959,7 +1960,7 @@ def register_enterprise_routes(app: FastAPI, ctx: dict[str, Any]) -> None:
 
     @app.post("/form/tedavi-onay/{token}", response_class=HTMLResponse)
     async def submit_treatment_consent_form(token: str, request: Request):
-        _rate_limit(f"tc_sign:{client_ip(request)}", 10, 60)
+        await asyncio.to_thread(_rate_limit, f"tc_sign:{client_ip(request)}", 10, 60)  # senkron Redis G/Ç olay döngüsünü bloklamasın
         tc = q1("SELECT * FROM treatment_consents WHERE token=?", token)
         if not tc:
             raise HTTPException(404, "Onay belgesi bulunamadı")
