@@ -85,7 +85,7 @@ def test_100_concurrent_patients_and_csv_import(isolated_env):
             elapsed = time.perf_counter() - t0
 
             created_ids = set()
-            for idx, src, res in results:
+            for idx, _src, res in results:
                 assert res.status_code == 200, f"Patient {idx} failed: {res.text}"
                 body = res.json()
                 assert body["duplicate"] is False

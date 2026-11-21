@@ -303,7 +303,7 @@ def _boot(env_extra: dict[str, str], timeout: int = 90) -> subprocess.CompletedP
     env = {k: v for k, v in os.environ.items() if k in _KEEP}
     env.update({"PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1"})
     env.update(env_extra)
-    return subprocess.run([sys.executable, "-X", "utf8", "-c", _BOOT], env=env, capture_output=True, text=True,
+    return subprocess.run([sys.executable, "-X", "utf8", "-c", _BOOT], env=env, capture_output=True, text=True,  # noqa: S603
                           encoding="utf-8", timeout=timeout, cwd=str(ROOT))
 
 

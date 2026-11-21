@@ -3,13 +3,8 @@ DENTACORE_URL (varsayılan: http://127.0.0.1:8792) ile çalışan run_local.py s
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import os
 import random
-import sys
-import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -59,7 +54,7 @@ def test_automation_end_to_end():
     c1, _, h1 = login_client(HQ_EMAIL, HQ_PASS)
     c_sec, _, h_sec = login_client(SEC_EMAIL, SEC_PASS)
     c2, _, h2 = login_client(BURSA_EMAIL, BURSA_PASS)
-    tag = random.randint(100, 899)
+    tag = random.randint(100, 899)  # noqa: S311 - test etiketi, güvenlik değeri yok
 
     try:
         # 1) Available slots endpoint (F-05) - Sunday closed + weekday free slots

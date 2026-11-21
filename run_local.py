@@ -5593,7 +5593,7 @@ def analytics(request: Request, u: dict = Depends(require_perm("finance_view")))
         c["patients_created"] = len(p_ids)
         if p_ids:
             ph_in = ",".join("?" for _ in p_ids)
-            ap_rows = q(f"SELECT status FROM appointments WHERE clinic_id=? AND (campaign_id=? OR patient_id IN ({ph_in}))", cid, cp_id, *p_ids)  # noqa: S608
+            ap_rows = q(f"SELECT status FROM appointments WHERE clinic_id=? AND (campaign_id=? OR patient_id IN ({ph_in}))", cid, cp_id, *p_ids)  # noqa: S608  # nosec B608 - ph_in yalnız "?" yer tutucularından oluşur, değerler parametre olarak gider
             real_appts = len(ap_rows)
             real_done = sum(1 for a in ap_rows if a["status"] == "done")
             rev_row = q1(
@@ -5601,7 +5601,7 @@ def analytics(request: Request, u: dict = Depends(require_perm("finance_view")))
                       CASE WHEN status='refunded' THEN -amount_kurus
                            WHEN COALESCE(status,'completed')='completed' AND method<>'avans_mahsup' THEN amount_kurus
                            ELSE 0 END
-                    ),0) AS s FROM payments WHERE clinic_id=? AND voided_at IS NULL AND patient_id IN ({ph_in})""",  # noqa: S608
+                    ),0) AS s FROM payments WHERE clinic_id=? AND voided_at IS NULL AND patient_id IN ({ph_in})""",  # noqa: S608  # nosec B608 - yalnız "?" yer tutucuları
                 cid, *p_ids,
             )
             real_rev_k = max(0, int((rev_row or {}).get("s") or 0))

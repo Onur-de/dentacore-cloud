@@ -16,7 +16,7 @@ PLACEHOLDER_PREFIX = "degistir"
 PLACEHOLDER_CHECKED_KEYS = (
     "ADMIN_TOKEN", "PHONE_HMAC_KEY", "OWNER_PASSWORD", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "N8N_ENCRYPTION_KEY",
 )
-LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")  # nosec B104 - yalnızca karşılaştırma listesi
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")  # noqa: S104  # nosec B104 - yalnızca karşılaştırma listesi
 
 
 def is_production(environ: Mapping[str, str] | None = None) -> bool:

@@ -153,7 +153,7 @@ class PgApp:
 
 def _spawn(base: str, env: dict[str, str]) -> subprocess.Popen:
     port = base.rsplit(":", 1)[1]
-    return subprocess.Popen([sys.executable, "-X", "utf8", "-c", _LAUNCH, port], env=env, cwd=str(ROOT),
+    return subprocess.Popen([sys.executable, "-X", "utf8", "-c", _LAUNCH, port], env=env, cwd=str(ROOT),  # noqa: S603
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
 
 

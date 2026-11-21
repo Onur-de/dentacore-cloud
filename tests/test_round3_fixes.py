@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import sqlite3
 import sys
@@ -162,7 +161,7 @@ def test_tech03_postop_pain_score_never_cancels_or_confirms_appt():
         # Aktif post-op kontrolü varken "2" yanıtı randevuyu iptal etmemeli, ağrı skoru olarak kaydedilmeli
         po = hq.post("/app/api/postop/schedule", json={"patient_id": pid, "procedure": "20 Yaş Çekim"}, headers=hq_hdr)
         assert po.status_code == 200
-        po_id = po.json()["ids"][0]
+        _po_id = po.json()["ids"][0]
 
         rep2 = hq.post("/app/api/conversations/simulate", json={"patient_id": pid, "text": "2"}, headers=hq_hdr)
         assert rep2.status_code == 200

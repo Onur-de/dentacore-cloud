@@ -43,7 +43,7 @@ os.environ.setdefault("IG_APP_SECRET", "ig-secret-test")
 def isolated_dentacore_server():
     env = os.environ.copy()
     log_file = open(_ISO_TMP_DIR / "isolated_server.log", "w", encoding="utf-8")
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # noqa: S603 - sabit argüman listesi, kullanıcı girdisi yok
         [sys.executable, "-X", "utf8", str(ROOT / "run_local.py")],
         cwd=str(ROOT),
         env=env,
@@ -68,9 +68,9 @@ def isolated_dentacore_server():
     for mod_name, mod in list(sys.modules.items()):
         if mod and mod_name.startswith("test_"):
             if hasattr(mod, "BASE"):
-                setattr(mod, "BASE", _ISO_URL)
+                mod.BASE = _ISO_URL
             if hasattr(mod, "DB_PATH"):
-                setattr(mod, "DB_PATH", _ISO_DB_PATH)
+                mod.DB_PATH = _ISO_DB_PATH
 
     yield _ISO_URL
 

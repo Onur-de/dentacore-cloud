@@ -251,7 +251,7 @@ def test_calendar_and_multitenant():
 
     tok = cal.calendar_feed_token(7)
     assert cal.verify_feed_token(tok) == 7 and cal.verify_feed_token(tok + "tamper") is None
-    print(f"iPhone/Android Takvim: RFC 5545 .ics + 2 VALARM + webcal/feed HMAC (clinic=7) + Google Cal URL OK")
+    print("iPhone/Android Takvim: RFC 5545 .ics + 2 VALARM + webcal/feed HMAC (clinic=7) + Google Cal URL OK")
 
 
 if __name__ == "__main__":
