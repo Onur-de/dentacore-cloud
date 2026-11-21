@@ -20,7 +20,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import tempfile
 import time
@@ -33,7 +33,8 @@ sys.path.insert(0, str(ROOT / "api"))
 IMAGE = "dentacore-backup-drill"
 PG_IMAGE = os.environ.get("DC_DRILL_PG_IMAGE", "pgvector/pgvector:pg16")
 PG_USER = "dentacore"
-PG_PASS = "drillpw_local_only"
+# Yalnızca tek kullanımlık, dışarıya açılmayan test konteyneri parolası (gerçek sır değil).
+PG_PASS = "drillpw_local_only"  # noqa: S105  # nosec B105
 
 
 class R:
@@ -49,7 +50,8 @@ class R:
 def run(args: list[str], *, input: bytes | str | None = None, check: bool = True, timeout: int = 900) -> R:
     if isinstance(input, str):
         input = input.encode("utf-8")
-    p = subprocess.run(args, input=input, capture_output=True, timeout=timeout)
+    # args yalnızca bu dosyadaki sabit docker/psql komutlarından ve kendi ürettiğimiz adlardan oluşur; kullanıcı girdisi yok.
+    p = subprocess.run(args, input=input, capture_output=True, timeout=timeout)  # noqa: S603  # nosec B603
     r = R(p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace"))
     if check and r.rc != 0:
         raise RuntimeError(f"komut basarisiz ({' '.join(args[:4])}...): {r}")
@@ -58,7 +60,7 @@ def run(args: list[str], *, input: bytes | str | None = None, check: bool = True
 
 def docker_available() -> bool:
     try:
-        return subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0
+        return subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0  # noqa: S603, S607  # nosec B603 B607
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -123,7 +125,8 @@ class Drill:
     def migrate(self, name: str) -> None:
         for f in sorted((ROOT / "api" / "app" / "migrations").glob("*.sql")):
             run(["docker", "cp", str(f), f"{name}:/tmp/{f.name}"])
-            run(["docker", "exec", name, "psql", "-U", PG_USER, "-d", "dentacore", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", f"/tmp/{f.name}"])
+            # /tmp tek kullanımlık KONTEYNERİN içindedir (ana makinenin /tmp'si değil).
+            run(["docker", "exec", name, "psql", "-U", PG_USER, "-d", "dentacore", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", f"/tmp/{f.name}"])  # noqa: S108  # nosec B108
 
     # ------------------------------------------------------------ sentetik veri
     def seed(self, name: str, patients: int) -> dict:
@@ -202,8 +205,13 @@ ANALYZE;
     def fingerprint(self, name: str) -> dict:
         """public şemadaki her tablo için (satır sayısı, içerik md5) + sekans değerleri. Kaynağın durağan olması gerekir."""
         tables = self.psql(name, "dentacore", "select tablename from pg_tables where schemaname='public' order by 1").split()
+        # Tablo adları tatbikatın KENDİ geçici veritabanının kataloğundan gelir; yine de açıkça doğrula (Adım 5'teki gibi).
+        bad = [t for t in tables if not re.fullmatch(r"[a-z_][a-z0-9_]*", t)]
+        if bad:
+            raise RuntimeError(f"beklenmeyen tablo adi: {bad}")
         sql = " union all ".join(
-            f"select '{t}', count(*)::text, md5(coalesce(string_agg(x::text, '|' order by x::text), '')) from public.{t} x" for t in tables)
+            f"select '{t}', count(*)::text, md5(coalesce(string_agg(x::text, '|' order by x::text), '')) from public.{t} x"  # noqa: S608  # nosec B608
+            for t in tables)
         fp = {}
         for line in self.psql(name, "dentacore", sql).strip().splitlines():
             t, n, h = line.split("\t")
