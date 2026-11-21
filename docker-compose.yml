@@ -32,7 +32,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - letsencrypt:/letsencrypt
-    networks: [edge]
+    # Sabit IP: api yaln?zca bu adresten gelen X-Forwarded-* ba?l?klar?na g?venir (FORWARDED_ALLOW_IPS).
+    networks:
+      edge:
+        ipv4_address: 172.30.40.2
     labels:
       - traefik.enable=true
       - traefik.http.middlewares.secure-headers.headers.stsSeconds=31536000
@@ -115,7 +118,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/dentacore
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       PUBLIC_URL: https://api.${DOMAIN}
+      # Proxy g?ven s?n?r?: ?n?nde tek proxy (Traefik) var. Traefik varsay?landa istemcinin g?nderdi?i X-Forwarded-*
+      # ba?l?klar?n? yok say?p kendisi yazar; XFF'nin SON girdisi ger?ek istemcidir (HOPS=1). ?n?ne CDN eklenirse
+      # HOPS=2 yap?n ve Traefik forwardedHeaders.trustedIPs verin. 127.0.0.1 burada i?e yaramaz: Traefik ayr? bir konteynerdir.
       TRUSTED_PROXY: "1"
+      TRUSTED_PROXY_HOPS: "1"
+      FORWARDED_ALLOW_IPS: "172.30.40.2"
       TZ: Europe/Istanbul
       # Üretim başlangıç doğrulaması (api/app/prodcheck.py) bu değerleri ister; eksikse uygulama açılmaz.
       DC_ENV: production
@@ -180,6 +188,9 @@ services:
 networks:
   edge:
     name: dentacore_edge
+    ipam:
+      config:
+        - subnet: 172.30.40.0/24
   core:
     name: dentacore_core
     internal: true
