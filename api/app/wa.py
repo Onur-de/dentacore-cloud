@@ -7,10 +7,13 @@ import logging
 
 import httpx
 
+from . import meta_graph
 from .core import env
 
 log = logging.getLogger("wa")
-VER = env("WA_GRAPH_VERSION", "v21.0")
+# Sürüm merkezîdir: WA_GRAPH_VERSION (özel) > META_GRAPH_VERSION (paylaşılan) > meta_graph.DEFAULT_VERSION. Biçim bozuksa varsayılan.
+VER = meta_graph.resolve_version(env("WA_GRAPH_VERSION"), env("META_GRAPH_VERSION"), label="wa")
+meta_graph.check_version(VER, "wa")
 PHONE_ID = env("WA_PHONE_NUMBER_ID")
 TOKEN = env("WA_ACCESS_TOKEN")
 APP_SECRET = env("WA_APP_SECRET")
