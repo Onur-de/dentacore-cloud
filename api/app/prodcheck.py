@@ -11,6 +11,11 @@ from urllib.parse import urlparse
 
 PROD_VALUES = ("prod", "production")
 MIN_SECRET_LEN = 32
+# .env.example'daki örnek değerlerin ortak öneki ("degistir-uzun-rastgele", "degistir-en-az-12-karakter"). Üretimde kalmamalı.
+PLACEHOLDER_PREFIX = "degistir"
+PLACEHOLDER_CHECKED_KEYS = (
+    "ADMIN_TOKEN", "PHONE_HMAC_KEY", "OWNER_PASSWORD", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "N8N_ENCRYPTION_KEY",
+)
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")  # nosec B104 - yalnızca karşılaştırma listesi
 
 
@@ -48,6 +53,12 @@ def production_problems(environ: Mapping[str, str] | None = None) -> list[str]:
     # 2) Veritabanı
     if not (e.get("DATABASE_URL") or "").strip():
         out.append("DATABASE_URL tanımlı değil (üretimde PostgreSQL zorunlu)")
+
+    # 2b) .env.example'daki örnek değerler üretimde kalmamalı (herkesin okuyabildiği bir parola/anahtar olur)
+    for k in PLACEHOLDER_CHECKED_KEYS:
+        v = (e.get(k) or "").strip().lower()
+        if v.startswith(PLACEHOLDER_PREFIX):
+            out.append(f"{k} hâlâ .env.example'daki örnek değer; gerçek, rastgele bir değerle değiştirin")
 
     # 3) Herkese açık adres: https ve yerel olmayan
     pu = (e.get("PUBLIC_URL") or "").strip()
