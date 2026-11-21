@@ -1295,6 +1295,16 @@ code {
     accountant: { view: true, create: false, edit: false, delete_cancel: false, finance_view: true, finance_collect: true, discount_apply: false, price_override: false, settings_manage: false, staff_manage: false, export_data: true, doctor_own_patients_only: false, max_discount_pct: 0 }
   };
 
+  // Gercek backend (dental_catalog.ROLE_DEFAULT_PERMISSIONS) yetki anahtarlariyla birebir uyum:
+  // panel finance_view / finance_edit / inventory_manage anahtarlarini okur.
+  const REAL_ROLE_PERMS = {
+    owner: { export: true, finance_view: true, finance_edit: true, patient_view: true, patient_edit: true, campaign_manage: true, inventory_manage: true, doctor_reports: true, staff_manage: true, system_settings: true, audit_logs: true },
+    doctor: { delete_cancel: true, export: false, finance_view: true, finance_edit: true, patient_view: true, patient_edit: true, campaign_manage: false, inventory_manage: true, doctor_reports: true, staff_manage: false, system_settings: false, audit_logs: false },
+    secretary: { delete_cancel: false, export: false, finance_view: false, finance_edit: true, patient_view: true, patient_edit: true, campaign_manage: false, inventory_manage: false, doctor_reports: false, staff_manage: false, system_settings: false, audit_logs: false },
+    accountant: { create: true, edit: true, delete_cancel: true, export: true, finance_view: true, finance_edit: true, patient_view: true, patient_edit: false, campaign_manage: true, inventory_manage: true, doctor_reports: true, staff_manage: false, system_settings: false, audit_logs: false }
+  };
+  Object.keys(DEFAULT_PERMS).forEach((r) => Object.assign(DEFAULT_PERMS[r], REAL_ROLE_PERMS[r] || {}));
+
   function buildInitialDB() {
     const t0 = isoNow();
     const clinics = [
@@ -2292,7 +2302,10 @@ code {
       saveDB();
       return jsonResp({ id: sid });
     }
-    if (path === "/app/api/expenses" && method === "GET") return jsonResp({ expenses: DB.expenses || [] });
+    if (path === "/app/api/expenses" && method === "GET") {
+      const supMap = new Map((DB.suppliers || []).map((sp) => [sp.id, sp.name]));
+      return jsonResp((DB.expenses || []).filter((e) => e.clinic_id === undefined || e.clinic_id === cid).map((e) => ({ ...e, amount: e.amount !== undefined ? e.amount : Number(e.amount_try || 0), supplier_name: e.supplier_name || supMap.get(e.supplier_id) || null })));
+    }
     if (path === "/app/api/expenses" && method === "POST") {
       const eid = nextId(DB.expenses);
       DB.expenses.unshift({ id: eid, clinic_id: cid, category: body.category || "malzeme", description: body.description, amount_try: Number(body.amount || 0), method: body.method || "havale", paid_at: isoNow().slice(0, 10) });
@@ -2325,6 +2338,9 @@ code {
         cost_usd: 0.0004, cost_try: 0.02, avg_cost_per_patient_try: 0.001, avg_cost_per_appointment_try: 0.002,
         monthly_quota_try: 500, quota_usage_pct: 0.1, alert_threshold_pct: 80, quota_warning: false, quota_exceeded: false,
         fx_usd_try: 36.5, fx_source: "sabit_referans_kur",
+        package_price_try: 3500, subscription_price_try: 3500, usd_try_rate: 36.5, total_requests: 83, zero_token_requests: 80, zero_token_ratio_pct: 96.4,
+        estimated_cost_usd: 0.0004, estimated_cost_try: 0.02, actual_billed_try: 0, cost_per_request_try: 0.0002, monthly_token_limit: 1500000, monthly_budget_try: 250,
+        quota_warning_80: false, quota_exceeded_100: false, hard_stop_enabled: false, gross_profit_after_ai_try: 3499.98, gross_margin_pct: 99.99, gross_margin_after_ai_pct: 99.99,
         pricing_transparency_tr: "L1/L2 deterministik katmanlar 0 token ve 0 TL maliyetle çalışır; yalnızca L3 LLM çağrıları gerçek token tarifesiyle hesaplanır.",
         by_layer: [
           { layer: "L1-sss", replies: 64, tokens_in: 0, tokens_out: 0, total_tokens: 0, cost_usd: 0, cost_try: 0 },
