@@ -210,7 +210,8 @@ class TestUploadValidation:
         (b"%PDF-1.4\n1 0 obj<</OpenAction 2 0 R>>endobj\n%%EOF", "x.pdf"),
         (b"yalnizca duz metin, hicbir imza yok", "x.jpg"),
         (b"", "x.jpg"),
-    ])
+    ], ids=["pe-jpg", "elf-png", "html-jpg", "svg-png", "shebang-jpg", "cift-uzanti", "exe", "svg", "txt",
+            "pdf-javascript", "pdf-openaction", "duz-metin", "bos"])
     def test_dangerous_or_fake_files_are_rejected(self, data, name):
         with pytest.raises(ValueError):
             media.assess_media_file(data, filename=name)

@@ -130,8 +130,9 @@ class PgApp:
         assert r.status_code == 200, r.text[:300]
         return r.json()["id"]
 
-    def upload(self, s: Session, pid: int, data: bytes, filename: str = "foto.jpg", category: str = "photo") -> httpx.Response:
-        return s.post(f"/app/api/patients/{pid}/media", params={"filename": filename, "category": category}, content=data)
+    def upload(self, s: Session, pid: int, data: bytes, filename: str = "foto.jpg", category: str = "photo",
+               stage: str = "general") -> httpx.Response:
+        return s.post(f"/app/api/patients/{pid}/media", params={"filename": filename, "category": category, "stage": stage}, content=data)
 
     def stop(self) -> None:
         for s in self.sessions:
