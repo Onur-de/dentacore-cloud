@@ -2713,6 +2713,18 @@ def list_patients(
     return out
 
 
+def _require_campaign_in_clinic(c, campaign_id: int | None, cid: int) -> None:
+    """İstemciden gelen campaign_id yalnızca çağıranın kendi kliniğine ait kampanya olabilir (yabancı-anahtar IDOR'u).
+
+    Kampanya kimlikleri ardışık tam sayıdır; doğrulama olmadan başka kliniğin kampanyası hastaya bağlanır ve
+    hasta detayındaki `campaign_name` o kliniğin kampanya adını sızdırırdı. Yokluk ile yabancılık aynı 404'tür.
+    """
+    if campaign_id is not None and not c.execute(
+        "SELECT 1 FROM campaigns WHERE id=? AND clinic_id=?", (campaign_id, cid)
+    ).fetchone():
+        raise HTTPException(404, "Seçilen kampanya bulunamadı")
+
+
 class PatientIn(BaseModel):
     phone: str = Field(max_length=30)
     name: str = Field(min_length=2, max_length=80)
@@ -2755,6 +2767,7 @@ def create_patient(b: PatientIn, u: dict = Depends(require_perm("patient_edit", 
             raise HTTPException(404, "Seçilen sorumlu doktor bulunamadı")
         if b.bank_agreement_id is not None and not c.execute("SELECT id FROM bank_agreements WHERE id=? AND clinic_id=? AND active=1", (b.bank_agreement_id, cid)).fetchone():
             raise HTTPException(404, "Seçilen banka anlaşması bulunamadı")
+        _require_campaign_in_clinic(c, b.campaign_id, cid)
         ex_p = c.execute("SELECT id, display_name, first_source, last_source FROM patients WHERE clinic_id=? AND phone_hmac=?", _clean_sql_args((cid, ph))).fetchone()
         if ex_p:
             # İlk geliş kaynağı (first_source) ASLA otomatik değişmez; yalnızca son temas kaynağı (last_source) güncellenir.
@@ -2894,6 +2907,7 @@ def update_patient(pid: int, b: PatientUpdateIn, u: dict = Depends(require_perm(
         if new_bank is not None and not c.execute("SELECT id FROM bank_agreements WHERE id=? AND clinic_id=?", (new_bank, cid)).fetchone():
             raise HTTPException(404, "Seçilen banka anlaşması bulunamadı")
         new_camp = b.campaign_id if b.campaign_id is not None else p["campaign_id"]
+        _require_campaign_in_clinic(c, b.campaign_id, cid)
         new_notes = b.notes if b.notes is not None else (p["notes"] or "")
         new_bdate = b.birth_date if b.birth_date is not None else (p["birth_date"] or "")
         try:
@@ -3058,10 +3072,10 @@ def get_patient(pid: int, reveal: bool = False, u: dict = Depends(require_perm("
                   ba.bank_name AS bank_agreement_name, ba.discount_pct AS bank_discount_pct,
                   cp.name AS campaign_name
            FROM patients p
-           LEFT JOIN staff_users d ON d.id=p.primary_doctor_id
+           LEFT JOIN staff_users d ON d.id=p.primary_doctor_id AND d.clinic_id=p.clinic_id
            LEFT JOIN staff_users c_u ON c_u.id=p.created_by
-           LEFT JOIN bank_agreements ba ON ba.id=p.bank_agreement_id
-           LEFT JOIN campaigns cp ON cp.id=p.campaign_id
+           LEFT JOIN bank_agreements ba ON ba.id=p.bank_agreement_id AND ba.clinic_id=p.clinic_id
+           LEFT JOIN campaigns cp ON cp.id=p.campaign_id AND cp.clinic_id=p.clinic_id
            WHERE p.id=? AND p.clinic_id=?""",
         pid, cid,
     )

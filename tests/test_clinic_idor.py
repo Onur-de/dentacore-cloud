@@ -218,8 +218,17 @@ def _fire(client: httpx.Client, method: str, path: str, body):
 
 
 def _no_leak(r: httpx.Response, v: dict, what: str) -> None:
+    if r.status_code == 404:
+        try:
+            detail = r.json().get("detail")
+        except Exception:
+            detail = "(json değil)"
+        # FastAPI'nin rota-yok 404'ü "Not Found" döner; probun yolu yanlışsa test sessizce körleşirdi.
+        assert detail != "Not Found", f"{what}: rota bulunamadı (probun yolu/yöntemi yanlış, reddedilme kanıtı değil)"
     assert v["mark"] not in r.text, f"{what}: yanıtta kurban işaretçisi sızdı: {r.text[:300]}"
     assert v["phone"].replace("+", "") not in r.text.replace("+", ""), f"{what}: kurban telefonu sızdı"
+    assert v["email"] not in r.text, f"{what}: kurban sahibi e-postası sızdı"
+    assert f"doc.{v['tag'].lower()}.{v['u']}@" not in r.text, f"{what}: kurban hekim e-postası sızdı"
 
 
 @pytest.mark.parametrize("direction", ["B->A", "A->B"])
@@ -236,10 +245,13 @@ def test_cross_clinic_direct_object_access_denied(world, probe, direction):
 # --------------------------------------------------------------------------------------------------
 # 2) Liste uçları: saldırganın görünümünde kurban verisi bulunmaz
 # --------------------------------------------------------------------------------------------------
+_D0 = (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+_D1 = (datetime.now(TZ) + timedelta(days=30)).strftime("%Y-%m-%d")
 _LISTS = [
-    "/app/api/patients", "/app/api/appointments", "/app/api/kasa", "/app/api/conversations", "/app/api/waitlist",
-    "/app/api/inventory", "/app/api/bank-agreements", "/app/api/lab-orders", "/app/api/staff", "/app/api/expenses",
-    "/app/api/suppliers", "/app/api/campaigns/report", "/app/api/implants", "/app/api/patient-groups", "/app/api/alerts",
+    "/app/api/patients", f"/app/api/appointments?start={_D0}&end={_D1}", "/app/api/kasa", "/app/api/conversations",
+    "/app/api/waitlist", "/app/api/inventory", "/app/api/bank-agreements", "/app/api/lab-orders", "/app/api/staff",
+    "/app/api/expenses", "/app/api/suppliers", "/app/api/campaigns/report", "/app/api/implants",
+    "/app/api/patient-groups", "/app/api/alerts",
 ]
 
 
@@ -250,9 +262,9 @@ def test_cross_clinic_lists_do_not_leak(world, path, direction):
     r = atk["client"].get(path)
     assert r.status_code == 200, f"{direction} {path}: {r.status_code} {r.text[:200]}"
     _no_leak(r, vic, f"{direction} {path}")
-    assert atk["mark"] in r.text or path in ("/app/api/alerts", "/app/api/implants", "/app/api/patient-groups",
-                                            "/app/api/campaigns/report", "/app/api/appointments", "/app/api/kasa"), \
-        f"{path}: kendi verisi bile görünmüyor (test körleşti)"
+    assert atk["mark"] in r.text or atk["email"] in r.text or path.split("?")[0] in (
+        "/app/api/alerts", "/app/api/implants", "/app/api/patient-groups", "/app/api/campaigns/report",
+        "/app/api/appointments", "/app/api/kasa"), f"{path}: kendi verisi bile görünmüyor (test körleşti)"
 
 
 # --------------------------------------------------------------------------------------------------
@@ -351,13 +363,17 @@ def test_non_hq_owner_cannot_open_or_enter_other_clinics(world):
 # --------------------------------------------------------------------------------------------------
 def test_foreign_campaign_name_never_surfaces_in_other_clinic(world):
     A, B = world["A"], world["B"]
+    problems: list[str] = []
     for atk, vic in ((B, A), (A, B)):
         r = atk["client"].patch(f"/app/api/patients/{atk['pid']}", json={"campaign_id": vic["camp"]})
-        assert r.status_code in DENIED, f"yabancı kampanya bağlandı: {r.status_code} {r.text[:200]}"
+        if r.status_code not in DENIED:
+            problems.append(f"{atk['tag']}->{vic['tag']}: yabancı kampanya bağlandı ({r.status_code})")
         d = atk["client"].get(f"/app/api/patients/{atk['pid']}")
         assert d.status_code == 200
-        assert vic["mark"] not in d.text, "kurban kampanya adı hasta detayında sızdı"
-        assert (d.json().get("campaign_name") or "") != f"{vic['mark']} Kampanya"
+        if vic["mark"] in d.text:
+            problems.append(f"{atk['tag']}->{vic['tag']}: kurban kampanya adı hasta detayında SIZDI "
+                            f"(campaign_name={d.json().get('campaign_name')!r})")
+    assert not problems, "; ".join(problems)
 
 
 # --------------------------------------------------------------------------------------------------
