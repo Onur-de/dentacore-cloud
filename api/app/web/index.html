@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DentaCore: Diş klinikleri için 16 dilde hasta iletişimi ve klinik yönetimi</title>
-<meta name="description" content="WhatsApp ve Instagram'da 16 dilde 7/24 hasta karşılama, boş koltuğu bekleme listesinden dolduran sistem, kırmızı bayraklı dijital anamnez, iPhone/Android takvim, çok şubeli zincir yönetimi, kasa ve envanter.">
+<title>DentaCore: Diş klinikleri için gece mesajı, boş koltuk ve hasta takibi</title>
+<meta name="description" content="WhatsApp ve Instagram'da 16 dilde 7/24 hasta karşılama, bekleme listesiyle boş koltuk doldurma, kırmızı bayraklı dijital anamnez, iPhone ve Android takvim eşitleme, çok şubeli klinik yönetimi, kasa ve envanter.">
 <link rel="canonical" href="/">
 <link rel="alternate" hreflang="x-default" href="/">
 <link rel="alternate" hreflang="tr" href="/">
@@ -25,12 +25,12 @@
 <link rel="alternate" hreflang="he" href="/?lang=he">
 <meta property="og:type" content="website">
 <meta property="og:title" content="DentaCore: Kaçan mesaj ve boş koltuk kalmasın">
-<meta property="og:description" content="Diş klinikleri için 16 dilde 7/24 hasta iletişimi, boş koltuk doldurma, dijital anamnez, iPhone/Android takvim ve çok şubeli klinik işletim sistemi.">
+<meta property="og:description" content="Diş klinikleri için 16 dilde 7/24 hasta iletişimi, boş koltuk doldurma, dijital anamnez, iPhone ve Android takvim ve çok şubeli klinik işletim sistemi.">
 <meta property="og:locale" content="tr_TR">
 <meta property="og:image" content="/static/og-dentacore.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="DentaCore: Diş klinikleri için klinik işletim sistemi">
-<meta name="twitter:description" content="16 dilde WhatsApp ve Instagram triyajı, 12 güvenlik başlığı, iPhone/Android takvim ve zincir klinik yönetimi.">
+<meta name="twitter:description" content="16 dilde WhatsApp ve Instagram triyajı, iPhone ve Android takvim, zincir klinik yönetimi ve şifreli hasta verisi.">
 <meta name="twitter:image" content="/static/og-dentacore.png">
 <meta name="theme-color" content="#0A2540">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -142,13 +142,13 @@
       <span>DentaCore</span>
     </a>
     <nav class="nav-links" aria-label="Ana menü">
+      <a href="#sahne">Canlı vakalar</a>
       <a href="#moduller">Modüller</a>
       <a href="#takvim">Takvim</a>
       <a href="#guvenlik">Güvenlik</a>
-      <a href="#zincir">Çok Şube</a>
+      <a href="#zincir">Şube ve dil</a>
       <a href="#hesap">Kayıp hesabı</a>
       <a href="#fiyat">Fiyat</a>
-      <a href="#sss">SSS</a>
     </nav>
     <div class="nav-actions">
       <a class="btn btn-ghost" href="/app">Panele giriş</a>
@@ -160,14 +160,15 @@
   </div>
   <div class="mobile-menu hidden" id="mobile-menu">
     <div class="wrap mobile-menu-in">
+      <a href="#sahne">Canlı vakalar</a>
       <a href="#moduller">Modüller</a>
       <a href="#takvim">Takvim eşitleme</a>
-      <a href="#guvenlik">12 Güvenlik başlığı</a>
+      <a href="#guvenlik">Güvenlik</a>
       <a href="#zincir">Çok şube ve 16 dil</a>
-      <a href="#karsilastirma">Karşılaştırma</a>
       <a href="#hesap">Kayıp hesabı</a>
       <a href="#fiyat">Fiyat</a>
       <a href="#sss">Sık sorulanlar</a>
+      <a href="#teknik">Teknik kanıt dosyası</a>
       <div class="mobile-menu-cta">
         <a class="btn btn-ghost" href="/app">Panele giriş</a>
         <a class="btn btn-cta" href="#demo">Demo iste</a>
@@ -180,409 +181,385 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <h1>Gece mesajlar yanıtlanır, boş koltuklar dolar.</h1>
-        <p class="lead">16 dilde WhatsApp yanıtı, otomatik bekleme listesi ve şifreli klinik paneli.</p>
+        <h1>Gece 02:14'te yazan hastayı kaçırmayın.</h1>
+        <p class="lead">Almanca mesaja Almanca yanıt gider, randevu hekimin takviminde hazır olur.</p>
         <div class="hero-cta">
           <a class="btn btn-cta btn-lg" href="#demo">Canlı demo iste</a>
           <a class="btn btn-ghost btn-lg" href="#hesap">Kaybı hesapla</a>
         </div>
-        <ul class="truth-list">
-          <li>
-            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
-            <span>Mevcut numara değişmez</span>
-          </li>
-          <li>
-            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
-            <span>Resmi Meta WhatsApp API</span>
-          </li>
-          <li>
-            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
-            <span>İlk ay ve kurulum ücretsiz</span>
-          </li>
+      </div>
+      <div class="ledger-wrap">
+        <ol class="ledger">
+          <li><time>02:14</time><span>Köln'den implant sorusu geldi, dil Almanca.</span></li>
+          <li><time>02:14</time><span>Almanca yanıt gitti, fiyat aralığı hekim onaylı.</span></li>
+          <li><time>02:16</time><span>Salı 10:00 randevusu takvime işlendi.</span></li>
+        </ol>
+        <p class="ledger-note">Kurgusal örnek. Aşağıda adım adım oynar.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec stage-sec" id="sahne" aria-labelledby="sahne-h">
+    <div class="wrap">
+      <div class="sec-head sec-head-split">
+        <h2 id="sahne-h">Kliniğin üç zor anı, adım adım</h2>
+        <p class="sec-sub">Bir vaka seçin, o dakikada ne olduğunu izleyin. Hastalar ve veriler kurgusaldır.</p>
+      </div>
+
+      <div class="stage-grid">
+        <div class="case-list" role="tablist" aria-label="Klinik vakaları" aria-orientation="vertical">
+          <button class="case" role="tab" id="tab-a" aria-selected="true" aria-controls="sc-a" data-case="a" type="button">
+            <span class="case-time">02:14</span>
+            <span class="case-body">
+              <span class="case-title">Yurt dışından implant hastası</span>
+              <span class="case-sum">Almanca mesaj, hekim onaylı fiyat aralığı, randevu teklifi.</span>
+            </span>
+          </button>
+          <button class="case" role="tab" id="tab-b" aria-selected="false" aria-controls="sc-b" data-case="b" type="button">
+            <span class="case-time">10:30</span>
+            <span class="case-body">
+              <span class="case-title">Son dakika iptali</span>
+              <span class="case-sum">İptal gelir, boşalan koltuk bekleme listesinden dolar.</span>
+            </span>
+          </button>
+          <button class="case" role="tab" id="tab-c" aria-selected="false" aria-controls="sc-c" data-case="c" type="button">
+            <span class="case-time">24. saat</span>
+            <span class="case-body">
+              <span class="case-title">Cerrahi sonrası kırmızı bayrak</span>
+              <span class="case-sum">Şiddetli ağrı ve kanama nöbetçi hekime anında düşer.</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="stage">
+          <div class="stage-bar">
+            <span>Örnek vaka, kurgusal hasta</span>
+            <button class="btn btn-ghost" id="replay" type="button">Baştan oynat</button>
+          </div>
+
+          <div class="stage-panel" id="sc-a" role="tabpanel" aria-labelledby="tab-a">
+            <ol class="thread">
+              <li class="step in" data-key="">
+                <span class="meta"><time>02:14</time> Hasta, WhatsApp</span>
+                <p lang="de">Guten Abend, ich wohne in Köln und möchte ein Implantat im Unterkiefer. Kann ich nächsten Monat zu Ihnen kommen?</p>
+              </li>
+              <li class="step sys" data-key="lang"><p>Dil algılandı: Almanca. Yanıt Almanca gönderilecek.</p></li>
+              <li class="step sys" data-key="price"><p>Fiyat yalnızca hekimin onayladığı aralıktan eklenir. Teşhis ve kesin fiyat verilmez.</p></li>
+              <li class="step out" data-key="">
+                <span class="meta"><time>02:14</time> DentaCore yanıtı</span>
+                <p lang="de">Vielen Dank für Ihre Nachricht. Den von unserem Arzt freigegebenen Preisrahmen für Implantate finden Sie im Anhang. Am Dienstag um 10:00 Uhr wäre ein Termin frei. Passt Ihnen das?</p>
+              </li>
+              <li class="step in" data-key="">
+                <span class="meta"><time>02:16</time> Hasta, WhatsApp</span>
+                <p lang="de">Ja, Dienstag passt.</p>
+              </li>
+              <li class="step sys" data-key="slot"><p>Randevu salı 10:00, Koltuk 1 olarak takvime işlendi.</p></li>
+            </ol>
+            <dl class="readout">
+              <div><dt>Algılanan dil</dt><dd data-key="lang">Almanca</dd></div>
+              <div><dt>Fiyat</dt><dd data-key="price">Hekim onaylı aralık</dd></div>
+              <div><dt>Takvim</dt><dd data-key="slot">Salı 10:00, Koltuk 1</dd></div>
+            </dl>
+            <a class="btn btn-cta" href="/app" data-panel-hash="#/messages">Bu senaryoyu yönetim panelinde canlı aç</a>
+          </div>
+
+          <div class="stage-panel" id="sc-b" role="tabpanel" aria-labelledby="tab-b">
+            <ol class="thread">
+              <li class="step in" data-key="">
+                <span class="meta"><time>10:30</time> Hasta, WhatsApp</span>
+                <p>Bugün 14:30 randevuma gelemeyeceğim, iptal edebilir misiniz?</p>
+              </li>
+              <li class="step out" data-key="">
+                <span class="meta"><time>10:30</time> DentaCore yanıtı</span>
+                <p>Geçmiş olsun, randevunuz iptal edildi. Size uygun yeni bir gün yazarsanız hemen planlayalım.</p>
+              </li>
+              <li class="step sys" data-key="seat"><p>Koltuk 2, 14:30 boşaldı. Bekleme listesinden uygun hastalar belirlendi.</p></li>
+              <li class="step out" data-key="offer">
+                <span class="meta"><time>10:31</time> Bekleme listesindeki 3 hastaya</span>
+                <p>Bugün 14:30 için bir yer açıldı. Almak isterseniz EVET yazmanız yeterli.</p>
+              </li>
+              <li class="step in" data-key="">
+                <span class="meta"><time>10:33</time> Selin A., bekleme listesi</span>
+                <p>Evet</p>
+              </li>
+              <li class="step sys" data-key="filled"><p>İlk onaylayan Selin A. oldu, randevu yazıldı, diğer iki teklif kapandı. Koltuk 2 yeniden dolu.</p></li>
+              <li class="step sys" data-key="money"><p>Korunan ciro: <span data-live-ticket>4.500 TL</span>. Bu, hesaplayıcıdaki ortalama işlem bedelidir.</p></li>
+            </ol>
+            <dl class="readout">
+              <div><dt>Koltuk</dt><dd data-key="filled">Koltuk 2, 14:30 dolu</dd></div>
+              <div><dt>Teklif</dt><dd data-key="offer">3 hasta, ilk onaylayan alır</dd></div>
+              <div><dt>Korunan ciro</dt><dd data-key="money" data-live-ticket>4.500 TL</dd></div>
+            </dl>
+            <a class="btn btn-cta" href="/app" data-panel-hash="#/waitlist">Bu senaryoyu yönetim panelinde canlı aç</a>
+          </div>
+
+          <div class="stage-panel" id="sc-c" role="tabpanel" aria-labelledby="tab-c">
+            <ol class="thread">
+              <li class="step out" data-key="">
+                <span class="meta"><time>16:20</time> DentaCore, 24. saat kontrolü</span>
+                <p>Merhaba, dünkü cerrahi çekimden sonra ağrınızı 0 ile 10 arasında puanlar mısınız? Kanama sürüyor mu?</p>
+              </li>
+              <li class="step in" data-key="">
+                <span class="meta"><time>16:24</time> Hasta, WhatsApp</span>
+                <p>Ağrım 9, kanama da durmuyor. Yüzüm de şişti.</p>
+              </li>
+              <li class="step sys" data-key="flag"><p>Triyaj motoru kırmızı bayrak yakaladı: ağrı 8 ve üzeri, durmayan kanama.</p></li>
+              <li class="step out" data-key="">
+                <span class="meta"><time>16:24</time> DentaCore yanıtı</span>
+                <p>Geçmiş olsun. Nöbetçi hekimimize hemen haber verdik. Durum ağırlaşırsa ya da nefes almakta zorlanırsanız 112'yi arayın.</p>
+              </li>
+              <li class="step sys" data-key="alert"><p>Nöbetçi hekime anında bildirim gitti. Panelde Uyarılar kutusunda kırmızı kayıt açıldı.</p></li>
+            </ol>
+            <dl class="readout">
+              <div><dt>Kırmızı bayrak</dt><dd data-key="flag">Ağrı 9, durmayan kanama</dd></div>
+              <div><dt>Bildirim</dt><dd data-key="alert">Nöbetçi hekim, anında</dd></div>
+              <div><dt>Panel</dt><dd data-key="alert">Uyarılar, kırmızı kayıt</dd></div>
+            </dl>
+            <a class="btn btn-cta" href="/app" data-panel-hash="#/alerts">Bu senaryoyu yönetim panelinde canlı aç</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="moduller" aria-labelledby="mod-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="mod-h">Sekreter yetişemediğinde iş kendiliğinden yürür</h2>
+        <p class="sec-sub">Mesajı yanıtlamak yalnızca ilk adım. Asıl iş, koltuğun boş kalmaması ve riskli hastanın gözden kaçmaması.</p>
+      </div>
+
+      <div class="mod-grid">
+        <article class="mod mod-seat">
+          <h3>Sabah iptal olan koltuğu bekleme listesinden doldurun</h3>
+          <p>İptal gelince listedeki hastalara teklif gider, ilk onaylayana randevu yazılır. Çift rezervasyonu veritabanı kilidi engeller.</p>
+          <div class="seatboard-wrap">
+            <div class="seatboard" role="img" aria-label="Koltuk 2'de 14:30 randevusu iptal oldu ve bekleme listesinden Selin A. ile doldu">
+              <span class="sb-h" style="--col:2">10:00</span>
+              <span class="sb-h" style="--col:4">11:00</span>
+              <span class="sb-h" style="--col:6">12:00</span>
+              <span class="sb-h" style="--col:8">13:00</span>
+              <span class="sb-h" style="--col:10">14:00</span>
+              <span class="sb-h" style="--col:12">15:00</span>
+              <span class="sb-row" style="--row:2">Koltuk 1</span>
+              <span class="sb-item" style="--row:2;--col:2;--span:2">Ahmet Y.</span>
+              <span class="sb-item" style="--row:2;--col:5;--span:2">Ayşe K.</span>
+              <span class="sb-item" style="--row:2;--col:12;--span:2">Murat D.</span>
+              <span class="sb-row" style="--row:3">Koltuk 2</span>
+              <span class="sb-item" style="--row:3;--col:3;--span:2">Zeynep T.</span>
+              <span class="sb-item sb-filled" style="--row:3;--col:11;--span:2">Selin A.<small>bekleme listesi</small></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="mod mod-anam">
+          <h3>Riskli yanıtı hekim işlemden önce görsün</h3>
+          <p>İşlemden önce 11 soruluk form gider: kan sulandırıcı, penisilin alerjisi, bifosfonat, diyabet, kalp, hamilelik.</p>
+          <ul class="qa">
+            <li><span>Kan sulandırıcı kullanıyor musunuz?</span><b class="flag">Evet, hekime düştü</b></li>
+            <li><span>Penisilin alerjiniz var mı?</span><b>Hayır</b></li>
+            <li><span>Diyabetiniz var mı?</span><b>Hayır</b></li>
+            <li><span>Kalp rahatsızlığınız var mı?</span><b class="flag">Evet, hekime düştü</b></li>
+          </ul>
+        </article>
+
+        <article class="mod mod-lang">
+          <h3>Gece de hafta sonu da hastanın dilinde yanıt</h3>
+          <p>WhatsApp ve Instagram mesajları 16 dilde, ek yapay zeka maliyeti olmadan karşılanır. İlk yanıt hedefi 10 saniyenin altındadır.</p>
+          <table class="route">
+            <thead><tr><th scope="col">Hasta yazıyor</th><th scope="col">DentaCore yapar</th></tr></thead>
+            <tbody>
+              <tr><td>Adresiniz nerede?</td><td>Hazır yanıtla karşılar</td></tr>
+              <tr><td>İmplant ne kadar?</td><td>Hekim onaylı aralığı ekler</td></tr>
+              <tr><td>Kanama durmuyor</td><td>Nöbetçi hekime alarm verir</td></tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="mod mod-post">
+          <h3>Ameliyat sonrası kanama yazan hastayı anında nöbetçi hekime düşürün</h3>
+          <p>Çekim ya da implanttan sonra 2, 24 ve 72. saatte ağrı skoru sorulur. 8 ve üzeri ağrı ya da durmayan kanama alarm olur.</p>
+          <ol class="rail">
+            <li><b>2. saat</b><span>Ağrı 3, sorun yok</span></li>
+            <li class="rail-alert"><b>24. saat</b><span>Ağrı 9, hekime alarm</span></li>
+            <li><b>72. saat</b><span>Soru gönderilecek</span></li>
+          </ol>
+        </article>
+      </div>
+
+      <div class="index">
+        <h3>Arka planda çalışan beş iş</h3>
+        <dl class="rows">
+          <div class="row"><dt>Röntgen ve fotoğraf kalite denetimi</dt><dd>Bulanık veya karanlık görseli tespit eder, hastadan yenisini ister. Teşhis koymaz; hekime yalnız net kare gelir.</dd></div>
+          <div class="row"><dt>Uyuyan hasta geri kazanımı</dt><dd>Planı alıp 3 ila 6 aydır dönmeyen hastaya, izni varsa, hatırlatma gider. Bekleyen planlı ciro görünür olur.</dd></div>
+          <div class="row"><dt>Kasa ve hekim hak edişi</dt><dd>Hizmet, tahsilat, alacak ve hekim payı kuruşu kuruşuna hesaplanır. Kayıt silinmez, yalnız gerekçeli iptal edilir.</dd></div>
+          <div class="row"><dt>Envanter ve kritik stok</dt><dd>Stok alt sınıra düşünce uyarı oluşur. Her giriş çıkış personel imzasıyla kaydedilir.</dd></div>
+          <div class="row"><dt>Hekim WhatsApp asistanı</dt><dd>Hekim WhatsApp'tan "yarın", "kasa" ya da "stok" yazınca anında yanıt alır. Her sabah 08:30'da günün özeti gelir.</dd></div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec surface-alt" id="takvim" aria-labelledby="takvim-h">
+    <div class="wrap g12">
+      <div class="s-5">
+        <h2 id="takvim-h">Randevu değişince hekimin telefonu da değişir</h2>
+        <p class="sec-sub">Her şubenin kendi takvim bağlantısı var. Hekim bir kez abone olur, gerisi kendiliğinden akar.</p>
+      </div>
+      <dl class="rows s-7">
+        <div class="row"><dt>iPhone</dt><dd>Şubeye özel bağlantıya tek dokunuşla abone olunur. Dış takvimde yalnız maskeli baş harfler ve koltuk numarası görünür. Randevudan 60 ve 15 dakika önce bildirim gelir. İptal ve saat değişikliği yenilemede güncellenir; yenileme sıklığı iPhone ayarlarına bağlıdır.</dd></div>
+        <div class="row"><dt>Android</dt><dd>Google Takvim'e abone olunur, her randevu satırından Google Takvim etkinliği açılır. Klinik adresi etkinliğin konumuna işlenir. Bağlantı 90 gün geçerlidir; tek tıkla iptal edilir ya da yenilenir.</dd></div>
+        <div class="row"><dt>Bilgisayar</dt><dd>Tek randevu ya da tüm şube programı .ics dosyası olarak indirilir. Aylık, haftalık ve günlük görünüm arasında anında geçilir.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="sec dark-band" id="guvenlik" aria-labelledby="guv-h">
+    <div class="wrap g12">
+      <div class="s-5">
+        <h2 id="guv-h">Hasta verisi sizde kalır, her açılış kayıtlıdır</h2>
+        <p class="sec-sub">Sağlık verisi KVKK'da özel nitelikli kişisel veridir. Bu yüzden hasta kartını kimin açtığı değiştirilemez bir günlüğe yazılır.</p>
+        <a class="text-link" href="#teknik">Teknik kanıt dosyasını incele</a>
+      </div>
+      <div class="s-7">
+        <ol class="audit" aria-label="Örnek denetim günlüğü">
+          <li><time>09:12</time><span>Sekreter, hasta kartını açtı</span></li>
+          <li><time>09:40</time><span>Hekim, anamnez formunu görüntüledi</span></li>
+          <li><time>11:05</time><span>Yönetici, kasa raporunu indirdi</span></li>
+        </ol>
+        <ul class="plain">
+          <li>Hasta telefonu ve anamnezi şifreli saklanır, gece yedeği de şifrelidir.</li>
+          <li>Yönetici girişi iki aşamalı doğrulamayla korunur.</li>
+          <li>Aydınlatma ve açık rıza, sürüm numarasıyla ayrı tutulur.</li>
+          <li>Sistem kendi sunucunuzda ya da Türkiye'de size özel sunucuda çalışır.</li>
         </ul>
       </div>
-
-      <div class="preview-shell" aria-label="Canlı ürün önizlemesi">
-        <div class="preview-tabs" role="tablist" aria-label="Önizleme görünümleri">
-          <button class="preview-tab active" role="tab" aria-selected="true" aria-controls="panel-chat" id="tab-chat" type="button">Canlı Hasta Akışı</button>
-          <button class="preview-tab" role="tab" aria-selected="false" aria-controls="panel-schedule" id="tab-schedule" type="button">Koltuk ve Anamnez</button>
-        </div>
-
-        <div id="panel-chat" role="tabpanel" aria-labelledby="tab-chat" class="preview-body">
-          <div class="scenario-bar" role="group" aria-label="Senaryo seçimi">
-            <button class="sc-btn active" type="button" data-sc="tr">TR Bekleme Listesi</button>
-            <button class="sc-btn" type="button" data-sc="en">EN Londra Zirkonyum</button>
-            <button class="sc-btn" type="button" data-sc="ar">AR Acil (RTL)</button>
-            <button class="sc-btn" type="button" data-sc="de">DE İmplant</button>
-          </div>
-          <div class="chat-feed" id="hero-chat-feed" dir="ltr" lang="tr">
-            <div class="msg msg-in"><span class="msg-meta">23:41 WhatsApp</span>Yarın 14:30 randevuma yetişemeyeceğim, iptal edebilir misiniz?</div>
-            <div class="msg msg-out"><span class="msg-meta">23:41 Otopilot</span>Randevunuz iptal edildi. Uygun yeni gün yazarsanız hemen planlayalım.</div>
-            <div class="msg msg-sys">Bekleme listesi dalga 1: 3 hastaya 14:30 teklifi gitti, Selin Arslan “EVET” dedi, koltuk 2 doldu.</div>
-          </div>
-          <div class="router-readout" id="hero-router-readout">
-            <span><strong>Katman:</strong> L1 Kural + Bekleme Listesi</span>
-            <span><strong>Ek maliyet:</strong> yok</span>
-            <span><strong>Durum:</strong> Koltuk 2 yeniden doldu</span>
-          </div>
-        </div>
-
-        <div id="panel-schedule" role="tabpanel" aria-labelledby="tab-schedule" class="preview-body hidden">
-          <div class="mini-cal">
-            <div class="mini-slot">
-              <div class="mini-time">10:00<span>Koltuk 1</span></div>
-              <div class="mini-info"><strong>Ahmet Yılmaz</strong><span>İmplant Kontrol (teyitli)</span></div>
-              <span class="mini-badge ok">Temiz</span>
-            </div>
-            <div class="mini-slot">
-              <div class="mini-time">11:30<span>Koltuk 1</span></div>
-              <div class="mini-info"><strong>Ayşe Kaya</strong><span>Yirmi Yaş Cerrahi Çekim</span></div>
-              <span class="mini-badge warn">Kan sulandırıcı</span>
-            </div>
-            <div class="mini-slot">
-              <div class="mini-time">14:30<span>Koltuk 2</span></div>
-              <div class="mini-info"><strong>Selin Arslan</strong><span>Zirkonyum Prova (bekleme listesi)</span></div>
-              <span class="mini-badge info">3 dk doldu</span>
-            </div>
-          </div>
-          <div class="router-readout">
-            <span><strong>Koltuk Çakışma Kilidi:</strong> Aktif</span>
-            <span><strong>iPhone / Android:</strong> Anlık webcal</span>
-          </div>
-        </div>
-      </div>
     </div>
   </section>
 
-  <section class="metrics-band" aria-label="Temel operasyon ölçüleri">
-    <div class="wrap metrics-grid">
-      <div><b>&lt; 10 sn</b><span>ilk yanıt süresi hedefi</span></div>
-      <div><b>16 dil</b><span>otomatik algılama, 3 RTL dahil</span></div>
-      <div><b>3 dk</b><span>iptal sonrası bekleme listesi dalgası</span></div>
-      <div><b>11 soru</b><span>işlem öncesi kırmızı bayraklı anamnez</span></div>
-    </div>
-  </section>
-
-  <section class="trust-strip" aria-label="Doğrulanabilir teknik güvenlik kanıtları">
-    <div class="wrap trust-grid">
-      <div class="trust-card">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"/></svg>
-        <span>12/12 HTTP Güvenlik Başlığı</span>
-      </div>
-      <div class="trust-card">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-        <span>Fernet AES-128 Şifreli Hasta Verisi</span>
-      </div>
-      <div class="trust-card">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3"/></svg>
-        <span>RFC 6238 TOTP 2FA + 10 Deneme Kilidi</span>
-      </div>
-      <div class="trust-card">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        <span>SHA-256 Değiştirilemez Denetim Zinciri</span>
-      </div>
-      <div class="trust-card">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <span>6698 Sayılı KVKK Açık Rıza Sürümleme</span>
-      </div>
-      <div class="trust-card">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>
-        <span>Kendi Sunucunuzda Tam Veri Egemenliği</span>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec" id="moduller">
-    <div class="wrap">
-      <h2>Sekreterin yetişemediği her iş, tek klinik panelde</h2>
-      <p class="sec-sub">Mesaj yanıtlamak ilk adım. Gelir kaybını durduran ve klinik ekibini koruyan dokuz modül birlikte çalışır.</p>
-
-      <div class="pillars">
-        <article class="pillar-card">
-          <div class="mod-head">
-            <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <h3>7/24 Çok Dilli Karşılama</h3>
-          </div>
-          <p>WhatsApp ve Instagram mesajlarını 16 dilde, ek yapay zekâ maliyeti olmadan karşılar. Konum, saat ve teyit sorularını yanıtlar; teşhis ve ilaç önerisini filtreler.</p>
-        </article>
-        <article class="pillar-card">
-          <div class="mod-head">
-            <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg>
-            <h3>Boş Koltuk Doldurucu</h3>
-          </div>
-          <p>İptal gelince bekleme listesine teklif gider. İlk onaylayana randevu yazılır; çift rezervasyonu veritabanı kilidi engeller.</p>
-        </article>
-        <article class="pillar-card">
-          <div class="mod-head">
-            <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"/></svg>
-            <h3>Kırmızı Bayraklı Anamnez</h3>
-          </div>
-          <p>İşlemden önce 11 soruluk form gider: kan sulandırıcı, penisilin alerjisi, bifosfonat, diyabet, kalp, hamilelik. Riskli yanıt hekime anında düşer.</p>
-        </article>
-      </div>
-
-      <div class="mod-list">
-        <article class="mod-item">
-          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 14l3-3 3 3 2-2 4 4"/></svg>
-          <div>
-            <h3>Röntgen ve Fotoğraf Kalite Denetimi</h3>
-            <p>Bulanık veya karanlık görseli tespit edip hastadan yenisini ister. Teşhis koymaz; hekime yalnız net kare gelir.</p>
-          </div>
-        </article>
-        <article class="mod-item">
-          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0"/></svg>
-          <div>
-            <h3>İşlem Sonrası 2-24-72 Saat Takibi</h3>
-            <p>Çekim veya implant sonrası 2, 24 ve 72. saatte ağrı skoru sorulur. 8 ve üzeri ağrı ya da durmayan kanama nöbetçi hekime alarm olur.</p>
-          </div>
-        </article>
-        <article class="mod-item">
-          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M22 19v-1a4 4 0 0 0-3-3.9"/></svg>
-          <div>
-            <h3>Uyuyan Hasta Geri Kazanımı</h3>
-            <p>Planı alıp 3 ila 6 aydır dönmeyen hastaya, izni varsa, hatırlatma gider. Bekleyen planlı ciro görünür olur.</p>
-          </div>
-        </article>
-        <article class="mod-item">
-          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6"/></svg>
-          <div>
-            <h3>Kasa ve Hekim Hak Edişi</h3>
-            <p>Hizmet, tahsilat, alacak ve hekim payı kuruş hassasiyetinde hesaplanır. Kayıt silinmez, yalnız gerekçeli iptal edilir.</p>
-          </div>
-        </article>
-        <article class="mod-item">
-          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/></svg>
-          <div>
-            <h3>Envanter ve Kritik Stok</h3>
-            <p>Stok alt sınıra düşünce uyarı oluşur; her giriş çıkış personel imzasıyla kaydedilir.</p>
-          </div>
-        </article>
-        <article class="mod-item">
-          <svg class="ico mod-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7zM9 3v4M15 3v4M9 17v4M15 17v4"/></svg>
-          <div>
-            <h3>Hekim WhatsApp Asistanı</h3>
-            <p>Hekim WhatsApp’tan “yarın”, “kasa” veya “stok” yazdığında ek maliyet olmadan anında yanıt alır; her sabah 08:30’da günün özeti gelir.</p>
-          </div>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec surface-alt" id="takvim">
-    <div class="wrap">
-      <h2>iPhone, Android ve Google Takvim ile RFC 5545 güvenli senkronizasyon</h2>
-      <p class="sec-sub">Koltuk çakışmasını veritabanı kilidi engeller. Şubenin imzalı <code>webcal://</code> akışı hekimin telefonuna salt-okunur ve KVKK maskeli bağlanır.</p>
-
-      <div class="cal-grid">
-        <article class="cal-card">
-          <h3>iPhone (Apple Takvim · Tek Yönlü ICS)</h3>
-          <p>Şubeye özel <code>webcal://</code> bağlantısına tek tıkla abone olunur. Dış takvimde yalnız maskeli baş harfler ve koltuk numarası görünür.</p>
-          <ul>
-            <li>60 dk ve 15 dk öncesinde çift <code>VALARM</code> bildirimi</li>
-            <li>RFC 5545 <code>SEQUENCE</code> ve sabit <code>UID</code> ile iptal/saat güncellemesi (yenileme sıklığı iOS ayarlarına bağlıdır)</li>
-          </ul>
-        </article>
-        <article class="cal-card">
-          <h3>Android (Google Takvim)</h3>
-          <p>Tüm takvime <code>google_subscribe_url</code> ile abone olunur; her randevu satırından Google Takvim etkinliği açılır.</p>
-          <ul>
-            <li>90 gün süreli HMAC imzalı URL, tek tıkla iptal/yenileme (rotasyon)</li>
-            <li>Klinik adresi etkinlik konumuna otomatik işlenir</li>
-          </ul>
-        </article>
-        <article class="cal-card">
-          <h3>Toplu ve Tekil <code>.ics</code> İndirme</h3>
-          <p>Tek randevu ya da tüm şube programı (<code>all.ics</code>) RFC 5545 biçiminde dışa aktarılır.</p>
-          <ul>
-            <li>Aylık, haftalık ve günlük görünüm arasında anlık geçiş</li>
-            <li>Yeni klinik açılışında teslim kartıyla hazır link</li>
-          </ul>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec dark-band" id="guvenlik">
-    <div class="wrap">
-      <h2>Hasta verisi kendi sunucunuzda. Şifreli ve denetlenebilir.</h2>
-      <p class="sec-sub">Sağlık verisi 6698 sayılı KVKK’ya göre özel nitelikli kişisel veridir. Güvenlik, test edilen teknik kontrollerle kurulur.</p>
-
-      <div class="sec-cards">
-        <article class="sec-card">
-          <h3>Fernet AES-128 Şifreli Hasta Verisi</h3>
-          <p>Telefon, anamnez, görseller ve TOTP anahtarları şifreli yazılır; arama için ayrı HMAC özetleri tutulur.</p>
-        </article>
-        <article class="sec-card">
-          <h3>SHA-256 Değiştirilemez Denetim Zinciri</h3>
-          <p>Kim, hangi kaydı ne zaman açtı? Her satır öncekinin SHA-256 özetini taşır; tek kayıt değişirse zincir kırılır.</p>
-        </article>
-        <article class="sec-card">
-          <h3>RFC 6238 TOTP 2FA + 10 Deneme Kilidi</h3>
-          <p>Parolalar scrypt ile özetlenir. TOTP tekrar oynatmaya karşı korunur; 10 hatalı girişte hesap 15 dakika kilitlenir, 15 dakika hareketsizlikte oturum düşer.</p>
-        </article>
-        <article class="sec-card">
-          <h3>6698 Sayılı KVKK Açık Rıza Sürümleme</h3>
-          <p>Aydınlatma, açık rıza, iletişim izni ve yurt dışı aktarım onayları sürüm numarasıyla ayrı saklanır.</p>
-        </article>
-        <article class="sec-card">
-          <h3>Kendi Sunucunuzda Tam Veri Egemenliği</h3>
-          <p>Docker Compose ile kendi sunucunuza veya Türkiye lokasyonlu özel sunucuya kurulur. Dış CDN ve üçüncü parti font betiği yüklenmez.</p>
-        </article>
-        <article class="sec-card">
-          <h3>12/12 HTTP Güvenlik Başlığı + Gece Yedeği</h3>
-          <p>Her yanıtta 12 güvenlik başlığı zorunludur (ayrıntı aşağıda). Yedek her gece açık anahtarla şifrelenir; çözme anahtarı sunucuda durmaz.</p>
-        </article>
-      </div>
-
-      <details class="tech-details">
-      <summary>Teknik ayrıntı: BT ekibiniz için 12 güvenlik başlığı</summary>
-      <div class="table-wrap dark-table-wrap" tabindex="0" role="region" aria-label="12 HTTP güvenlik başlığı tablosu">
-        <table class="sec-table">
-          <thead>
-            <tr>
-              <th>Güvenlik Başlığı</th>
-              <th>Uygulanan Değer</th>
-              <th>Koruduğu Risk</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td><code>Strict-Transport-Security</code></td><td><code>max-age=63072000; includeSubDomains; preload</code></td><td>HTTPS zorunlu, downgrade kapalı</td></tr>
-            <tr><td><code>Content-Security-Policy</code></td><td><code>default-src 'self'; script-src 'self'; frame-ancestors 'none'</code></td><td>Satır içi ve dış XSS betiklerini durdurur</td></tr>
-            <tr><td><code>X-Content-Type-Options</code></td><td><code>nosniff</code></td><td>Dosya türü tahminini önler</td></tr>
-            <tr><td><code>X-Frame-Options</code></td><td><code>DENY</code></td><td>Clickjacking ve iframe gömmeyi engeller</td></tr>
-            <tr><td><code>X-XSS-Protection</code></td><td><code>0</code></td><td>Hatalı eski XSS filtresini kapatır</td></tr>
-            <tr><td><code>Referrer-Policy</code></td><td><code>no-referrer</code></td><td>Hasta bağlantı ve token bilgisinin dış URL’ye sızmasını önler</td></tr>
-            <tr><td><code>Permissions-Policy</code></td><td><code>camera=(), microphone=(), geolocation=(), payment=()</code></td><td>Kamera, mikrofon ve konumu kilitler</td></tr>
-            <tr><td><code>Cross-Origin-Opener-Policy</code></td><td><code>same-origin</code></td><td>Açılan sekmelerle bellek/pencere paylaşımını keser</td></tr>
-            <tr><td><code>Cross-Origin-Resource-Policy</code></td><td><code>same-origin</code></td><td>Panel kaynaklarının başka kökenlerden yüklenmesini engeller</td></tr>
-            <tr><td><code>Cross-Origin-Embedder-Policy</code></td><td><code>require-corp</code></td><td>Spectre yan kanal riskini azaltır</td></tr>
-            <tr><td><code>X-Permitted-Cross-Domain-Policies</code></td><td><code>none</code></td><td>Harici Flash/PDF çapraz alan politikalarını yasaklar</td></tr>
-            <tr><td><code>Cache-Control</code> + Kimlik Gizleme</td><td><code>no-store</code> (/app/api, /auth), Server gizli</td><td>Önbellek ve sürüm ifşasını önler</td></tr>
-          </tbody>
-        </table>
-      </div>
-      </details>
-    </div>
-  </section>
-
-  <section class="sec" id="zincir">
-    <div class="wrap chain-grid">
-      <div class="chain-block">
-        <h2>Çok şubeli zincir klinikler, tam veri izolasyonuyla</h2>
-        <p>Hasta kartı, koltuk, kasa ve envanter veritabanı düzeyinde <code>clinic_id</code> ile ayrılır. Bursa şubesi İstanbul veya Ankara şubesinin tek kaydını göremez.</p>
+  <section class="sec" id="zincir" aria-labelledby="zincir-h">
+    <div class="wrap g12">
+      <div class="s-5">
+        <h2 id="zincir-h">Zincir klinikler tek ekranda, şubeler birbirinden ayrı</h2>
+        <p class="sec-sub">Hasta kartı, koltuk, kasa ve envanter şube numarasıyla ayrılır. Bursa şubesi İstanbul veya Ankara şubesinin tek kaydını göremez.</p>
         <ul class="check-list">
-          <li>Merkez yöneticisi tek tıkla şubeye geçer ve merkeze döner.</li>
-          <li>Yeni şubede giriş e-postası, <code>webcal://</code> ve Google Takvim linki tek teslim kartında hazırlanır.</li>
-          <li>Şube bazlı aktif randevu, hasta sayısı ve tahsilat cirosu merkez tabloda karşılaştırılır.</li>
+          <li>Merkez yöneticisi tek tıkla şubeye geçer, merkeze döner.</li>
+          <li>Yeni şubenin giriş e-postası ve takvim bağlantıları tek teslim kartında hazırlanır.</li>
+          <li>Şubelerin aktif randevu, hasta sayısı ve tahsilatı tek tabloda karşılaştırılır.</li>
         </ul>
       </div>
-
-      <div class="lang-block" id="diller">
-        <h2>16 dilde anında algılama ve RTL desteği</h2>
-        <p>Hasta hangi dilde yazarsa ilk mesajdan o dilde karşılanır. Arapça, Farsça ve İbranice sağdan sola (RTL) görünür.</p>
-        <div class="lang-chips" id="lang-chips" role="group" aria-label="16 desteklenen dil örneği">
-          <button type="button" class="lang-chip active" data-lang="tr">Türkçe (tr)</button>
-          <button type="button" class="lang-chip" data-lang="en">English (en)</button>
-          <button type="button" class="lang-chip" data-lang="de">Deutsch (de)</button>
-          <button type="button" class="lang-chip" data-lang="ar">العربية (ar RTL)</button>
-          <button type="button" class="lang-chip" data-lang="ru">Русский (ru)</button>
-          <button type="button" class="lang-chip" data-lang="fr">Français (fr)</button>
-          <button type="button" class="lang-chip" data-lang="nl">Nederlands (nl)</button>
-          <button type="button" class="lang-chip" data-lang="es">Español (es)</button>
-          <button type="button" class="lang-chip" data-lang="it">Italiano (it)</button>
-          <button type="button" class="lang-chip" data-lang="fa">فارسی (fa RTL)</button>
-          <button type="button" class="lang-chip" data-lang="az">Azərbaycanca (az)</button>
-          <button type="button" class="lang-chip" data-lang="uk">Українська (uk)</button>
-          <button type="button" class="lang-chip" data-lang="bg">Български (bg)</button>
-          <button type="button" class="lang-chip" data-lang="ro">Romana (ro)</button>
-          <button type="button" class="lang-chip" data-lang="el">Ελληνικά (el)</button>
-          <button type="button" class="lang-chip" data-lang="he">עברית (he RTL)</button>
+      <div class="s-7 lang-wrap" id="diller">
+        <h3>Hasta hangi dilde yazarsa ilk mesajdan o dilde karşılanır</h3>
+        <p class="lang-sub">16 dil desteklenir. Arapça, Farsça ve İbranice sağdan sola görünür.</p>
+        <div class="lang-chips" id="lang-chips" role="group" aria-label="16 desteklenen dil">
+          <button type="button" class="lang-chip active" data-lang="tr">Türkçe</button>
+          <button type="button" class="lang-chip" data-lang="en">English</button>
+          <button type="button" class="lang-chip" data-lang="de">Deutsch</button>
+          <button type="button" class="lang-chip" data-lang="ar" lang="ar">العربية</button>
+          <button type="button" class="lang-chip" data-lang="ru">Русский</button>
+          <button type="button" class="lang-chip" data-lang="fr">Français</button>
+          <button type="button" class="lang-chip" data-lang="nl">Nederlands</button>
+          <button type="button" class="lang-chip" data-lang="es">Español</button>
+          <button type="button" class="lang-chip" data-lang="it">Italiano</button>
+          <button type="button" class="lang-chip" data-lang="fa" lang="fa">فارسی</button>
+          <button type="button" class="lang-chip" data-lang="az">Azərbaycanca</button>
+          <button type="button" class="lang-chip" data-lang="uk">Українська</button>
+          <button type="button" class="lang-chip" data-lang="bg">Български</button>
+          <button type="button" class="lang-chip" data-lang="ro">Română</button>
+          <button type="button" class="lang-chip" data-lang="el">Ελληνικά</button>
+          <button type="button" class="lang-chip" data-lang="he" lang="he">עברית</button>
         </div>
-        <div class="lang-preview" id="lang-preview" dir="ltr" lang="tr" role="region" aria-live="polite">
-          <div class="lp-meta">Seçilen dil: <strong id="lp-code">TR</strong> (hazır yanıt, ek maliyet yok)</div>
+        <div class="lang-preview" id="lang-preview" dir="ltr" lang="tr" role="region" aria-live="polite" aria-label="Seçilen dilde karşılama mesajı">
+          <div class="lp-meta">Seçilen dil: <strong id="lp-code">TR</strong>, hazır yanıt, ek maliyet yok</div>
           <p id="lp-text">Merhaba, Özel DentaCore Merkez Polikliniği hasta iletişim hattına hoş geldiniz. Randevu, adres veya çalışma saatleri için yazabilirsiniz.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="sec surface-alt" id="karsilastirma">
+  <section class="sec surface-alt" id="hesap" aria-labelledby="hesap-h">
     <div class="wrap">
-      <h2>Tipik mesaj botu ile DentaCore arasındaki fark</h2>
-      <p class="sec-sub">Sıradan SaaS mesaj botlarının güvenlik, takip ve maliyet açıklarını tek mimaride kapatır.</p>
-      <div class="table-wrap" tabindex="0" role="region" aria-label="Tipik mesaj botu ile DentaCore karşılaştırma tablosu">
-        <table class="cmp">
-          <thead>
-            <tr>
-              <th>Kriter</th>
-              <th>Tipik mesaj botu</th>
-              <th>DentaCore</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td>7/24 hasta karşılama ve dil</td><td>Genelde 1-5 dil, bulut SaaS</td><td>WhatsApp + Instagram, 16 dil (AR/FA/HE RTL dahil)</td></tr>
-            <tr><td>İptal edilen koltuğu doldurma</td><td>Çoğunlukla yok</td><td>3 dakikalık bekleme listesi dalgası + çakışma kilidi</td></tr>
-            <tr><td>Dijital anamnez ve KVKK onam</td><td>Yok veya düz metin form</td><td>11 sorulu kırmızı bayrak uyarılı, Fernet şifreli, sürümlü</td></tr>
-            <tr><td>Röntgen ve fotoğraf kontrolü</td><td>Görsel analiz yapılmaz</td><td>Bulanık/karanlık görseli teşhissiz geri ister</td></tr>
-            <tr><td>İşlem sonrası takip</td><td>Tek seferlik memnuniyet anketi</td><td>2 / 24 / 72 saat ağrı skoru + nöbetçi hekim alarmı</td></tr>
-            <tr><td>Telefon takvim senkronizasyonu</td><td>Yalnız Google linki</td><td>iPhone webcal:// (VALARM) + Google Takvim + toplu .ics</td></tr>
-            <tr><td>Çok şubeli zincir yönetimi</td><td>Şubeler arası geçiş kısıtlı</td><td>clinic_id izolasyonu, HQ tek tık geçiş, teslim kartı</td></tr>
-            <tr><td>HTTP güvenlik başlıkları</td><td>0/10 başlık eksik kalabiliyor</td><td>12/12 zorunlu güvenlik başlığı, CSP script-src 'self'</td></tr>
-            <tr><td>Denetim kaydı bütünlüğü</td><td>Standart log veya belirsiz</td><td>SHA-256 hash zincirli, değiştirilemez denetim kaydı</td></tr>
-            <tr><td>Veri egemenliği</td><td>Sağlayıcının ortak bulutu</td><td>Kendi sunucunuz veya size özel Türkiye sunucusu</td></tr>
-            <tr><td>Yapay zekâ maliyeti</td><td>Her mesajda ücretli model çağrısı</td><td>Sık sorulan sorular hazır yanıtla, ek maliyet olmadan cevaplanır</td></tr>
-          </tbody>
-        </table>
+      <div class="sec-head sec-head-split">
+        <h2 id="hesap-h">Kliniğiniz ayda ne kadar kaybediyor?</h2>
+        <p class="sec-sub">Varsayılan rakamlar örnektir, kendi rakamlarınızı girin. Hesap tarayıcınızda yapılır, sunucuya veri gitmez.</p>
       </div>
-    </div>
-  </section>
-
-  <section class="sec" id="hesap">
-    <div class="wrap">
-      <h2>Kliniğiniz ayda ne kadar kaybediyor?</h2>
-      <p class="sec-sub">Kendi rakamlarınızı girin. Hesaplama tamamen tarayıcınızda yapılır, sunucuya veri gitmez.</p>
       <div class="calc">
         <div class="calc-in">
-          <div class="range-row">
-            <label for="i-msg">Günlük gelen yeni mesaj</label>
-            <output id="o-msg" for="i-msg">25</output>
-            <input type="range" id="i-msg" min="5" max="150" value="25">
-          </div>
-          <div class="range-row">
-            <label for="i-off">Mesai dışında gelenlerin oranı (%)</label>
-            <output id="o-off" for="i-off">45</output>
-            <input type="range" id="i-off" min="10" max="80" value="45">
-          </div>
-          <div class="range-row">
-            <label for="i-conv">Cevapsız kalanların randevuya dönme ihtimali (%)</label>
-            <output id="o-conv" for="i-conv">8</output>
-            <input type="range" id="i-conv" min="2" max="25" value="8">
-          </div>
-          <div class="range-row">
-            <label for="i-appt">Aylık randevu sayısı</label>
-            <output id="o-appt" for="i-appt">220</output>
-            <input type="range" id="i-appt" min="40" max="900" step="10" value="220">
-          </div>
-          <div class="range-row">
-            <label for="i-ns">Gelmeme (no-show) oranı (%)</label>
-            <output id="o-ns" for="i-ns">18</output>
-            <input type="range" id="i-ns" min="3" max="45" value="18">
-          </div>
-          <div class="range-row">
-            <label for="i-tic">Ortalama işlem bedeli (TL)</label>
-            <output id="o-tic" for="i-tic">4.500</output>
-            <input type="range" id="i-tic" min="500" max="40000" step="250" value="4500">
-          </div>
+          <fieldset class="calc-group">
+            <legend>Mesai dışı mesajlar</legend>
+            <div class="range-row">
+              <label for="i-msg">Günlük gelen yeni mesaj</label>
+              <output id="o-msg" for="i-msg">25</output>
+              <input type="range" id="i-msg" min="5" max="150" value="25">
+            </div>
+            <div class="range-row">
+              <label for="i-off">Mesai dışında gelenlerin oranı</label>
+              <output id="o-off" for="i-off">%45</output>
+              <input type="range" id="i-off" min="10" max="80" value="45">
+            </div>
+            <div class="range-row">
+              <label for="i-for">Mesai dışı yazanlardan yurt dışındakilerin oranı</label>
+              <output id="o-for" for="i-for">%15</output>
+              <input type="range" id="i-for" min="0" max="60" value="15">
+            </div>
+            <div class="range-row">
+              <label for="i-conv">Cevapsız kalanın randevuya dönme ihtimali</label>
+              <output id="o-conv" for="i-conv">%8</output>
+              <input type="range" id="i-conv" min="2" max="25" value="8">
+            </div>
+          </fieldset>
+          <fieldset class="calc-group">
+            <legend>Koltuk</legend>
+            <div class="range-row">
+              <label for="i-appt">Aylık randevu sayısı</label>
+              <output id="o-appt" for="i-appt">220</output>
+              <input type="range" id="i-appt" min="40" max="900" step="10" value="220">
+            </div>
+            <div class="range-row">
+              <label for="i-ns">Gelmeyen ve son dakika iptal eden oranı</label>
+              <output id="o-ns" for="i-ns">%15</output>
+              <input type="range" id="i-ns" min="3" max="40" value="15">
+            </div>
+          </fieldset>
+          <fieldset class="calc-group">
+            <legend>Tutarlar</legend>
+            <div class="range-row">
+              <label for="i-tic">Ortalama işlem bedeli</label>
+              <output id="o-tic" for="i-tic">4.500 TL</output>
+              <input type="range" id="i-tic" min="500" max="40000" step="250" value="4500">
+            </div>
+            <div class="range-row">
+              <label for="i-ftic">Yurt dışı hastanın ortalama işlem bedeli</label>
+              <output id="o-ftic" for="i-ftic">15.000 TL</output>
+              <input type="range" id="i-ftic" min="2000" max="150000" step="500" value="15000">
+            </div>
+          </fieldset>
+          <fieldset class="calc-group">
+            <legend>Telefon ve mesaj trafiği</legend>
+            <div class="range-row">
+              <label for="i-min">Sekreterin günde bilgi vermeye harcadığı süre</label>
+              <output id="o-min" for="i-min">90 dk</output>
+              <input type="range" id="i-min" min="15" max="240" step="5" value="90">
+            </div>
+          </fieldset>
         </div>
-        <div class="calc-out">
+
+        <div class="calc-out" aria-live="polite">
           <div>
-            <div class="calc-kicker">Tahmini aylık kayıp</div>
+            <p class="calc-kicker">Tahmini aylık ciro kaybı</p>
             <b class="calc-total" id="r-loss">-</b>
-            <ul>
-              <li>Mesai dışı cevapsız mesajlardan: <strong id="r-off">-</strong></li>
-              <li>Gelmeyen hastalardan: <strong id="r-ns">-</strong></li>
-            </ul>
-            <p>Hesaplama kaybı görünür kılar. İlk ay sonunda gerçek kaybı panelin ana ekranında izlersiniz.</p>
+            <div class="split" aria-hidden="true">
+              <span id="b-seat" style="--v:1"></span>
+              <span id="b-loc" style="--v:1"></span>
+              <span id="b-for" style="--v:1"></span>
+            </div>
+            <dl class="loss">
+              <div class="loss-seat"><dt>Boş kalan koltuktan kayıp</dt><dd><strong id="r-seat">-</strong><small id="r-seat-n"></small></dd></div>
+              <div class="loss-loc"><dt>Mesai dışı kaçan yerli hasta</dt><dd><strong id="r-loc">-</strong><small id="r-loc-n"></small></dd></div>
+              <div class="loss-for"><dt>Mesai dışı kaçan yurt dışı hasta</dt><dd><strong id="r-for">-</strong><small id="r-for-n"></small></dd></div>
+            </dl>
+            <p class="hours">Telefon trafiğine giden sekreter saati: <strong id="r-hours">-</strong> <small>(ciro kaybına eklenmez)</small></p>
+            <p class="calc-note">Bu hesap bugün masada kalanı gösterir, hepsinin geri geleceğini söylemez. İlk ay sonunda gerçek rakamı panelin ana ekranında izlersiniz.</p>
           </div>
           <a class="btn btn-cta btn-lg" href="#demo">Demo talep et</a>
         </div>
@@ -590,33 +567,35 @@
     </div>
   </section>
 
-  <section class="sec surface-alt" id="fiyat">
-    <div class="wrap">
-      <h2>Tek paket, şeffaf fiyat, tüm modüller dahil</h2>
-      <p class="sec-sub">Modül başı ek ücret, hekim başı lisans farkı ve gizli kurulum bedeli yok. İlk ay ücretsiz, istediğiniz an iptal.</p>
-      <div class="prices">
-        <article class="price best">
-          <h3>DentaCore Kurumsal Tek Paket</h3>
-          <span class="flag">Tüm Klinik ve Otomasyon Modülleri Dahil</span>
-          <div class="price-val"><b>3.500 TL</b><span>+ KDV / ay</span></div>
-          <ul>
-            <li>Sınırsız hekim, sekreter ve 14 personel meslek/yetki (RBAC) tanımı</li>
-            <li>52 diş (32 erişkin + 20 süt) SVG odontogram, 5 yüzey, periodontal çizelge</li>
-            <li>10 kalem kuruş-kesin finans, avans mahsubu, taksit ve günlük kasa kapanışı</li>
-            <li>7/24 WhatsApp ve Instagram 16 dil hasta karşılama + bekleme listesi koltuk doldurma</li>
-            <li>Gerçek kampanya tıklama (/c/kod), bot filtresi ve kasa tahsilat dönüşüm hunisi</li>
-            <li>Kırmızı bayraklı dijital anamnez, dijital tedavi planı onamı, laboratuvar ve implant/lot pasaportu</li>
-          </ul>
-          <a class="btn btn-cta" href="#demo">Ücretsiz kurulum iste</a>
-        </article>
+  <section class="sec" id="fiyat" aria-labelledby="fiyat-h">
+    <div class="wrap g12">
+      <div class="s-5 price-main">
+        <h2 id="fiyat-h">Tek paket, tek fiyat</h2>
+        <p class="price-num"><b>3.500 TL</b> <span>+ KDV / ay</span></p>
+        <p class="sec-sub">Modül başı ek ücret, hekim başı lisans farkı ve gizli kurulum bedeli yok. İlk ay ve kurulum ücretsiz, istediğiniz an iptal.</p>
+        <a class="btn btn-cta btn-lg" href="#demo">Ücretsiz kurulum iste</a>
+      </div>
+      <div class="s-7">
+        <h3 class="incl-h">Pakete dahil olanlar</h3>
+        <ul class="incl">
+          <li>Sınırsız hekim ve sekreter, 14 meslek ve yetki tanımı</li>
+          <li>52 dişli odontogram (32 erişkin, 20 süt), 5 yüzey, periodontal çizelge</li>
+          <li>Kuruşu kuruşuna finans: avans mahsubu, taksit, günlük kasa kapanışı</li>
+          <li>WhatsApp ve Instagram'da 16 dilde 7/24 karşılama, bekleme listesiyle koltuk doldurma</li>
+          <li>Kampanya tıklama takibi, bot filtresi ve tahsilata kadar dönüşüm hunisi</li>
+          <li>Kırmızı bayraklı dijital anamnez, dijital tedavi planı onamı, laboratuvar ve implant lot pasaportu</li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <section class="sec" id="sss">
-    <div class="wrap faq-wrap">
-      <h2>Sık sorulan sorular</h2>
-      <div class="faq-list">
+  <section class="sec surface-alt" id="sss" aria-labelledby="sss-h">
+    <div class="wrap g12">
+      <div class="s-4">
+        <h2 id="sss-h">Sık sorulan sorular</h2>
+        <p class="sec-sub">Cevabı burada yoksa demo formuna yazın, aynı gün dönüş yapalım.</p>
+      </div>
+      <div class="faq-list s-8">
         <details open>
           <summary>Mevcut WhatsApp klinik numaramız değişir mi?</summary>
           <p>Hayır. Mevcut hattınız resmi Meta WhatsApp Cloud API ile bağlanır; hastalar aynı numaraya yazar.</p>
@@ -645,50 +624,129 @@
     </div>
   </section>
 
-  <section class="sec surface-alt" id="demo">
-    <div class="wrap">
-      <div class="demo-box">
-        <div>
-          <h2>15 dakikada kliniğinize nasıl uyacağını görün</h2>
-          <p class="demo-copy">Tedavilerinizi, saatlerinizi ve sık gelen soruları dinliyor, sistemi mevcut numaranıza bir hafta içinde kuruyoruz.</p>
-          <ul class="check-list">
-            <li>Bağlayıcı sözleşme yok, ilk ay ve kurulum ücretsiz</li>
-            <li>Teknik kurulum ve numara bağlantısı ekibimizden</li>
-            <li>Önce yalnızca izleme modunda başlatabilirsiniz</li>
-          </ul>
-          <p class="demo-panel-link">Sistemi hemen test etmek isterseniz <a href="/app">3 demo şube ile yönetim paneline</a> geçebilirsiniz.</p>
+  <section class="sec" id="demo" aria-labelledby="demo-h">
+    <div class="wrap g12">
+      <div class="s-5">
+        <h2 id="demo-h">15 dakikada kliniğinize nasıl uyacağını görün</h2>
+        <p class="sec-sub">Tedavilerinizi, saatlerinizi ve sık gelen soruları dinliyor, sistemi mevcut numaranıza bir hafta içinde kuruyoruz.</p>
+        <ul class="check-list">
+          <li>Bağlayıcı sözleşme yok, ilk ay ve kurulum ücretsiz</li>
+          <li>Teknik kurulum ve numara bağlantısı ekibimizden</li>
+          <li>Önce yalnızca izleme modunda başlatabilirsiniz</li>
+        </ul>
+        <p class="demo-panel-link">Hemen denemek isterseniz <a href="/app">3 demo şubeli yönetim paneline</a> geçebilirsiniz.</p>
+      </div>
+      <form id="lead" class="lead-form s-7" novalidate>
+        <label for="f-clinic">Klinik adı
+          <input id="f-clinic" name="clinic" required minlength="2" maxlength="120" autocomplete="organization" placeholder="Özel Örnek Diş Polikliniği">
+        </label>
+        <label for="f-contact">Telefon veya e-posta
+          <input id="f-contact" name="contact" required minlength="5" maxlength="120" placeholder="05xx xxx xx xx veya e-posta">
+        </label>
+        <div class="two-col">
+          <label for="f-city">Şehir
+            <input id="f-city" name="city" maxlength="40" placeholder="İstanbul">
+          </label>
+          <label for="f-chairs">Koltuk sayısı
+            <input id="f-chairs" name="chairs" type="number" min="1" max="200" placeholder="3">
+          </label>
         </div>
-        <form id="lead" class="lead-form" novalidate>
-          <label for="f-clinic">Klinik adı
-            <input id="f-clinic" name="clinic" required minlength="2" maxlength="120" autocomplete="organization" placeholder="Özel Örnek Diş Polikliniği">
-          </label>
-          <label for="f-contact">Telefon veya e-posta
-            <input id="f-contact" name="contact" required minlength="5" maxlength="120" placeholder="05xx xxx xx xx veya e-posta">
-          </label>
-          <div class="two-col">
-            <label for="f-city">Şehir
-              <input id="f-city" name="city" maxlength="40" placeholder="İstanbul">
-            </label>
-            <label for="f-chairs">Koltuk sayısı
-              <input id="f-chairs" name="chairs" type="number" min="1" max="200" placeholder="3">
-            </label>
+        <div class="kvkk-note">
+          <strong>KVKK Aydınlatma Özeti:</strong> Girdiğiniz klinik adı ve iletişim bilgisi yalnızca tanıtım ve demo talebinize dönüş yapılması amacıyla şifreli olarak kaydedilir.
+        </div>
+        <label class="kvkk-check" for="f-kvkk">
+          <input id="f-kvkk" name="kvkk_aydinlatma" type="checkbox" value="1" required>
+          <span><strong class="kvkk-req">(Zorunlu)</strong> Aydınlatma metnini okudum; iletişim bilgilerimin tanıtım ve demo talebime dönüş yapılması amacıyla işlenmesine açık rıza veriyorum.</span>
+        </label>
+        <label class="kvkk-check" for="f-yurtdisi">
+          <input id="f-yurtdisi" name="yurt_disi_riza" type="checkbox" value="1">
+          <span><strong class="kvkk-opt">(İsteğe bağlı)</strong> İletişim sürecinde yurt dışı mesajlaşma/bulut servislerine aktarım yapılmasına izin veriyorum.</span>
+        </label>
+        <label class="hp" aria-hidden="true">Web sitesi<input name="website" tabindex="-1" autocomplete="off"></label>
+        <button class="btn btn-cta btn-lg" id="lead-submit" type="submit">Tanıtım talep et</button>
+        <p class="form-msg" id="lead-msg" role="status" aria-live="polite"></p>
+        <small>İletişim bilginiz yalnızca dönüş yapmak için şifreli kaydedilir.</small>
+      </form>
+    </div>
+  </section>
+
+  <section class="proof" id="teknik" aria-labelledby="teknik-h">
+    <div class="wrap g12">
+      <div class="s-4">
+        <h2 id="teknik-h">BT ve Veri Güvenliği Teknik Kanıt Dosyası</h2>
+        <p class="sec-sub">Kliniğinizin BT sorumlusu ya da KVKK danışmanı için. Hekimin okuması gerekmez; satıra tıklayınca açılır.</p>
+      </div>
+      <div class="proof-list s-8">
+        <details name="proof">
+          <summary><span class="proof-name">Şifreleme ve yedek</span><span class="proof-tag">Fernet AES-128, HMAC arama özetleri</span></summary>
+          <div class="proof-body"><p>Telefon, anamnez, görseller ve TOTP anahtarları Fernet AES-128 ile şifreli yazılır; arama için ayrı HMAC özetleri tutulur. Yedek her gece açık anahtarla şifrelenir, çözme anahtarı sunucuda durmaz.</p></div>
+        </details>
+        <details name="proof">
+          <summary><span class="proof-name">Denetim zinciri</span><span class="proof-tag">SHA-256 değiştirilemez kayıt</span></summary>
+          <div class="proof-body"><p>Kim, hangi kaydı ne zaman açtı sorusunun cevabı denetim zincirindedir. Her satır öncekinin SHA-256 özetini taşır; tek kayıt değişirse zincir kırılır.</p></div>
+        </details>
+        <details name="proof">
+          <summary><span class="proof-name">Giriş güvenliği</span><span class="proof-tag">RFC 6238 TOTP 2FA, 10 deneme kilidi</span></summary>
+          <div class="proof-body"><p>Parolalar scrypt ile özetlenir. TOTP tekrar oynatmaya karşı korunur. 10 hatalı girişte hesap 15 dakika kilitlenir, 15 dakika hareketsizlikte oturum düşer.</p></div>
+        </details>
+        <details name="proof">
+          <summary><span class="proof-name">KVKK rıza kayıtları</span><span class="proof-tag">6698 sayılı kanun, sürümlü açık rıza</span></summary>
+          <div class="proof-body"><p>Aydınlatma, açık rıza, iletişim izni ve yurt dışı aktarım onayları sürüm numarasıyla ayrı saklanır.</p></div>
+        </details>
+        <details name="proof">
+          <summary><span class="proof-name">Takvim eşitleme</span><span class="proof-tag">RFC 5545 ICS, VALARM, SEQUENCE</span></summary>
+          <div class="proof-body"><p>iPhone için şubeye özel imzalı <code>webcal://</code> akışı, Android için <code>google_subscribe_url</code>. Randevudan 60 ve 15 dakika önce çift <code>VALARM</code>; sabit <code>UID</code> ve <code>SEQUENCE</code> ile iptal ve saat güncellemesi (yenileme sıklığı iOS ayarlarına bağlıdır). Android bağlantısı 90 gün süreli HMAC imzalıdır, tek tıkla iptal edilir ya da yenilenir. Tüm şube programı <code>all.ics</code> olarak indirilir.</p></div>
+        </details>
+        <details name="proof">
+          <summary><span class="proof-name">Sunucu ve veri egemenliği</span><span class="proof-tag">Docker Compose, şube izolasyonu</span></summary>
+          <div class="proof-body"><p>Docker Compose ile kendi sunucunuza ya da Türkiye lokasyonlu özel sunucuya kurulur. Veri <code>clinic_id</code> ile şubeye göre ayrılır. Kurulu üründe dış CDN ve üçüncü parti font betiği yüklenmez; bu demo sayfası yazı tiplerini Google'dan alır.</p></div>
+        </details>
+        <details name="proof">
+          <summary><span class="proof-name">12 HTTP güvenlik başlığı</span><span class="proof-tag">12/12 zorunlu, CSP script-src 'self'</span></summary>
+          <div class="proof-body">
+            <div class="table-wrap" tabindex="0" role="region" aria-label="12 HTTP güvenlik başlığı tablosu">
+              <table class="data-table">
+                <thead><tr><th scope="col">Güvenlik başlığı</th><th scope="col">Uygulanan değer</th><th scope="col">Koruduğu risk</th></tr></thead>
+                <tbody>
+                  <tr><td><code>Strict-Transport-Security</code></td><td><code>max-age=63072000; includeSubDomains; preload</code></td><td>HTTPS zorunlu, downgrade kapalı</td></tr>
+                  <tr><td><code>Content-Security-Policy</code></td><td><code>default-src 'self'; script-src 'self'; frame-ancestors 'none'</code></td><td>Satır içi ve dış XSS betiklerini durdurur</td></tr>
+                  <tr><td><code>X-Content-Type-Options</code></td><td><code>nosniff</code></td><td>Dosya türü tahminini önler</td></tr>
+                  <tr><td><code>X-Frame-Options</code></td><td><code>DENY</code></td><td>Clickjacking ve iframe gömmeyi engeller</td></tr>
+                  <tr><td><code>X-XSS-Protection</code></td><td><code>0</code></td><td>Hatalı eski XSS filtresini kapatır</td></tr>
+                  <tr><td><code>Referrer-Policy</code></td><td><code>no-referrer</code></td><td>Hasta bağlantı ve token bilgisinin dış URL'ye sızmasını önler</td></tr>
+                  <tr><td><code>Permissions-Policy</code></td><td><code>camera=(), microphone=(), geolocation=(), payment=()</code></td><td>Kamera, mikrofon ve konumu kilitler</td></tr>
+                  <tr><td><code>Cross-Origin-Opener-Policy</code></td><td><code>same-origin</code></td><td>Açılan sekmelerle bellek ve pencere paylaşımını keser</td></tr>
+                  <tr><td><code>Cross-Origin-Resource-Policy</code></td><td><code>same-origin</code></td><td>Panel kaynaklarının başka kökenlerden yüklenmesini engeller</td></tr>
+                  <tr><td><code>Cross-Origin-Embedder-Policy</code></td><td><code>require-corp</code></td><td>Spectre yan kanal riskini azaltır</td></tr>
+                  <tr><td><code>X-Permitted-Cross-Domain-Policies</code></td><td><code>none</code></td><td>Harici Flash ve PDF çapraz alan politikalarını yasaklar</td></tr>
+                  <tr><td><code>Cache-Control</code> ve kimlik gizleme</td><td><code>no-store</code> (/app/api, /auth), Server gizli</td><td>Önbellek ve sürüm ifşasını önler</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div class="kvkk-note">
-            <strong>KVKK Aydınlatma Özeti:</strong> Girdiğiniz klinik adı ve iletişim bilgisi yalnızca tanıtım ve demo talebinize dönüş yapılması amacıyla şifreli olarak kaydedilir.
+        </details>
+        <details name="proof">
+          <summary><span class="proof-name">Tipik mesaj botuyla farklar</span><span class="proof-tag">10 kriterde karşılaştırma</span></summary>
+          <div class="proof-body">
+            <div class="table-wrap" tabindex="0" role="region" aria-label="Tipik mesaj botu ile DentaCore karşılaştırma tablosu">
+              <table class="data-table">
+                <thead><tr><th scope="col">Kriter</th><th scope="col">Tipik mesaj botu</th><th scope="col">DentaCore</th></tr></thead>
+                <tbody>
+                  <tr><td>7/24 hasta karşılama ve dil</td><td>Genelde 1 ila 5 dil, bulut SaaS</td><td>WhatsApp ve Instagram, 16 dil (AR, FA, HE sağdan sola dahil)</td></tr>
+                  <tr><td>İptal edilen koltuğu doldurma</td><td>Çoğunlukla yok</td><td>3 dakikalık bekleme listesi dalgası ve çakışma kilidi</td></tr>
+                  <tr><td>Dijital anamnez ve KVKK onam</td><td>Yok veya düz metin form</td><td>11 sorulu kırmızı bayraklı, Fernet şifreli, sürümlü</td></tr>
+                  <tr><td>Röntgen ve fotoğraf kontrolü</td><td>Görsel analiz yapılmaz</td><td>Bulanık veya karanlık görseli teşhissiz geri ister</td></tr>
+                  <tr><td>İşlem sonrası takip</td><td>Tek seferlik memnuniyet anketi</td><td>2, 24 ve 72 saat ağrı skoru ve nöbetçi hekim alarmı</td></tr>
+                  <tr><td>Telefon takvim eşitleme</td><td>Yalnız Google bağlantısı</td><td>iPhone webcal:// (VALARM), Google Takvim ve toplu .ics</td></tr>
+                  <tr><td>Çok şubeli zincir yönetimi</td><td>Şubeler arası geçiş kısıtlı</td><td>clinic_id izolasyonu, merkezde tek tık geçiş, teslim kartı</td></tr>
+                  <tr><td>Denetim kaydı bütünlüğü</td><td>Standart log veya belirsiz</td><td>SHA-256 zincirli, değiştirilemez denetim kaydı</td></tr>
+                  <tr><td>Veri egemenliği</td><td>Sağlayıcının ortak bulutu</td><td>Kendi sunucunuz veya size özel Türkiye sunucusu</td></tr>
+                  <tr><td>Yapay zeka maliyeti</td><td>Her mesajda ücretli model çağrısı</td><td>Sık sorulan sorular hazır yanıtla, ek maliyet olmadan cevaplanır</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          <label class="kvkk-check" for="f-kvkk">
-            <input id="f-kvkk" name="kvkk_aydinlatma" type="checkbox" value="1" required>
-            <span><strong class="kvkk-req">(Zorunlu)</strong> Aydınlatma metnini okudum; iletişim bilgilerimin tanıtım ve demo talebime dönüş yapılması amacıyla işlenmesine açık rıza veriyorum.</span>
-          </label>
-          <label class="kvkk-check" for="f-yurtdisi">
-            <input id="f-yurtdisi" name="yurt_disi_riza" type="checkbox" value="1">
-            <span><strong class="kvkk-opt">(İsteğe bağlı)</strong> İletişim sürecinde yurt dışı mesajlaşma/bulut servislerine aktarım yapılmasına izin veriyorum.</span>
-          </label>
-          <label class="hp" aria-hidden="true">Web sitesi<input name="website" tabindex="-1" autocomplete="off"></label>
-          <button class="btn btn-cta btn-lg" id="lead-submit" type="submit">Tanıtım talep et</button>
-          <p class="form-msg" id="lead-msg" role="status" aria-live="polite"></p>
-          <small>İletişim bilginiz yalnızca dönüş yapmak için şifreli kaydedilir.</small>
-        </form>
+        </details>
       </div>
     </div>
   </section>
@@ -704,6 +762,8 @@
       <a href="#moduller">Modüller</a>
       <a href="#guvenlik">Güvenlik</a>
       <a href="#fiyat">Fiyat</a>
+      <a href="#sss">SSS</a>
+      <a href="#teknik">Teknik kanıt dosyası</a>
       <a href="/app">Panele giriş</a>
     </div>
   </div>

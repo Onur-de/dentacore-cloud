@@ -1,6 +1,8 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
+  const reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const TL = (n) => Math.round(n).toLocaleString("tr-TR") + " TL";
 
   // Service worker kaydı (yalnız statik varlıklar önbelleğe alınır)
   if ("serviceWorker" in navigator) {
@@ -20,118 +22,98 @@
       a.addEventListener("click", () => {
         mobileMenu.classList.add("hidden");
         navToggle.setAttribute("aria-expanded", "false");
+        navToggle.setAttribute("aria-label", "Menüyü aç");
       });
     });
   }
 
-  // Hero canlı ürün önizlemesi sekmeleri
-  const tabChat = $("tab-chat");
-  const tabSched = $("tab-schedule");
-  const panelChat = $("panel-chat");
-  const panelSched = $("panel-schedule");
-  function switchPreviewTab(which) {
-    const isChat = which === "chat";
-    tabChat.classList.toggle("active", isChat);
-    tabSched.classList.toggle("active", !isChat);
-    tabChat.setAttribute("aria-selected", isChat ? "true" : "false");
-    tabSched.setAttribute("aria-selected", !isChat ? "true" : "false");
-    panelChat.classList.toggle("hidden", !isChat);
-    panelSched.classList.toggle("hidden", isChat);
-  }
-  if (tabChat && tabSched) {
-    tabChat.addEventListener("click", () => switchPreviewTab("chat"));
-    tabSched.addEventListener("click", () => switchPreviewTab("schedule"));
-  }
-
-  // Hero senaryoları (TR, EN, AR RTL, DE: Parlant VIP Hasta Koordinatörü Üslubu)
-  const SCENARIOS = {
-    tr: {
-      dir: "ltr",
-      lang: "tr",
-      msgs: [
-        { cls: "msg-in", meta: "23:41 WhatsApp", text: "Yarın 14:30 randevuma yetişemeyeceğim, iptal edebilir misiniz?" },
-        { cls: "msg-out", meta: "23:41 VIP Koordinatör AI", text: "Merhabalar, bilgi verdiğiniz için çok teşekkür ederiz; yarın 14:30 randevunuzu iptal ettik. Takviminize uygun yeni bir gün ve saat paylaşırsanız memnuniyetle hemen planlayabiliriz." },
-        { cls: "msg-sys", meta: "", text: "Bekleme listesi dalga 1: 3 hastaya 14:30 teklifi gitti, Selin Arslan “EVET” dedi, koltuk 2 doldu." }
-      ],
-      layer: "L1 Parlant VIP + Bekleme Listesi",
-      tokens: "yok",
-      status: "Koltuk 2 yeniden doldu"
-    },
-    en: {
-      dir: "ltr",
-      lang: "en",
-      msgs: [
-        { cls: "msg-in", meta: "23:47 Instagram DM", text: "Hi, I'm in London. How much is a full set of zirconia crowns? Can I come next month?" },
-        { cls: "msg-out", meta: "23:47 VIP Koordinatör AI", text: "Hello and a warm welcome from Istanbul! For guests traveling from London, our specialist dentist prepares a personalized written treatment and cost plan after reviewing your X-ray, and our 4-6 day VIP zirconia schedule is tailored to your flights. Which dates next month suit you best?" },
-        { cls: "msg-sys", meta: "", text: "Yüksek değerli sağlık turizmi talebi: Görsel kalite kontrolü geçti, koordinatöre öncelikli düşürüldü." }
-      ],
-      layer: "L1 Parlant Bağlamsal Besteci",
-      tokens: "yok",
-      status: "Yüksek değerli VIP misafir"
-    },
-    ar: {
-      dir: "rtl",
-      lang: "ar",
-      msgs: [
-        { cls: "msg-in", meta: "01:12 WhatsApp", text: "لدي تورم في الوجه ونزيف لا يتوقف بعد الخلع، ماذا أفعل؟" },
-        { cls: "msg-out", meta: "01:12 L1 Acil Triyaj", text: "نتمنى لكم السلامة؛ قد تحتاج حالتكم إلى رعاية طبية عاجلة. يرجى الاتصال بالرقم 112 فوراً أو التوجه لأقرب قسم طوارئ. تم إبلاغ طبيبنا المناوب فوراً." },
-        { cls: "msg-sys", meta: "", text: "Acil durum alarmı tetiklendi: Nöbetçi hekim ve panel uyarı kutusu bilgilendirildi." }
-      ],
-      layer: "L1 Acil Durum Radarı",
-      tokens: "yok",
-      status: "Nöbetçi hekim alarmı"
-    },
-    de: {
-      dir: "ltr",
-      lang: "de",
-      msgs: [
-        { cls: "msg-in", meta: "08:05 WhatsApp", text: "Guten Morgen, wo ist Ihre Adresse und haben Sie Parkplätze?" },
-        { cls: "msg-out", meta: "08:05 VIP Koordinatör AI", text: "Guten Morgen und herzlich willkommen! Wir begrüßen Sie gerne in unserer Klinik in der Bağdat Cad. No:142, Kadıköy / İstanbul. Sie können bequem mit dem Auto anreisen: Kostenlose Gästeparkplätze befinden sich direkt vor der Klinik." },
-        { cls: "msg-sys", meta: "", text: "Konum + otopark birleşik VIP yanıtı 1 saniye altında gönderildi." }
-      ],
-      layer: "L1 Parlant Birleşik Niyet",
-      tokens: "yok",
-      status: "Otomatik yanıtlandı"
-    }
-  };
-
-  const chatFeed = $("hero-chat-feed");
-  const routerReadout = $("hero-router-readout");
-  document.querySelectorAll(".sc-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const sc = SCENARIOS[btn.dataset.sc];
-      if (!sc || !chatFeed || !routerReadout) return;
-      document.querySelectorAll(".sc-btn").forEach((b) => b.classList.toggle("active", b === btn));
-      chatFeed.setAttribute("dir", sc.dir);
-      chatFeed.setAttribute("lang", sc.lang);
-      chatFeed.replaceChildren(...sc.msgs.map((m) => {
-        const box = document.createElement("div");
-        box.className = "msg " + m.cls;
-        if (m.cls === "msg-sys") box.setAttribute("dir", "ltr");
-        if (m.meta) {
-          const sp = document.createElement("span");
-          sp.className = "msg-meta";
-          sp.textContent = m.meta;
-          box.appendChild(sp);
-        }
-        box.appendChild(document.createTextNode(m.text));
-        return box;
-      }));
-      routerReadout.replaceChildren();
-      [
-        ["Katman:", sc.layer],
-        ["Ek maliyet:", sc.tokens],
-        ["Durum:", sc.status]
-      ].forEach(([lbl, val]) => {
-        const sp = document.createElement("span");
-        const st = document.createElement("strong");
-        st.textContent = lbl + " ";
-        sp.appendChild(st);
-        sp.appendChild(document.createTextNode(val));
-        routerReadout.appendChild(sp);
-      });
-    });
+  // Sahneden panele doğrudan geçiş: /app (canlı) ya da panel.html (statik demo) adresine sekme bağlantısı eklenir
+  document.querySelectorAll("a[data-panel-hash]").forEach((a) => {
+    const base = a.getAttribute("href") || "/app";
+    if (!base.includes("#")) a.setAttribute("href", base + a.dataset.panelHash);
   });
+
+  // Canlı klinik sahnesi: üç vaka, adım adım oynar. HTML tek kaynaktır; betik yalnız sırayla gösterir.
+  const caseTabs = Array.from(document.querySelectorAll("[data-case]"));
+  const panels = Array.from(document.querySelectorAll(".stage-panel"));
+  const replayBtn = $("replay");
+  const STEP_MS = 950;
+  let stageTimer = 0;
+  let activeCase = "a";
+
+  function panelFor(id) { return $("sc-" + id); }
+
+  function resetReadout(panel) {
+    panel.querySelectorAll("dd[data-key]").forEach((dd) => {
+      if (!dd.dataset.final) dd.dataset.final = dd.textContent;
+      dd.textContent = "Bekleniyor";
+      dd.classList.add("is-pending");
+    });
+  }
+
+  function fillReadout(panel, key) {
+    panel.querySelectorAll('dd[data-key="' + key + '"]').forEach((dd) => {
+      const live = dd.hasAttribute("data-live-ticket");
+      if (!live && dd.dataset.final) dd.textContent = dd.dataset.final;
+      dd.classList.remove("is-pending");
+    });
+  }
+
+  function showCase(id, animate) {
+    window.clearTimeout(stageTimer);
+    activeCase = id;
+    caseTabs.forEach((tab) => {
+      const on = tab.dataset.case === id;
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+    });
+    panels.forEach((p) => { p.hidden = p.id !== "sc-" + id; });
+    const panel = panelFor(id);
+    if (!panel) return;
+    const steps = Array.from(panel.querySelectorAll(".step"));
+    // Önceki oynatmanın izleri temizlenir
+    steps.forEach((s) => { s.classList.remove("is-pending"); s.removeAttribute("aria-hidden"); });
+    panel.querySelectorAll("dd[data-key]").forEach((dd) => {
+      if (dd.dataset.final && !dd.hasAttribute("data-live-ticket")) dd.textContent = dd.dataset.final;
+      dd.classList.remove("is-pending");
+    });
+    syncTicket();
+    if (!animate || reducedMotion) return;
+
+    steps.forEach((s) => { s.classList.add("is-pending"); s.setAttribute("aria-hidden", "true"); });
+    resetReadout(panel);
+    let i = 0;
+    const next = () => {
+      if (i >= steps.length) { panel.dataset.state = "done"; return; }
+      const step = steps[i++];
+      step.classList.remove("is-pending");
+      step.removeAttribute("aria-hidden");
+      if (step.dataset.key) fillReadout(panel, step.dataset.key);
+      stageTimer = window.setTimeout(next, STEP_MS);
+    };
+    panel.dataset.state = "playing";
+    next();
+  }
+
+  if (caseTabs.length) {
+    // Betik varsa yalnız seçili vaka görünür; betik yoksa üçü de okunabilir kalır
+    showCase("a", false);
+    caseTabs.forEach((tab, idx) => {
+      tab.addEventListener("click", () => showCase(tab.dataset.case, true));
+      tab.addEventListener("keydown", (e) => {
+        const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+        let target = -1;
+        if (e.key in keys) target = (idx + keys[e.key] + caseTabs.length) % caseTabs.length;
+        else if (e.key === "Home") target = 0;
+        else if (e.key === "End") target = caseTabs.length - 1;
+        if (target < 0) return;
+        e.preventDefault();
+        caseTabs[target].focus();
+        showCase(caseTabs[target].dataset.case, true);
+      });
+    });
+  }
+  if (replayBtn) replayBtn.addEventListener("click", () => showCase(activeCase, true));
 
   // 16 dil önizleme seçicisi (RTL destekli)
   const LANG_SAMPLES = {
@@ -164,33 +146,73 @@
       document.querySelectorAll(".lang-chip").forEach((c) => c.classList.toggle("active", c === chip));
       langPreview.setAttribute("dir", sample.dir);
       langPreview.setAttribute("lang", lg);
-      lpCode.textContent = lg.toUpperCase() + (sample.dir === "rtl" ? " (RTL)" : "");
+      lpCode.textContent = lg.toUpperCase() + (sample.dir === "rtl" ? " (sağdan sola)" : "");
       lpText.textContent = sample.text;
     });
   });
 
-  // Kayıp hesaplayıcı (yalnız tarayıcıda)
-  const TL = new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 });
-  const ids = ["msg", "off", "conv", "appt", "ns", "tic"];
+  // Kayıp hesaplayıcı: üç kırılım, yalnız tarayıcıda
+  const CALC_FIELDS = {
+    msg: (v) => String(v),
+    off: (v) => "%" + v,
+    for: (v) => "%" + v,
+    conv: (v) => "%" + v,
+    appt: (v) => String(v),
+    ns: (v) => "%" + v,
+    tic: (v) => TL(v),
+    ftic: (v) => TL(v),
+    min: (v) => v + " dk"
+  };
+  const WORK_DAYS = 26;
+  const NUM = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 1 });
+
+  function syncTicket() {
+    const tic = $("i-tic");
+    if (!tic) return;
+    document.querySelectorAll("[data-live-ticket]").forEach((el) => { el.textContent = TL(Number(tic.value)); });
+  }
+
   function calc() {
     const v = {};
-    ids.forEach((k) => {
-      const inp = $(`i-${k}`);
+    Object.keys(CALC_FIELDS).forEach((k) => {
+      const inp = $("i-" + k);
       if (!inp) return;
       v[k] = Number(inp.value);
-      $(`o-${k}`).textContent = k === "tic" ? v[k].toLocaleString("tr-TR") : String(v[k]);
+      const out = $("o-" + k);
+      if (out) out.textContent = CALC_FIELDS[k](v[k]);
     });
-    const offLoss = Math.round(v.msg * 30 * (v.off / 100) * (v.conv / 100) * v.tic);
-    const nsLoss = Math.round(v.appt * (v.ns / 100) * v.tic);
-    $("r-off").textContent = TL.format(offLoss);
-    $("r-ns").textContent = TL.format(nsLoss);
-    $("r-loss").textContent = TL.format(offLoss + nsLoss);
+    const offMonthly = v.msg * 30 * (v.off / 100);
+    const offForeign = offMonthly * (v.for / 100);
+    const offLocal = offMonthly - offForeign;
+    const lostLocalPatients = offLocal * (v.conv / 100);
+    const lostForeignPatients = offForeign * (v.conv / 100);
+    const emptySeats = v.appt * (v.ns / 100);
+    const seatLoss = emptySeats * v.tic;
+    const localLoss = lostLocalPatients * v.tic;
+    const foreignLoss = lostForeignPatients * v.ftic;
+    const total = seatLoss + localLoss + foreignLoss;
+    const hours = (v.min * WORK_DAYS) / 60;
+
+    $("r-loss").textContent = TL(total);
+    $("r-seat").textContent = TL(seatLoss);
+    $("r-loc").textContent = TL(localLoss);
+    $("r-for").textContent = TL(foreignLoss);
+    $("r-seat-n").textContent = "ayda " + Math.round(emptySeats) + " boş koltuk";
+    $("r-loc-n").textContent = "ayda " + Math.round(lostLocalPatients) + " hasta";
+    $("r-for-n").textContent = "ayda " + Math.round(lostForeignPatients) + " hasta";
+    $("r-hours").textContent = "ayda " + NUM.format(hours) + " saat";
+    $("b-seat").style.setProperty("--v", String(Math.max(seatLoss, 0)));
+    $("b-loc").style.setProperty("--v", String(Math.max(localLoss, 0)));
+    $("b-for").style.setProperty("--v", String(Math.max(foreignLoss, 0)));
+    syncTicket();
   }
-  ids.forEach((k) => {
-    const inp = $(`i-${k}`);
-    if (inp) inp.addEventListener("input", calc);
-  });
-  calc();
+  if ($("r-loss")) {
+    Object.keys(CALC_FIELDS).forEach((k) => {
+      const inp = $("i-" + k);
+      if (inp) inp.addEventListener("input", calc);
+    });
+    calc();
+  }
 
   // Kampanya ve UTM kaynak yakalama (Multi-Touch Attribution: dc_first_touch & dc_last_touch) + Demo formu (POST /lead)
   const urlParams = new URLSearchParams(window.location.search || "");
