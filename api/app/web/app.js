@@ -111,6 +111,7 @@
     clinic: "M3 21h18M5 21V7l8-4v18M19 21V11l-6-4M9 9h1M9 13h1M9 17h1",
     menu: "M4 7h16M4 12h16M4 17h16",
     copy: "M9 9h11v11H9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
+    search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3",
   };
   function icon(n) {
     const s = document.createElementNS(SVG, "svg");
@@ -503,24 +504,32 @@
   }
 
   // ------------------------------------------------------------------ kabuk & mobil navigasyon
-  const NAV = [
-    ["overview", "Genel Bakış", "home"],
-    ["calendar", "Takvim", "cal"],
-    ["messages", "Mesajlar & Simülatör", "msg"],
-    ["patients", "Hastalar", "users"],
-    ["waitlist", "Bekleme Listesi", "clock"],
-    ["alerts", "Uyarılar", "bell"],
-    ["inventory", "Envanter", "box"],
-    ["templates", "Şablonlar", "tpl"],
-    ["kasa", "Kasa", "cash"],
-    ["analytics", "İletişim Analizi", "chart"],
-    ["sep"],
-    ["costs", "Yapay Zeka Maliyeti", "chip"],
-    ["team", "Ekip", "team"],
-    ["clinics", "Zincir Klinikler", "clinic"],
-    ["settings", "Ayarlar", "cog"],
-    ["security", "Güvenlik", "shield"],
+  const NAV_GROUPS = [
+    ["Günlük operasyon", [
+      ["overview", "Kokpit (Genel Bakış)", "home"],
+      ["calendar", "Takvim", "cal"],
+      ["messages", "Mesajlar & Simülatör", "msg"],
+      ["patients", "Hastalar", "users"],
+    ]],
+    ["Klinik akış & finans", [
+      ["waitlist", "Bekleme Listesi", "clock"],
+      ["alerts", "Kırmızı Bayrak & Uyarılar", "bell"],
+      ["kasa", "Kasa & Hak Ediş", "cash"],
+      ["inventory", "Envanter", "box"],
+    ]],
+    ["Otomasyon & analiz", [
+      ["templates", "Mesaj Şablonları", "tpl"],
+      ["analytics", "İletişim Analizi", "chart"],
+      ["costs", "Yapay Zeka Maliyeti", "chip"],
+    ]],
+    ["Klinik yönetimi", [
+      ["team", "Ekip & Yetkiler", "team"],
+      ["clinics", "Zincir Şubeler", "clinic"],
+      ["security", "Güvenlik & Denetim", "shield"],
+      ["settings", "Klinik Ayarları", "cog"],
+    ]],
   ];
+  const NAV = NAV_GROUPS.flatMap(([, items]) => items);
 
   let main;
   function visibleNavItems() {
@@ -586,15 +595,27 @@
     root.replaceChildren();
     const initials = (S.user.full_name || "?").split(" ").map((x) => x[0]).slice(0, 2).join("").toUpperCase();
     main = h("main", { class: "main", id: "panel-main", tabIndex: "-1" });
-    const nav = h("nav", { class: "nav", "aria-label": "Ana navigasyon" }, visibleNavItems().map(([k, t, ic]) =>
-      k === "sep"
-        ? h("div", { class: "sep" })
-        : h("a", { href: `#/${k}`, "data-k": k },
-            icon(ic),
-            t,
-            k === "alerts" && S.counts.alerts ? h("span", { class: "count", text: S.counts.alerts }) : null
-          )
-    ));
+    const allowed = visibleNavItems();
+    const navKids = [];
+    NAV_GROUPS.forEach(([label, groupItems]) => {
+      const items = groupItems.filter(([k]) => allowed.some((a) => a[0] === k));
+      if (!items.length) return;
+      navKids.push(h("div", { class: "nav-h", role: "presentation", text: label }));
+      items.forEach(([k, t, ic]) => navKids.push(h("a", { href: `#/${k}`, "data-k": k },
+        icon(ic),
+        t,
+        k === "alerts" && S.counts.alerts ? h("span", { class: "count", text: S.counts.alerts }) : null
+      )));
+    });
+    const nav = h("nav", { class: "nav", "aria-label": "Ana navigasyon" }, navKids);
+    const permsNow = (S.user && S.user.permissions) || null;
+    const qbar = h("div", { class: "qbar", role: "toolbar", "aria-label": "Hızlı eylemler" },
+      h("button", { class: "btn btn-sm btn-cta", type: "button", "data-qa": "appt", on: { click: () => newAppt("") } }, "+ Hızlı Randevu"),
+      h("button", { class: "btn btn-sm btn-primary", type: "button", "data-qa": "patient", on: { click: openFastCreatePatientModal } }, "+ Yeni Hasta"),
+      !permsNow || permsNow.finance_edit ? h("button", { class: "btn btn-sm btn-teal", type: "button", "data-qa": "pay", on: { click: () => openQuickPayment() } }, "+ Hızlı Tahsilat") : null,
+      h("button", { class: "btn btn-sm btn-ghost", type: "button", "data-qa": "sim", on: { click: openSimulatorModal } }, icon("msg"), "Mesaj Simülatörü"),
+      h("button", { class: "btn btn-sm btn-ghost qbar-k", type: "button", "data-qa": "palette", "aria-label": "Arama ve komut paleti", on: { click: openQuickSearch } }, icon("search"), "Ctrl+K Arama / Komut")
+    );
 
     const logoutAction = async () => {
       await run(() => api("/auth/logout", { method: "POST" }));
@@ -642,10 +663,11 @@
           h("button", { type: "button", title: "Çıkış", "aria-label": "Çıkış yap", on: { click: logoutAction } }, icon("out"))
         )
       ),
-      main
+      h("div", { class: "work" }, qbar, main)
     ));
     root.appendChild(mBottom);
     route();
+    refreshNavBadges();
   }
 
   function openAssistant() {
@@ -786,9 +808,9 @@
     main.replaceChildren(...(b ? [b] : []), ...nodes.filter(Boolean));
   }
 
-  async function route() {
+  async function route(keepDrawer) {
     if (!S.user) return;
-    if (activeDrawerCleanup) activeDrawerCleanup(false);
+    if (keepDrawer !== true && activeDrawerCleanup) activeDrawerCleanup(false);
     const k = (location.hash.replace(/^#\//, "") || "overview").split("?")[0];
     document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.k === k));
     document.querySelectorAll(".m-bottom-nav a").forEach((a) => a.classList.toggle("active", a.dataset.mk === k));
@@ -796,6 +818,7 @@
     const v = VIEWS[k] || VIEWS.overview;
     try {
       await v();
+      if (keepDrawer !== true) refreshNavBadges();
     } catch (e) {
       if (e.message !== "oturum") {
         setMain(h("div", { class: "error-card", role: "alert" },
@@ -805,7 +828,7 @@
       }
     }
   }
-  addEventListener("hashchange", route);
+  addEventListener("hashchange", () => route());
 
   // ------------------------------------------------------------------ görünümler
   const VIEWS = {};
