@@ -594,11 +594,15 @@ async def handle_message(m: dict, profile_name: str | None, channel: str = "wa",
             link = await modules.create_anamnesis_link(pid)
             return await reply("Görsel paylaşmadan önce sağlık verisi açık rıza formunu onaylamanız gerekir. "
                                f"Form (1 dk): {link} Onaydan sonra görseli tekrar gönderebilirsiniz.", "L1-onam", "gorsel")
-        data, mime = await wa.download_media(m[mtype]["id"])
-        try:
-            result = media.assess_media_file(data, mime=mime)
-        except (ValueError, OSError):
+        got = await wa.download_media(m[mtype]["id"])
+        if got is None:  # Meta'dan indirilemedi (token, 5xx, ağ): webhook çökmez, hasta "geçersiz dosya" yanıtı alır
             result = {"verdict": "invalid", "possible_opg": False}
+        else:
+            data, mime = got
+            try:
+                result = media.assess_media_file(data, mime=mime)
+            except (ValueError, OSError):
+                result = {"verdict": "invalid", "possible_opg": False}
         if result["verdict"] == "ok":
             ext = {"image/png": "png", "image/webp": "webp"}.get(str(result.get("mime_type")), "jpg")
             mid, _key = await media.persist_patient_media(clinic_id, pid, data, filename=f"whatsapp.{ext}", qc=result)

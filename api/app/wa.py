@@ -65,14 +65,9 @@ async def _post(payload: dict) -> dict:
     if not ready():
         log.info("[wa kuru] %s", payload.get("type"))
         return {"dry_run": True}
-    c = get_client()
-    r = await c.post(f"{GRAPH}/{PHONE_ID}/messages", headers={"Authorization": f"Bearer {TOKEN}"},
-                     json={"messaging_product": "whatsapp", **payload})
-    j = r.json()
-    if r.status_code >= 400:
-        log.warning("WA hata %s: %s", r.status_code, j)
-        return {"error": j.get("error", {})}
-    return j
+    return await meta_graph.call(get_client(), "POST", f"{GRAPH}/{PHONE_ID}/messages", channel="wa",
+                                 headers={"Authorization": f"Bearer {TOKEN}"},
+                                 json={"messaging_product": "whatsapp", **payload})
 
 
 async def send_text(to: str, body: str) -> dict:
@@ -101,20 +96,32 @@ async def send_text_or_template(to: str, text: str, tpl: str, params: list[str])
 async def upload_media(data: bytes, mime: str, filename: str) -> str | None:
     if not ready():
         return None
-    c = get_client()
-    r = await c.post(f"{GRAPH}/{PHONE_ID}/media", headers={"Authorization": f"Bearer {TOKEN}"},
-                     data={"messaging_product": "whatsapp", "type": mime}, files={"file": (filename, data, mime)})
-    r.raise_for_status()
-    return r.json()["id"]
+    res = await meta_graph.call(get_client(), "POST", f"{GRAPH}/{PHONE_ID}/media", channel="wa",
+                                headers={"Authorization": f"Bearer {TOKEN}"},
+                                data={"messaging_product": "whatsapp", "type": mime},
+                                files={"file": (filename, data, mime)})
+    mid = res.get("id")
+    return str(mid) if mid and not res.get("error") else None
 
 
 async def send_audio(to: str, media_id: str) -> dict:
     return await _post({"to": to, "type": "audio", "audio": {"id": media_id}})
 
 
-async def download_media(media_id: str) -> tuple[bytes, str]:
+async def download_media(media_id: str) -> tuple[bytes, str] | None:
+    """Medya baytlarını indirir. Herhangi bir hatada (token, 5xx, ağ, bozuk gövde) istisna fırlatmaz, None döner."""
     c = get_client()
-    meta = (await c.get(f"{GRAPH}/{media_id}", headers={"Authorization": f"Bearer {TOKEN}"})).json()
-    r = await c.get(meta["url"], headers={"Authorization": f"Bearer {TOKEN}"})
-    r.raise_for_status()
-    return r.content, meta.get("mime_type", "application/octet-stream")
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    meta = await meta_graph.call(c, "GET", f"{GRAPH}/{media_id}", channel="wa", headers=auth)
+    url = meta.get("url")
+    if meta.get("error") or not isinstance(url, str) or not url:
+        return None
+    try:
+        r = await c.get(url, headers=auth)
+    except (httpx.HTTPError, httpx.InvalidURL) as ex:
+        log.warning("[wa] medya indirilemedi: %s: %s", type(ex).__name__, str(ex)[:200])
+        return None
+    if r.status_code >= 400:
+        log.warning("[wa] medya indirme HTTP %s", r.status_code)
+        return None
+    return r.content, str(meta.get("mime_type") or "application/octet-stream")
